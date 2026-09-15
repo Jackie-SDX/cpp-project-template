@@ -1,0 +1,159 @@
+# GitHub CI workflow synchronized from the repository update archive.
+# Automatic execution is restored after the repository-wide migration pass.
+
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.config.name }} - ${{ matrix.build_type }}
+    runs-on: ${{ matrix.config.os }}
+    if: matrix.build_type != 'Debug' || !contains(matrix.config.name, 'Windows') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+        config:
+          - { name: "Ubuntu GCC", os: ubuntu-24.04, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-linux }
+          - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: arm64-osx }
+          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static }
+          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static }
+          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: x64-win-llvm }
+          - { name: "Windows MinGW x64", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-mingw-dynamic }
+          - { name: "Windows MinGW i686", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x86-mingw-dynamic }
+
+    defaults:
+      run:
+        working-directory: ./
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: "true"
+          path: project
+
+      - name: Locate MSVC environment script
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC')
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
+          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.config.environment_script }}"
+          if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
+          "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Update Ubuntu package list
+        if: runner.os == 'Linux'
+        run: sudo apt-get update
+
+      - name: Install build dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get install -y ninja-build ccache lcov valgrind libwxgtk3.2-dev libgtest-dev
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            choco install ninja ccache -y
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install ninja ccache wxwidgets googletest
+          fi
+
+      - name: Get LLVM vcpkg triplets
+        if: runner.os == 'Windows'
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: 'Neumann-A/my-vcpkg-triplets'
+          path: './my-vcpkg-triplets'
+
+      - name: vcpkg
+        if: runner.os == 'Windows'
+        uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
+        env:
+          VCPKG_MANIFEST_MODE: OFF
+        with:
+          pkgs: wxwidgets gtest
+          triplet: ${{ matrix.config.vcpkg_triplet }}
+          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
+          cache-key: ${{ matrix.config.name }}-${{ matrix.build_type }}
+          revision: master
+          token: ${{ github.token }}
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.config.cc }}
+          CXX: ${{ matrix.config.cxx }}
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          RUNNER_OS: ${{ runner.os }}
+          VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
+          BUILD_TYPE: ${{ matrix.build_type }}
+        working-directory: project
+        run: |
+          chmod a+x ./.github/scripts/*.cmake
+          cmake -P ./.github/scripts/configure.cmake
+
+      - name: Build
+        env:
+          CXX: ${{ matrix.config.cxx }}
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          RUNNER_OS: ${{ runner.os }}
+          BUILD_TYPE: ${{ matrix.build_type }}
+        working-directory: project
+        run: cmake -P ./.github/scripts/build.cmake
+
+      - name: Run tests
+        env:
+          CC: ${{ matrix.config.cc }}
+          CXX: ${{ matrix.config.cxx }}
+          RUNNER_OS: ${{ runner.os }}
+          BUILD_TYPE: ${{ matrix.build_type }}
+        working-directory: project
+        run: cmake -P ./.github/scripts/test.cmake
+
+      - name: Upload coverage to Codecov
+        if: runner.os == 'Linux' && matrix.build_type == 'Debug'
+        uses: codecov/codecov-action@e28ff129e5458c3803b5a0b916302891229196b3 # v4.5.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Coveralls
+        if: runner.os == 'Linux' && matrix.build_type == 'Debug'
+        uses: threeal/gcovr-action@b1c128180973589e608f265409361b22f94341f3 # v1.1.0
+        with:
+          root: project
+          coveralls-send: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  coverity:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: "true"
+          path: project
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libwxgtk3.2-dev libgtest-dev
+      - name: Configure
+        working-directory: project
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Coverity scan
+        uses: vapier/coverity-scan-action@1b6fd4eaba6651aa354c9ea7f48caa1710b4e12e # v1
+        with:
+          email: ${{ secrets.COVERITY_SCAN_EMAIL }}
+          token: ${{ secrets.COVERITY_SCAN_TOKEN }}
+          working-directory: project/build
+          command: ninja
