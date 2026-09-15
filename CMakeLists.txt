@@ -40,12 +40,12 @@ endif()
 project (cpp-project-template
 	VERSION 0.0.1.0
 	DESCRIPTION "C++ Project Template"
-	HOMEPAGE_URL "https://github.com/MangaD/cpp-project-template"
+	HOMEPAGE_URL "https://github.com/NaylaCruz/cpp-project-template"
 	LANGUAGES ${PROJECT_LANGUAGES})
 
 # Global variables
-set(AUTHOR_NAME "MangaD")
-set(ORGANIZATION "MangaD")
+set(AUTHOR_NAME "NaylaCruz")
+set(ORGANIZATION "NaylaCruz")
 set(CPACK_PACKAGE_VENDOR "${ORGANIZATION}")
 set(CPACK_PACKAGE_CONTACT "${AUTHOR_NAME}")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
