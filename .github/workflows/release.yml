@@ -1,0 +1,4 @@
+# GitHub release workflow synchronized from the repository update archive.
+# The vcpkg revision is pinned to the repository's verified manifest baseline.
+
+"+rel,"branch":"main
