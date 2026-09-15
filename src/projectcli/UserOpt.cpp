@@ -1,8 +1,9 @@
 #include "UserOpt.hpp"
 
+#include <cstdlib>
 #include <iostream>
 #include <span>
-#include <stdexcept>  // std::runtime_error
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -42,7 +43,7 @@ void printVersionAndExit()
 
 void parseUserOptions(const std::span<char*>& args)
 {
-	if (args.size() == 0)
+	if (args.empty())
 	{
 		return;
 	}
