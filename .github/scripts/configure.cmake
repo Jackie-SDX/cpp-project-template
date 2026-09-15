@@ -1,10 +1,14 @@
-#!/usr/local/bin/cmake -P
+# Configure the project from the CI environment.
 
 if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "x$ENV{ENVIRONMENT_SCRIPT}" STREQUAL "x")
 	execute_process(
 		COMMAND "$ENV{ENVIRONMENT_SCRIPT}" && set
 		OUTPUT_FILE environment_script_output.txt
+		RESULT_VARIABLE env_result
 	)
+	if (NOT env_result EQUAL 0)
+		message(FATAL_ERROR "Failed to initialize the Windows compiler environment")
+	endif()
 	file(STRINGS environment_script_output.txt output_lines)
 	foreach(line IN LISTS output_lines)
 		if (line MATCHES "^([a-zA-Z0-9_-]+)=(.*)$")
@@ -19,13 +23,10 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 endif()
 set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}${path_separator}$ENV{PATH}")
 
-# CMakeLists.txt only include()s cmake/CodeCoverage.cmake (which defines the
-# CMAKE_*_FLAGS_COVERAGE variables, including --coverage) when CMAKE_BUILD_TYPE
-# is literally "Coverage" -- never "Debug". Substitute it in for exactly the
-# leg that actually uploads coverage (ci.yml's Codecov/gcovr-action steps only
-# run when runner.os == Linux && matrix.build_type == Debug); every other leg
-# keeps getting the real Debug/Release value, untouched.
 set(actual_build_type "$ENV{BUILD_TYPE}")
+if (actual_build_type STREQUAL "")
+	set(actual_build_type "Release")
+endif()
 if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND "$ENV{CC}" STREQUAL "gcc" AND "$ENV{BUILD_TYPE}" STREQUAL "Debug")
 	set(actual_build_type "Coverage")
 endif()
@@ -41,8 +42,11 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 			-D CMAKE_MAKE_PROGRAM=ninja
 			-D CMAKE_C_COMPILER_LAUNCHER=ccache
 			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
-			-D CMAKE_TOOLCHAIN_FILE=${toolchain_file} -DVCPKG_TARGET_TRIPLET=$ENV{VCPKG_TRIPLET} -DVCPKG_HOST_TRIPLET=$ENV{VCPKG_TRIPLET} #-DVCPKG_MANIFEST_MODE=OFF
-			--fresh # Necessary if changing between build types
+			-D CMAKE_TOOLCHAIN_FILE=${toolchain_file}
+			-D VCPKG_TARGET_TRIPLET=$ENV{VCPKG_TRIPLET}
+			-D VCPKG_HOST_TRIPLET=$ENV{VCPKG_TRIPLET}
+			-D VCPKG_MANIFEST_MODE=OFF
+			--fresh
 		RESULT_VARIABLE result
 	)
 else()
@@ -55,11 +59,11 @@ else()
 			-D CMAKE_MAKE_PROGRAM=ninja
 			-D CMAKE_C_COMPILER_LAUNCHER=ccache
 			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
-			--fresh # Necessary if changing between build types
+			--fresh
 		RESULT_VARIABLE result
 	)
 endif()
 
 if (NOT result EQUAL 0)
-	message(FATAL_ERROR "Bad exit status")
+	message(FATAL_ERROR "CMake configure failed with exit status ${result}")
 endif()
