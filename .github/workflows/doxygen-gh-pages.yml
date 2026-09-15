@@ -5,7 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
-  permissions:
+
+permissions:
   contents: write
 
 env:
@@ -16,68 +17,50 @@ env:
 jobs:
   generate-docs:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         shell: bash
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           submodules: "true"
-
-      ##################################
-      # 📦 Cache and Install CMake
-      ##################################
       - name: Cache CMake
         id: cache-cmake
-        uses: actions/cache@v4
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: cmake-install
           key: cmake-cache-${{ env.CMAKE_VERSION }}
-
       - name: Install CMake
         if: steps.cache-cmake.outputs.cache-hit != 'true'
         run: |
+          set -euo pipefail
           mkdir -p cmake-install
-          curl -LO https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
-          tar -xf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C cmake-install
-        shell: bash
-
+          curl -fL -o cmake.tar.gz "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz"
+          tar -xf cmake.tar.gz --strip-components=1 -C cmake-install
       - name: Add CMake to PATH
-        run: echo "${GITHUB_WORKSPACE}/cmake-install/bin" >> $GITHUB_PATH
-
-      ##################################
-      # 📦 Cache and Install Doxygen
-      ##################################
+        run: echo "${GITHUB_WORKSPACE}/cmake-install/bin" >> "$GITHUB_PATH"
       - name: Cache Doxygen
         id: cache-doxygen
-        uses: actions/cache@v4
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: doxygen-${{ env.DOXYGEN_VERSION }}
           key: doxygen-cache-${{ env.DOXYGEN_VERSION }}
-
-      - name: Install Doxygen from GitHub
+      - name: Install Doxygen
         if: steps.cache-doxygen.outputs.cache-hit != 'true'
         run: |
+          set -euo pipefail
           version_underscore=$(echo "$DOXYGEN_VERSION" | sed 's/\./_/g')
           dirname=doxygen-$DOXYGEN_VERSION
           filename_tar=$dirname.linux.bin.tar
           filename_gz=$filename_tar.gz
           url=https://github.com/doxygen/doxygen/releases/download/Release_$version_underscore/$filename_gz
-          wget $url
-          gunzip $filename_gz
-          tar xf $filename_tar
-        shell: bash
-
+          curl -fL -o "$filename_gz" "$url"
+          gunzip "$filename_gz"
+          tar xf "$filename_tar"
       - name: Add Doxygen to PATH
-        run: echo "${GITHUB_WORKSPACE}/doxygen-${{ env.DOXYGEN_VERSION }}/bin" >> $GITHUB_PATH
-
-      ##################################
-      # 📦 Deps for Graphviz (pangocairo) + cached fonts
-      ##################################
-      - name: Cache & install build deps + fonts via APT
+        run: echo "${GITHUB_WORKSPACE}/doxygen-${{ env.DOXYGEN_VERSION }}/bin" >> "$GITHUB_PATH"
+      - name: Cache & install build deps + fonts
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
           packages: >
@@ -86,93 +69,45 @@ jobs:
             libfreetype6-dev libpng-dev libjpeg-dev zlib1g-dev
             fontconfig fonts-dejavu-core fonts-liberation gsfonts fonts-urw-base35
           version: 3
-
-      ##################################
-      # 🧱 Build Graphviz (pangocairo; no gd) from source — cached
-      ##################################
-      - name: Cache Graphviz build (pangocairo)
+      - name: Cache Graphviz build
         id: cache-graphviz-cairo
-        uses: actions/cache@v4
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: graphviz-install
           key: ${{ runner.os }}-graphviz-${{ env.GRAPHVIZ_VERSION }}-cairo-nogd
-
-      - name: Build & install Graphviz (pangocairo; no gd)
+      - name: Build & install Graphviz
         if: steps.cache-graphviz-cairo.outputs.cache-hit != 'true'
-        shell: bash
         run: |
           set -euo pipefail
-          curl -LO "https://gitlab.com/api/v4/projects/4207231/packages/generic/graphviz-releases/${GRAPHVIZ_VERSION}/graphviz-${GRAPHVIZ_VERSION}.tar.gz"
+          curl -fL -o "graphviz-${GRAPHVIZ_VERSION}.tar.gz" "https://gitlab.com/api/v4/projects/4207231/packages/generic/graphviz-releases/${GRAPHVIZ_VERSION}/graphviz-${GRAPHVIZ_VERSION}.tar.gz"
           tar -xf "graphviz-${GRAPHVIZ_VERSION}.tar.gz"
           cd "graphviz-${GRAPHVIZ_VERSION}"
-
-          # Build with pangocairo; disable gd so -Tpng uses cairo by default
-          ./configure --prefix="${GITHUB_WORKSPACE}/graphviz-install" \
-                      --without-gd \
-                      --disable-swig --disable-guile --disable-java \
-                      --disable-lua --disable-perl --disable-php \
-                      --disable-python --disable-r --disable-ruby
+          ./configure --prefix="${GITHUB_WORKSPACE}/graphviz-install" --without-gd --disable-swig --disable-guile --disable-java --disable-lua --disable-perl --disable-php --disable-python --disable-r --disable-ruby
           make -j"$(nproc)"
           make install
-
       - name: Add Graphviz to PATH & set lib path
-        shell: bash
         run: |
           echo "${GITHUB_WORKSPACE}/graphviz-install/bin" >> "$GITHUB_PATH"
           echo "LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/graphviz-install/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-
-      ##################################
-      # 🖋️ Install fonts (cached) & refresh caches for Graphviz
-      ##################################
       - name: Refresh font caches & Graphviz plugin cache
-        shell: bash
         run: |
           set -euo pipefail
-          # Ensure system fontconfig is used
           unset FONTCONFIG_FILE FONTCONFIG_PATH || true
-
-          # Rebuild fontconfig cache and refresh Graphviz plugin cache
           fc-cache -f
           "${GITHUB_WORKSPACE}/graphviz-install/bin/dot" -c || true
-
-          # Smoke test with Helvetica (aliased via fontconfig to Nimbus Sans)
-          fc-match Helvetica || true
-          echo 'digraph G {
-            graph [fontname="Helvetica"];
-            node  [fontname="Helvetica"];
-            edge  [fontname="Helvetica"];
-            a -> b; label="Helvetica test";
-          }' | "${GITHUB_WORKSPACE}/graphviz-install/bin/dot" -Tpng -o /tmp/helvetica.png
-          ls -lh /tmp/helvetica.png || true
-
-      ##################################
-      # 📚 Generate Doxygen Documentation (force Helvetica; png via cairo)
-      ##################################
+          "${GITHUB_WORKSPACE}/graphviz-install/bin/dot" -V
       - name: Generate Doxygen Documentation
-        shell: bash
         run: |
           set -euo pipefail
           mkdir -p build && cd build
-          cmake .. \
-            -DBUILD_SOURCE=OFF \
-            -DDOXYGEN_GENERATE_LATEX=FALSE \
-            -DDOXYGEN_DOT_FONTNAME="Helvetica"
-            # No need to force DOT_EXECUTABLE; it's on PATH now
-            # PNG will use cairo because Graphviz was built --without-gd
+          cmake .. -DBUILD_SOURCE=OFF -DDOXYGEN_GENERATE_LATEX=FALSE -DDOXYGEN_DOT_FONTNAME="Helvetica"
           cmake --build . --target doxygen
-
-      ##################################
-      # 🚀 Deploy to GitHub Pages
-      ##################################
+          test -f ../docs/doxygen/build/html/index.html
       - name: Upload documentation to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs/doxygen/build/html
-          publish_branch: gh-pages          # explicit (default)
-          keep_files: false                 # remove anything that isn't in publish_dir
-          force_orphan: true                # recreate gh-pages as a single clean commit
-      # In the repository settings, go to Actions -> General -> Workflow permissions
-      # and enable Read and write permissions.
-      # After the workflow runs successfully, go to Settings -> Pages -> Branch
-      # select `gh-pages` and click "Save".
+          publish_branch: gh-pages
+          keep_files: false
+          force_orphan: true
