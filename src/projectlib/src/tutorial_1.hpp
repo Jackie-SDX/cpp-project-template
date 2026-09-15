@@ -8,11 +8,13 @@
  * @copyright Copyright (c) 2023 David Gonçalves
  */
 
-
 #ifndef TUT1_HPP
 #define TUT1_HPP
 
-#include <concepts>  // std::integral
+#include <concepts>
+#include <limits>
+#include <stdexcept>
+#include <type_traits>
 
 /**
  * @brief The namespace for this tutorial.
@@ -21,19 +23,35 @@ namespace tut1
 {
 
 /**
- * @brief Calculate the factorial of a given integral number.
- * 
- * @param[in] n The number to calculate the factorial of.
+ * @brief Calculate the factorial of a non-negative integral number.
+ *
+ * @tparam T Integral input and result type.
+ * @param[in] n The non-negative number to calculate the factorial of.
  * @return The calculated factorial.
+ * @throws std::domain_error for negative signed inputs.
+ * @throws std::overflow_error when the result cannot fit in T.
  */
-constexpr std::integral auto factorial(std::integral auto n)
+template <std::integral T>
+constexpr T factorial(T n)
 {
-	std::integral auto res = 1;
-	for (auto i = 2; i <= n; ++i)
+	static_assert(!std::same_as<T, bool>, "factorial requires a non-bool integral type");
+
+	if constexpr (std::is_signed_v<T>)
 	{
-		res *= i;
+		if (n < 0)
+			throw std::domain_error("factorial is undefined for negative integers");
 	}
-	return res;
+
+	T result{1};
+	for (T i{2}; i <= n; ++i)
+	{
+		if (result > std::numeric_limits<T>::max() / i)
+			throw std::overflow_error("factorial result overflows the selected integral type");
+		result *= i;
+		if (i == n)
+			break;
+	}
+	return result;
 }
 
 }  // namespace tut1
