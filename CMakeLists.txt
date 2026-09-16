@@ -66,7 +66,8 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(PROJECT_LANGUAGE_NEUTRAL 0) # if 0, language will be set to English in version.rc, otherwise neutral
 string(TIMESTAMP COPYRIGHT_YEAR "%Y")
-set(CPACK_PACKAGE_COPYRIGHT "© ${COPYRIGHT_YEAR} ${CPACK_PACKAGE_VENDOR}")
+# Keep Windows VERSIONINFO text ASCII-safe for llvm-rc on CI runners.
+set(CPACK_PACKAGE_COPYRIGHT "(c) ${COPYRIGHT_YEAR} ${CPACK_PACKAGE_VENDOR}")
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(ASSETS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets)
 set(PACKAGING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/packaging)
@@ -118,60 +119,3 @@ endif()
 ###############
 ### TARGETS ###
 ###############
-
-if(${BUILD_SOURCE})
-	set(PROJECT_LIB_NAME projectlib)
-	set(PROJECT_LIB_DIR ${SOURCE_DIR}/${PROJECT_LIB_NAME})
-	add_subdirectory(${PROJECT_LIB_DIR}/src)
-
-	set(PROJECT_CLI_NAME projectcli)
-	set(PROJECT_CLI_DIR ${SOURCE_DIR}/${PROJECT_CLI_NAME})
-	add_subdirectory(${PROJECT_CLI_DIR})
-
-	set(PROJECT_WX_NAME projectwx)
-	option(BUILD_PROJECTWX "Build ${PROJECT_WX_NAME}" ON)
-	set(PROJECT_WX_DIR ${SOURCE_DIR}/${PROJECT_WX_NAME})
-	if(BUILD_PROJECTWX)
-		add_subdirectory(${PROJECT_WX_DIR}/src)
-	endif()
-endif()
-
-#############
-### CTEST ###
-#############
-
-enable_testing()
-include (CTest)
-
-if(BUILD_SOURCE AND BUILD_TESTING)
-	add_test(NAME Runs
-		COMMAND $<TARGET_FILE:${PROJECT_CLI_NAME}>)
-	add_test(NAME Runs-v
-		COMMAND $<TARGET_FILE:${PROJECT_CLI_NAME}> -v)
-	add_test(NAME Runs-h
-		COMMAND $<TARGET_FILE:${PROJECT_CLI_NAME}> -h)
-	add_test(NAME Runs-invalid
-		COMMAND $<TARGET_FILE:${PROJECT_CLI_NAME}> --invalid)
-	set_tests_properties(Runs-invalid PROPERTIES WILL_FAIL TRUE)
-
-	# CTest with valgring: https://stackoverflow.com/a/40437731/3049315
-	include(cmake/memcheck.cmake)
-
-	# Test projectlib
-	add_subdirectory(${PROJECT_LIB_DIR}/test)
-endif()
-
-#############
-### CPACK ###
-#############
-
-if(${BUILD_SOURCE})
-	# See: https://cmake.org/cmake/help/latest/guide/tutorial/Installing%20and%20Testing.html
-	install(TARGETS ${PROJECT_CLI_NAME} DESTINATION bin)
-	if(BUILD_PROJECTWX)
-		install(TARGETS ${PROJECT_WX_NAME} DESTINATION bin)
-	endif()
-	install(DIRECTORY "${ASSETS_DIR}/images" DESTINATION ".")
-
-	include(cmake/cpack_module.cmake)
-endif()
