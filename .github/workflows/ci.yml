@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 env:
-  CCACHE_DIR: ${{ github.workspace }}/project/.ccache
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
   VCPKG_GIT_REF: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
 
@@ -55,7 +55,7 @@ jobs:
         id: ccache-restore
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
-          path: project/.ccache
+          path: .ccache
           key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
           restore-keys: |
             ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-
@@ -149,7 +149,7 @@ jobs:
         if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
-          path: project/.ccache
+          path: .ccache
           key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
 
       - name: Run tests
