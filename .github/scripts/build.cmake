@@ -11,7 +11,7 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "x$ENV{ENVIRONMENT_SCRIPT}" STR
 	endforeach()
 endif()
 
-file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/project" ccache_basedir)
+file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}" ccache_basedir)
 set(ENV{CCACHE_BASEDIR} "${ccache_basedir}")
 set(ENV{CCACHE_DIR} "${ccache_basedir}/.ccache")
 set(ENV{CCACHE_COMPRESS} "true")
