@@ -26,6 +26,9 @@ jobs:
   build:
     name: ${{ matrix.config.name }} - ${{ matrix.build_type }}
     runs-on: ${{ matrix.config.os }}
+    env:
+      CC: ${{ matrix.config.cc }}
+      CXX: ${{ matrix.config.cxx }}
     strategy:
       fail-fast: false
       matrix:
@@ -103,8 +106,6 @@ jobs:
           if (-not (Test-Path $clangCl)) { throw "LLVM clang-cl was not found at $clangCl" }
           "LLVMInstallDir=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$llvmRoot\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          "CC=clang-cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "CXX=clang-cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Get LLVM vcpkg triplets
         if: runner.os == 'Windows'
@@ -196,8 +197,6 @@ jobs:
 
       - name: Configure
         env:
-          CC: ${{ env.CC || matrix.config.cc }}
-          CXX: ${{ env.CXX || matrix.config.cxx }}
           ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
@@ -207,7 +206,6 @@ jobs:
 
       - name: Build
         env:
-          CXX: ${{ env.CXX || matrix.config.cxx }}
           ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           BUILD_TYPE: ${{ matrix.build_type }}
@@ -223,8 +221,6 @@ jobs:
 
       - name: Run tests
         env:
-          CC: ${{ env.CC || matrix.config.cc }}
-          CXX: ${{ env.CXX || matrix.config.cxx }}
           RUNNER_OS: ${{ runner.os }}
           BUILD_TYPE: ${{ matrix.build_type }}
         working-directory: project
