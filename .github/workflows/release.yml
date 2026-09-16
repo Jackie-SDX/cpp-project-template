@@ -14,6 +14,7 @@ permissions:
 env:
   VCPKG_GIT_REF: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
+  CCACHE_DIR: ${{ github.workspace }}/project/.ccache
 
 jobs:
   package:
@@ -106,6 +107,15 @@ jobs:
           submodules: true
           fetch-depth: 0
           path: project
+
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.name }}-Release-
 
       - name: Locate MSVC environment script
         if: runner.os == 'Windows' && (matrix.toolchain == 'msvc' || matrix.toolchain == 'llvm')
@@ -237,6 +247,13 @@ jobs:
           BUILD_TYPE: Release
         run: cmake -P ./.github/scripts/build.cmake
 
+      - name: Save compiler cache
+        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: project/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+
       - name: Test
         working-directory: project
         env:
@@ -333,6 +350,14 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           submodules: true
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/.ccache
+          key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+          restore-keys: |
+            ccache-Linux-Linux-GCC-x64-PR-Release-
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -351,6 +376,12 @@ jobs:
           RUNNER_OS: Linux
           BUILD_TYPE: Release
         run: cmake -P ./.github/scripts/build.cmake
+      - name: Save compiler cache
+        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: project/.ccache
+          key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
       - name: Test
         env:
           CC: gcc
