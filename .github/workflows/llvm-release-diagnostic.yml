@@ -1,0 +1,112 @@
+name: LLVM release diagnostic
+
+on:
+  push:
+    branches:
+      - reconcile/gitlab-github-parity
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VCPKG_GIT_REF: master
+  MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
+
+jobs:
+  llvm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64-release-triplet
+            triplet: x64-win-llvm-release
+            arch: x64
+            environment_script: vcvars64.bat
+            with_vcvars: true
+          - name: x64-ci-triplet
+            triplet: x64-win-llvm
+            arch: x64
+            environment_script: vcvars64.bat
+            with_vcvars: false
+          - name: x86-release-triplet
+            triplet: x86-win-llvm
+            arch: x86
+            environment_script: vcvars32.bat
+            with_vcvars: true
+          - name: x86-ci-triplet
+            triplet: x86-win-llvm
+            arch: x86
+            environment_script: vcvars32.bat
+            with_vcvars: false
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: true
+          fetch-depth: 0
+          path: project
+
+      - name: Install dependencies
+        run: choco install ninja ccache -y --no-progress
+
+      - name: Checkout triplets
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: Neumann-A/my-vcpkg-triplets
+          ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
+          path: my-vcpkg-triplets
+          fetch-depth: 1
+
+      - name: Locate MSVC environment script
+        if: matrix.with_vcvars
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
+          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.environment_script }}"
+          if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
+          "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Configure
+        working-directory: project
+        env:
+          CC: clang-cl
+          CXX: clang-cl
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          RUNNER_OS: Windows
+          VCPKG_TRIPLET: ${{ matrix.triplet }}
+          BUILD_TYPE: Release
+          PACKAGE_TOOLCHAIN: llvm
+        run: |
+          echo "=== matrix=${{ matrix.name }} triplet=${{ matrix.triplet }} with_vcvars=${{ matrix.with_vcvars }} ==="
+          if [ "${{ matrix.with_vcvars }}" != "true" ]; then
+            unset ENVIRONMENT_SCRIPT
+          fi
+          cmake -P ./.github/scripts/configure.cmake
+
+      - name: Show compiler configuration
+        working-directory: project
+        run: |
+          echo "=== CMake compiler variables ==="
+          grep -E '^(CMAKE_(C|CXX)_COMPILER:|CMAKE_(C|CXX)_FLAGS(_RELEASE)?:|VCPKG_TARGET_TRIPLET:)' build/CMakeCache.txt || true
+          echo "=== generated compile command(s) ==="
+          grep -n 'clang-cl' build/compile_commands.json | head -3 || true
+
+      - name: Build
+        working-directory: project
+        env:
+          CXX: clang-cl
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          RUNNER_OS: Windows
+          BUILD_TYPE: Release
+        run: |
+          if [ "${{ matrix.with_vcvars }}" != "true" ]; then
+            unset ENVIRONMENT_SCRIPT
+          fi
+          cmake -P ./.github/scripts/build.cmake
