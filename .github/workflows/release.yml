@@ -500,19 +500,19 @@ jobs:
         run: |
           shopt -s nullglob
           version="${GITHUB_REF_NAME#v}"
-          expected_source=(
-            "cpp-project-template_${version}_source.zip"
-            "cpp-project-template_${version}_source.tar.gz"
-          )
+          source_files=("cpp-project-template_${version}_source.zip" "cpp-project-template_${version}_source.tar.gz")
 
-          source_files=("${expected_source[@]}")
           for f in "${source_files[@]}"; do
             test -f "$f" || { echo "Missing source artifact: $f"; exit 1; }
           done
 
           package_files=()
           for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi; do
-            [[ -f "$f" ]] && package_files+=("$f")
+            [[ -f "$f" ]] || continue
+            case "$f" in
+              *_source.zip|*_source.tar.gz) continue ;;
+            esac
+            package_files+=("$f")
           done
 
           test "${#package_files[@]}" -eq 30 || {
@@ -520,9 +520,6 @@ jobs:
             printf '%s\n' "${package_files[@]}"
             exit 1
           }
-
-          expected_package_count=30
-          test "${#package_files[@]}" -eq "$expected_package_count"
 
           for f in "${package_files[@]}"; do
             case "$f" in
