@@ -24,7 +24,7 @@ endif()
 
 # Useful if we only wish to build documentation in a machine or
 # Docker container without compilers available.
-# See: https://cmake.cmake.narkive.com/OMnbmBIb/without-c-c-compiler-check
+# See: https://cmake.cmake.narkive.com/without-c-c-compiler-check
 option(BUILD_SOURCE "Build primary libraries and executables." ON)
 
 # Keep the MSVC runtime consistent with the existing GitHub static-vcpkg
@@ -101,12 +101,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 # https://clang.llvm.org/docs/HowToSetupToolingForLLVM.html
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# We add a flag to llvm-rc because of the following issue:
-# https://github.com/llvm/llvm-project/issues/57367
-if(WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-	set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} /C 65001")
-endif()
-
 #####################
 ### CMake modules ###
 #####################
@@ -136,7 +130,7 @@ if(${BUILD_SOURCE})
 
 	set(PROJECT_WX_NAME projectwx)
 	option(BUILD_PROJECTWX "Build ${PROJECT_WX_NAME}" ON)
-	set(PROJECT_WX_DIR ${SOURCE_DIR}/${PROJECT_WX_NAME})
+	set(PROJECT_WX_DIR ${SOURCE_DIR}/${PROJECT_WX_NAME)
 	if(BUILD_PROJECTWX)
 		add_subdirectory(${PROJECT_WX_DIR}/src)
 	endif()
