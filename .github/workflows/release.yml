@@ -16,7 +16,7 @@ permissions:
 jobs:
   package:
     name: ${{ matrix.name }}
-    if: github.event_name != 'pull_request' || matrix.name == 'Linux GCC x64'
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -159,7 +159,7 @@ jobs:
         with:
           pkgs: wxwidgets gtest
           triplet: ${{ matrix.vcpkg_triplet }}
-          extra-args: ${{ matrix.llvm && format('--overlay-triplets={0}/my-vcpkg-triplets', github.workspace) || '' }}
+          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
           cache-key: release-${{ matrix.name }}
           revision: a1cae005c39be7b18ba319fced856b68d7276271
           token: ${{ github.token }}
@@ -284,6 +284,66 @@ jobs:
         with:
           name: release-${{ matrix.name }}
           path: project/release-assets/*
+          if-no-files-found: error
+
+  package-smoke:
+    name: Linux GCC x64 PR packaging smoke
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: true
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build rpm libwxgtk3.2-dev libgtest-dev
+      - name: Configure
+        env:
+          CC: gcc
+          CXX: g++
+          RUNNER_OS: Linux
+          BUILD_TYPE: Release
+          PACKAGE_TOOLCHAIN: gcc
+        run: cmake -P ./.github/scripts/configure.cmake
+      - name: Build
+        env:
+          CXX: g++
+          RUNNER_OS: Linux
+          BUILD_TYPE: Release
+        run: cmake -P ./.github/scripts/build.cmake
+      - name: Test
+        env:
+          CC: gcc
+          CXX: g++
+          RUNNER_OS: Linux
+          BUILD_TYPE: Release
+        run: cmake -P ./.github/scripts/test.cmake
+      - name: Package all Linux formats
+        env:
+          PACKAGE_TOOLCHAIN: gcc
+        run: |
+          cmake --install build --prefix instdir --strip --config Release
+          test -n "$(find instdir -type f -print -quit)"
+          mkdir -p release-assets
+          (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.zip" --format=zip .)
+          (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.7z" --format=7zip .)
+          (cd instdir && tar -czf "../release-assets/linux-gcc-x64.tar.gz" .)
+          cpack -C Release -G DEB
+          cpack -C Release -G RPM
+          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
+          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
+          test -n "$deb" && test -n "$rpm"
+          cp "$deb" release-assets/linux-gcc-x64.deb
+          cp "$rpm" release-assets/linux-gcc-x64.rpm
+          sha256sum release-assets/* > release-assets/SHA256SUMS
+          sha256sum -c release-assets/SHA256SUMS
+      - name: Upload smoke artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-pr-linux-gcc-x64-smoke
+          path: release-assets/*
           if-no-files-found: error
 
   source:
