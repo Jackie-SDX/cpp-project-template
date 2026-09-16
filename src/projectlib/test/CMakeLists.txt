@@ -17,16 +17,17 @@ target_include_directories("${PROJECT_LIB_NAME}_gtest" PUBLIC
 # 2. May need to link with -pthread on some operating systems
 # (tested with Raspbian). See: https://stackoverflow.com/a/21116684/3049315
 target_link_libraries("${PROJECT_LIB_NAME}_gtest" PRIVATE
-	${GTEST_LIBRARIES} -pthread)
+	${GTEST_LIBRARIES}
+)
 
 if (MINGW)
 	target_link_libraries("${PROJECT_LIB_NAME}_gtest" PRIVATE
 		$<$<CONFIG:Release>:-static-libgcc -static-libstdc++ -static>
 	)
 elseif (MSVC)
-	# Must use DebugDLL in Debug mode because: https://stackoverflow.com/a/66307196/3049315
+	# Match the static Windows vcpkg triplets used by CI.
 	set_property(TARGET "${PROJECT_LIB_NAME}_gtest" PROPERTY
-		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:DebugDLL>")
+		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 	target_link_options("${PROJECT_LIB_NAME}_gtest" PUBLIC
 		$<$<CONFIG:Release>:/INCREMENTAL:NO /NODEFAULTLIB:MSVCRT>
 	)
