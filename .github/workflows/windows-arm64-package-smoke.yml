@@ -86,16 +86,16 @@ jobs:
           $manifest = Get-Content vcpkg.json -Raw | ConvertFrom-Json
           if (-not $manifest.'builtin-baseline') { throw 'vcpkg.json must provide builtin-baseline for the ARM64 smoke' }
           $vcpkgRef = $manifest.'builtin-baseline'
-          if (Test-Path vcpkg) { Remove-Item -Recurse -Force vcpkg }
-          git init vcpkg
-          git -C vcpkg remote add origin https://github.com/microsoft/vcpkg.git
-          git -C vcpkg fetch --depth 1 --no-tags origin $vcpkgRef
+          if (Test-Path ..\vcpkg) { Remove-Item -Recurse -Force ..\vcpkg }
+          git init ..\vcpkg
+          git -C ..\vcpkg remote add origin https://github.com/microsoft/vcpkg.git
+          git -C ..\vcpkg fetch --depth 1 --no-tags origin $vcpkgRef
           if ($LASTEXITCODE -ne 0) { throw "Failed to fetch vcpkg baseline $vcpkgRef" }
-          git -C vcpkg checkout FETCH_HEAD
-          .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          git -C ..\vcpkg checkout FETCH_HEAD
+          ..\vcpkg\bootstrap-vcpkg.bat -disableMetrics
           $env:VCPKG_MANIFEST_MODE = 'ON'
           $env:VCPKG_BINARY_SOURCES = "clear;files,$env:GITHUB_WORKSPACE\project\vcpkg_cache,readwrite"
-          .\vcpkg\vcpkg install --triplet arm64-windows
+          ..\vcpkg\vcpkg install --triplet arm64-windows
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
 
       - name: Save GitLab-style vcpkg binary cache
