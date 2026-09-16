@@ -40,10 +40,6 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
 	set(llvm_x86_target_args)
 	if ("$ENV{VCPKG_TRIPLET}" STREQUAL "x86-win-llvm")
-		# The upstream LLVM overlay triplet chainloads a shared toolchain, but
-		# CMake's initial clang-cl compiler probe on current Windows runners can
-		# still select the host x64 linker target. Pass the documented clang-cl
-		# spelling that forwards the target option to the Clang driver.
 		list(APPEND llvm_x86_target_args
 			-D CMAKE_C_FLAGS_INIT=/clang:--target=i686-pc-windows-msvc
 			-D CMAKE_CXX_FLAGS_INIT=/clang:--target=i686-pc-windows-msvc
@@ -60,7 +56,7 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
 			-D CMAKE_TOOLCHAIN_FILE=${toolchain_file}
 			-D VCPKG_TARGET_TRIPLET=$ENV{VCPKG_TRIPLET}
-			-D VCPKG_HOST_TRIPLET=$ENV{VCPKG_TRIPLET}
+			-D VCPKG_HOST_TRIPLET=x64-windows
 			-D VCPKG_MANIFEST_MODE=OFF
 			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
 			${llvm_x86_target_args}
