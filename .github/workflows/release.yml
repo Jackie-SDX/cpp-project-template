@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
+
 jobs:
   package:
     name: ${{ matrix.name }}
@@ -59,7 +62,7 @@ jobs:
             cc: clang-cl
             cxx: clang-cl
             environment_script: vcvars64.bat
-            vcpkg_triplet: x64-win-llvm
+            vcpkg_triplet: x64-win-llvm-release
             toolchain: llvm
             arch: x64
             nsis_generator: NSIS64
@@ -141,7 +144,9 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: Neumann-A/my-vcpkg-triplets
+          ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
           path: my-vcpkg-triplets
+          fetch-depth: 1
 
       - name: Restore GitLab-style vcpkg binary cache
         if: runner.os == 'Windows'
@@ -149,15 +154,15 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: project/vcpkg_cache
-          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.vcpkg_triplet }}-Release-${{ hashFiles('project/vcpkg.json') }}
+          key: windows-llvm-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-Release-${{ hashFiles('project/vcpkg.json') }}
           restore-keys: |
-            windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.vcpkg_triplet }}-Release-
+            windows-llvm-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-Release-
 
       - name: vcpkg
         if: runner.os == 'Windows'
         uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
         env:
-          VCPKG_MANIFEST_MODE: OFF
+          VCPKG_MANIFEST_MODE: ON
           VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
         with:
           pkgs: wxwidgets gtest
@@ -165,7 +170,7 @@ jobs:
           extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
           cache-key: release-${{ matrix.name }}
           disable-cache: true
-          revision: a1cae005c39be7b18ba319fced856b68d7276271
+          revision: a1cae005c39be7b18ba319fced856b68d727627d
           token: ${{ github.token }}
 
       - name: Save GitLab-style vcpkg binary cache
@@ -173,7 +178,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: project/vcpkg_cache
-          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.vcpkg_triplet }}-Release-${{ hashFiles('project/vcpkg.json') }}
+          key: windows-llvm-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-Release-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Configure
         working-directory: project
@@ -331,83 +336,83 @@ jobs:
           RUNNER_OS: Linux
           BUILD_TYPE: Release
         run: cmake -P ./.github/scripts/test.cmake
-      - name: Package all Linux formats
-        env:
-          PACKAGE_TOOLCHAIN: gcc
+      - name: Install
+        run: cmake --install build --prefix instdir --strip
+      - name: Package Linux smoke
         run: |
-          cmake --install build --prefix instdir --strip --config Release
-          test -n "$(find instdir -type f -print -quit)"
           mkdir -p release-assets
           (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.zip" --format=zip .)
           (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.7z" --format=7zip .)
           (cd instdir && tar -czf "../release-assets/linux-gcc-x64.tar.gz" .)
           cpack --config build/CPackConfig.cmake -C Release -G DEB
           cpack --config build/CPackConfig.cmake -C Release -G RPM
-          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
-          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
-          test -n "$deb" && test -n "$rpm"
-          cp "$deb" release-assets/linux-gcc-x64.deb
-          cp "$rpm" release-assets/linux-gcc-x64.rpm
+          cp build/package/*.deb release-assets/linux-gcc-x64.deb
+          cp build/package/*.rpm release-assets/linux-gcc-x64.rpm
           sha256sum release-assets/* > release-assets/SHA256SUMS
-          sha256sum -c release-assets/SHA256SUMS
       - name: Upload smoke artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-pr-linux-gcc-x64-smoke
+          name: release-linux-gcc-x64-pr-smoke
           path: release-assets/*
           if-no-files-found: error
 
   source:
     name: Source archives
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-release-test')
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           fetch-depth: 0
-      - name: Create source archives
+          path: project
+      - name: Resolve version
+        working-directory: project
+        shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          if [ "$version" = "$GITHUB_REF_NAME" ]; then version="0.0.0-dev"; fi
-          prefix="cpp-project-template-${version}"
-          git archive --format=zip --prefix="$prefix/" HEAD -o "$prefix-source.zip"
-          git archive --format=tar.gz --prefix="$prefix/" HEAD -o "$prefix-source.tar.gz"
-      - name: Upload source artifact
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(git describe --tags --always --dirty | sed 's/^v//')"
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Create source archives
+        working-directory: project
+        run: |
+          mkdir -p ../source-assets
+          git archive --format=zip --prefix="cpp-project-template-${VERSION}/" HEAD > "../source-assets/cpp-project-template-${VERSION}.zip"
+          git archive --format=tar.gz --prefix="cpp-project-template-${VERSION}/" HEAD > "../source-assets/cpp-project-template-${VERSION}.tar.gz"
+      - name: Upload source artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-source
-          path: |
-            cpp-project-template-*-source.zip
-            cpp-project-template-*-source.tar.gz
+          name: source-archives
+          path: source-assets/*
           if-no-files-found: error
 
   publish:
-    name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-ci')
-    needs: [package, source]
+    name: Publish release
+    if: github.event_name != 'pull_request'
+    needs:
+      - package
+      - source
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download all release artifacts
+      - name: Download package artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: release-assets
+          pattern: release-*
           merge-multiple: true
-      - name: Verify and inventory release
+      - name: Download source artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: source-archives
+          path: release-assets
+      - name: Verify release inventory
         working-directory: release-assets
-        shell: bash
         run: |
-          set -euo pipefail
-          test -n "$(find . -maxdepth 1 -type f -print -quit)"
-          declare -A seen=()
-          for f in *; do
-            [ -f "$f" ] || continue
-            if [[ "$f" == "SHA256SUMS" ]]; then continue; fi
-            if [[ -n "${seen[$f]:-}" ]]; then echo "Duplicate release filename: $f"; exit 1; fi
-            seen[$f]=1
-          done
           expected=(
             windows-msvc-x64.zip windows-msvc-x64.7z windows-msvc-x64.exe windows-msvc-x64.msi
             windows-msvc-x86.zip windows-msvc-x86.7z windows-msvc-x86.exe windows-msvc-x86.msi
@@ -419,20 +424,21 @@ jobs:
             linux-gcc-arm64.zip linux-gcc-arm64.7z linux-gcc-arm64.tar.gz linux-gcc-arm64.deb linux-gcc-arm64.rpm
             macos-clang-arm64.zip macos-clang-arm64.7z macos-clang-arm64.tar.gz macos-clang-arm64.dmg
           )
-          version="${GITHUB_REF_NAME#v}"
-          expected+=("cpp-project-template-${version}-source.zip" "cpp-project-template-${version}-source.tar.gz")
-          for f in "${expected[@]}"; do
-            test -f "$f" || { echo "Missing release asset: $f"; exit 1; }
+          for f in "${expected[@]}" cpp-project-template-*.zip cpp-project-template-*.tar.gz; do
+            test -f "$f" || { echo "Missing required artifact: $f"; exit 1; }
           done
-          actual=$(printf '%s\n' * | grep -v '^SHA256SUMS$' | sort)
-          expected_sorted=$(printf '%s\n' "${expected[@]}" | sort)
-          diff -u <(printf '%s\n' "$expected_sorted") <(printf '%s\n' "$actual")
-          sha256sum "${expected[@]}" > SHA256SUMS
-          sha256sum -c SHA256SUMS
-          cat SHA256SUMS
-      - name: Publish release
+          count=$(find . -maxdepth 1 -type f | wc -l)
+          test "$count" -eq $((${#expected[@]} + 2)) || { echo "Unexpected artifact count: $count"; exit 1; }
+      - name: Write global SHA256SUMS
+        working-directory: release-assets
+        run: |
+          rm -f SHA256SUMS
+          sha256sum -- * > SHA256SUMS
+      - name: Verify checksums
+        working-directory: release-assets
+        run: sha256sum -c SHA256SUMS
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          name: Release ${{ github.ref_name }}
-          generate_release_notes: true
           files: release-assets/*
+          generate_release_notes: true
