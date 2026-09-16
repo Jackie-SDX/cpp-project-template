@@ -103,20 +103,27 @@ jobs:
           restore-keys: |
             ${{ matrix.config.vcpkg_cache_prefix }}-
 
+      - name: Checkout vcpkg
+        if: runner.os == 'Windows'
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: microsoft/vcpkg
+          ref: master
+          path: vcpkg
+
+      - name: Bootstrap vcpkg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\vcpkg\bootstrap-vcpkg.bat
+
       - name: vcpkg
         if: runner.os == 'Windows'
-        uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
+        shell: pwsh
         env:
           VCPKG_MANIFEST_MODE: OFF
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/project/vcpkg_cache
           VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
-        with:
-          pkgs: wxwidgets gtest
-          triplet: ${{ matrix.config.vcpkg_triplet }}
-          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
-          cache-key: ${{ matrix.config.name }}-${{ matrix.build_type }}
-          disable-cache: true
-          revision: master
-          token: ${{ github.token }}
+        run: .\vcpkg\vcpkg.exe install --triplet ${{ matrix.config.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets wxwidgets gtest
 
       - name: Save GitLab-style vcpkg binary cache
         if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
@@ -138,6 +145,7 @@ jobs:
 
       - name: Build
         env:
+          CC: ${{ matrix.config.cc }}
           CXX: ${{ matrix.config.cxx }}
           ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
