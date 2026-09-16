@@ -1,5 +1,5 @@
 # GitHub CI workflow synchronized from the repository update archive.
-# Automatic execution is restored after the repository-wide migration pass.
+# Windows Debug jobs remain manual to avoid expensive automatic matrix runs.
 
 name: CI
 
@@ -89,14 +89,13 @@ jobs:
           triplet: ${{ matrix.config.vcpkg_triplet }}
           extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
           cache-key: ${{ matrix.config.name }}-${{ matrix.build_type }}
-          revision: master
+          revision: a1cae005c39be7b18ba319fced856b68d7276271
           token: ${{ github.token }}
 
       - name: Configure
         env:
           CC: ${{ matrix.config.cc }}
           CXX: ${{ matrix.config.cxx }}
-          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
           BUILD_TYPE: ${{ matrix.build_type }}
@@ -108,7 +107,6 @@ jobs:
       - name: Build
         env:
           CXX: ${{ matrix.config.cxx }}
-          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           BUILD_TYPE: ${{ matrix.build_type }}
         working-directory: project
