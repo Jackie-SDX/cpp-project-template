@@ -1,6 +1,5 @@
 # GitHub CI workflow synchronized from the repository update archive.
-# All matrix combinations are now eligible on push/PR so GitHub can actually
-# materialize and execute the matrix. Coverity remains manual-only.
+# All matrix combinations are eligible on push/PR. Coverity remains manual-only.
 
 name: CI
 
@@ -101,9 +100,7 @@ jobs:
           VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
           BUILD_TYPE: ${{ matrix.build_type }}
         working-directory: project
-        run: |
-          chmod a+x ./.github/scripts/*.cmake
-          cmake -P ./.github/scripts/configure.cmake
+        run: cmake -P ./.github/scripts/configure.cmake
 
       - name: Build
         env:
@@ -122,6 +119,35 @@ jobs:
           BUILD_TYPE: ${{ matrix.build_type }}
         working-directory: project
         run: cmake -P ./.github/scripts/test.cmake
+
+      # Fold packaging verification into the existing Linux Release leg so no
+      # additional runner is allocated just to validate archive/CPack output.
+      - name: Packaging smoke test
+        if: runner.os == 'Linux' && matrix.build_type == 'Release'
+        working-directory: project
+        env:
+          PACKAGE_TOOLCHAIN: gcc
+        run: |
+          cmake --install build --prefix instdir --strip --config Release
+          test -n "$(find instdir -type f -print -quit)"
+          mkdir -p package-smoke
+          (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.zip" --format=zip .)
+          (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.7z" --format=7zip .)
+          (cd instdir && tar -czf "../package-smoke/linux-gcc-x64.tar.gz" .)
+          cpack -C Release -G DEB
+          cpack -C Release -G RPM
+          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
+          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
+          test -n "$deb"
+          test -n "$rpm"
+          cp "$deb" package-smoke/linux-gcc-x64.deb
+          cp "$rpm" package-smoke/linux-gcc-x64.rpm
+          test -f package-smoke/linux-gcc-x64.zip
+          test -f package-smoke/linux-gcc-x64.7z
+          test -f package-smoke/linux-gcc-x64.tar.gz
+          test -f package-smoke/linux-gcc-x64.deb
+          test -f package-smoke/linux-gcc-x64.rpm
+          sha256sum package-smoke/* > package-smoke/SHA256SUMS
 
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux' && matrix.build_type == 'Debug'

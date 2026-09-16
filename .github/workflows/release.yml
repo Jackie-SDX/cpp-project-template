@@ -11,14 +11,12 @@ on:
 permissions:
   contents: write
 
-# Release jobs are intentionally smoke-tested on pull requests with only the
-# cheapest Linux leg. A tag runs the complete proven matrix. This prevents a
-# PR from spending the project's entire Actions budget while still validating
-# the packaging/release mechanics before a real tag is created.
+# PRs run one Linux packaging smoke leg. Tags/manual dispatch run the full
+# supported artifact matrix and publish only after a strict asset check.
 jobs:
   package:
     name: ${{ matrix.name }}
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || matrix.name == 'Ubuntu GCC'
+    if: github.event_name != 'pull_request' || matrix.name == 'Linux GCC x64'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -33,6 +31,7 @@ jobs:
             toolchain: msvc
             arch: x64
             nsis_generator: NSIS64
+            llvm: false
           - name: Windows MSVC x86
             os: windows-latest
             cc: cl
@@ -42,18 +41,61 @@ jobs:
             toolchain: msvc
             arch: x86
             nsis_generator: NSIS
-          - name: Linux x64
+            llvm: false
+          - name: Windows MinGW x64
+            os: windows-latest
+            cc: gcc
+            cxx: g++
+            vcpkg_triplet: x64-mingw-dynamic
+            toolchain: mingw
+            arch: x64
+            nsis_generator: NSIS64
+            llvm: false
+          - name: Windows MinGW x86
+            os: windows-latest
+            cc: gcc
+            cxx: g++
+            vcpkg_triplet: x86-mingw-dynamic
+            toolchain: mingw
+            arch: x86
+            nsis_generator: NSIS
+            llvm: false
+          - name: Windows LLVM x64
+            os: windows-latest
+            cc: clang-cl
+            cxx: clang-cl
+            environment_script: vcvars64.bat
+            vcpkg_triplet: x64-win-llvm
+            toolchain: llvm
+            arch: x64
+            nsis_generator: NSIS64
+            llvm: true
+          - name: Windows LLVM x86
+            os: windows-latest
+            cc: clang-cl
+            cxx: clang-cl
+            environment_script: vcvars32.bat
+            vcpkg_triplet: x86-win-llvm
+            toolchain: llvm
+            arch: x86
+            nsis_generator: NSIS
+            llvm: true
+          - name: Linux GCC x64
             os: ubuntu-24.04
             cc: gcc
             cxx: g++
-            vcpkg_triplet: x64-linux-release
             toolchain: gcc
-            arch: x86_64
-          - name: macOS arm64
+            arch: x64
+          - name: Linux GCC arm64
+            os: ubuntu-24.04-arm
+            cc: gcc
+            cxx: g++
+            toolchain: gcc
+            arch: arm64
+          - name: macOS Clang arm64
             os: macos-latest
             cc: clang
             cxx: clang++
-            vcpkg_triplet: arm64-osx-release
             toolchain: clang
             arch: arm64
 
@@ -70,7 +112,7 @@ jobs:
           path: project
 
       - name: Locate MSVC environment script
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (matrix.toolchain == 'msvc' || matrix.toolchain == 'llvm')
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -80,20 +122,30 @@ jobs:
           if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
           "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Install build and packaging dependencies
+      - name: Install packaging dependencies
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
             sudo apt-get install -y ninja-build rpm libwxgtk3.2-dev libgtest-dev
           elif [ "$RUNNER_OS" = "Windows" ]; then
-            choco install ninja nsis -y --no-progress
-            choco install wixtoolset -y --no-progress || echo "WiX install failed; MSI will be omitted."
+            choco install ninja nsis 7zip -y --no-progress
+            choco install wixtoolset -y --no-progress
           elif [ "$RUNNER_OS" = "macOS" ]; then
             brew install ninja wxwidgets googletest
           fi
 
-      - name: Get LLVM vcpkg triplets
+      - name: Refresh Windows environment
         if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
+            Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+            refreshenv
+          }
+          7z | Select-Object -First 1
+
+      - name: Get LLVM vcpkg triplets
+        if: runner.os == 'Windows' && matrix.llvm == true
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: Neumann-A/my-vcpkg-triplets
@@ -107,7 +159,7 @@ jobs:
         with:
           pkgs: wxwidgets gtest
           triplet: ${{ matrix.vcpkg_triplet }}
-          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
+          extra-args: ${{ matrix.llvm && format('--overlay-triplets={0}/my-vcpkg-triplets', github.workspace) || '' }}
           cache-key: release-${{ matrix.name }}
           revision: a1cae005c39be7b18ba319fced856b68d7276271
           token: ${{ github.token }}
@@ -122,9 +174,21 @@ jobs:
           VCPKG_TRIPLET: ${{ matrix.vcpkg_triplet }}
           BUILD_TYPE: Release
           PACKAGE_TOOLCHAIN: ${{ matrix.toolchain }}
+        run: cmake -P ./.github/scripts/configure.cmake
+
+      - name: Verify toolchain identity
+        if: runner.os == 'Windows'
+        working-directory: project
+        env:
+          TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
-          chmod a+x ./.github/scripts/*.cmake
-          cmake -P ./.github/scripts/configure.cmake
+          if [ "$TOOLCHAIN" = "llvm" ]; then
+            clang-cl --version
+          elif [ "$TOOLCHAIN" = "mingw" ]; then
+            g++ --version
+          else
+            cmd.exe /c "cl" 2>&1 | head -3
+          fi
 
       - name: Build
         working-directory: project
@@ -157,7 +221,7 @@ jobs:
         working-directory: project
         shell: bash
         run: |
-          base=$(sed -n 's/^SET(CPACK_PACKAGE_FILE_NAME "\(.*\)")/\1/p' build/CPackConfig.cmake | head -1)
+          base=$(sed -n 's/.*SET(CPACK_PACKAGE_FILE_NAME "\([^"]*\)").*/\1/p' build/CPackConfig.cmake | head -1)
           test -n "$base"
           echo "base=$base" >> "$GITHUB_OUTPUT"
 
@@ -171,41 +235,34 @@ jobs:
           New-Item -ItemType Directory -Force release-assets | Out-Null
           Compress-Archive -Path instdir\* -DestinationPath "release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.zip" -Force
           Push-Location build
-          cpack -C Release -G $env:NSIS_GENERATOR
-          if ($LASTEXITCODE -eq 0 -and (Test-Path "package\$env:BASE.exe")) {
-            Copy-Item "package\$env:BASE.exe" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.exe"
-          }
+          cpack -C Release -G "${{ matrix.nsis_generator }}"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
+          Copy-Item "package\$env:BASE.exe" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.exe" -Force
           cpack -C Release -G 7Z
-          if ($LASTEXITCODE -eq 0 -and (Test-Path "package\$env:BASE.7z")) {
-            Copy-Item "package\$env:BASE.7z" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.7z"
-          }
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
+          Copy-Item "package\$env:BASE.7z" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.7z" -Force
           cpack -C Release -G WIX
-          if ($LASTEXITCODE -eq 0 -and (Test-Path "package\$env:BASE.msi")) {
-            Copy-Item "package\$env:BASE.msi" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.msi"
-          } else {
-            Write-Host 'WiX/MSI unavailable; continuing without MSI.'
-          }
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
+          Copy-Item "package\$env:BASE.msi" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.msi" -Force
           Pop-Location
           Get-ChildItem release-assets
 
       - name: Package Linux
         if: runner.os == 'Linux'
         working-directory: project
-        env:
-          BASE: ${{ steps.package_name.outputs.base }}
         run: |
           mkdir -p release-assets
-          tar -C instdir -czf "release-assets/linux-${{ matrix.arch }}.tar.gz" .
-          cmake -E tar cf "release-assets/linux-${{ matrix.arch }}.zip" --format=zip -C instdir .
-          cmake -E tar cf "release-assets/linux-${{ matrix.arch }}.7z" --format=7zip -C instdir .
-          cd build
-          cpack -C Release -G DEB || true
-          cpack -C Release -G RPM || true
-          cd ..
-          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1 || true)
-          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1 || true)
-          test -z "$deb" || cp "$deb" "release-assets/linux-${{ matrix.arch }}.deb"
-          test -z "$rpm" || cp "$rpm" "release-assets/linux-${{ matrix.arch }}.rpm"
+          (cd instdir && cmake -E tar cf "../release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.zip" --format=zip .)
+          (cd instdir && cmake -E tar cf "../release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.7z" --format=7zip .)
+          (cd instdir && tar -czf "../release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.tar.gz" .)
+          cpack -C Release -G DEB
+          cpack -C Release -G RPM
+          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
+          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
+          test -n "$deb"
+          test -n "$rpm"
+          cp "$deb" "release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.deb"
+          cp "$rpm" "release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.rpm"
           ls -la release-assets
 
       - name: Package macOS
@@ -213,14 +270,13 @@ jobs:
         working-directory: project
         run: |
           mkdir -p release-assets
-          tar -C instdir -czf "release-assets/macos-${{ matrix.arch }}.tar.gz" .
-          cmake -E tar cf "release-assets/macos-${{ matrix.arch }}.zip" --format=zip -C instdir .
-          cmake -E tar cf "release-assets/macos-${{ matrix.arch }}.7z" --format=7zip -C instdir .
-          cd build
-          cpack -C Release -G DragNDrop || true
-          cd ..
-          dmg=$(find build/package -maxdepth 1 -type f -name '*.dmg' | head -1 || true)
-          test -z "$dmg" || cp "$dmg" "release-assets/macos-${{ matrix.arch }}.dmg"
+          (cd instdir && cmake -E tar cf "../release-assets/macos-${{ matrix.toolchain }}-${{ matrix.arch }}.zip" --format=zip .)
+          (cd instdir && cmake -E tar cf "../release-assets/macos-${{ matrix.toolchain }}-${{ matrix.arch }}.7z" --format=7zip .)
+          (cd instdir && tar -czf "../release-assets/macos-${{ matrix.toolchain }}-${{ matrix.arch }}.tar.gz" .)
+          cpack -C Release -G DragNDrop
+          dmg=$(find build/package -maxdepth 1 -type f -name '*.dmg' | head -1)
+          test -n "$dmg"
+          cp "$dmg" "release-assets/macos-${{ matrix.toolchain }}-${{ matrix.arch }}.dmg"
           ls -la release-assets
 
       - name: Upload package artifact
@@ -232,7 +288,7 @@ jobs:
 
   source:
     name: Source archives
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -246,7 +302,6 @@ jobs:
           prefix="cpp-project-template-${version}"
           git archive --format=zip --prefix="$prefix/" HEAD -o "$prefix-source.zip"
           git archive --format=tar.gz --prefix="$prefix/" HEAD -o "$prefix-source.tar.gz"
-          sha256sum "$prefix-source.zip" "$prefix-source.tar.gz" > SHA256SUMS
       - name: Upload source artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -254,7 +309,6 @@ jobs:
           path: |
             cpp-project-template-*-source.zip
             cpp-project-template-*-source.tar.gz
-            SHA256SUMS
           if-no-files-found: error
 
   publish:
@@ -270,15 +324,44 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
-      - name: Verify release assets
+
+      - name: Verify and inventory release
         working-directory: release-assets
+        shell: bash
         run: |
+          set -euo pipefail
           test -n "$(find . -maxdepth 1 -type f -print -quit)"
-          find . -maxdepth 1 -type f -printf '%f\n' | sort > FILES
-          duplicates=$(sort FILES | uniq -d)
-          test -z "$duplicates" || { echo "Duplicate release filenames:"; echo "$duplicates"; exit 1; }
-          sha256sum --tag $(find . -maxdepth 1 -type f ! -name FILES -print | sort) > SHA256SUMS.generated
-          cat SHA256SUMS.generated
+          declare -A seen=()
+          for f in *; do
+            [ -f "$f" ] || continue
+            if [[ "$f" == "SHA256SUMS" ]]; then continue; fi
+            if [[ -n "${seen[$f]:-}" ]]; then echo "Duplicate release filename: $f"; exit 1; fi
+            seen[$f]=1
+          done
+
+          expected=(
+            windows-msvc-x64.zip windows-msvc-x64.7z windows-msvc-x64.exe windows-msvc-x64.msi
+            windows-msvc-x86.zip windows-msvc-x86.7z windows-msvc-x86.exe windows-msvc-x86.msi
+            windows-mingw-x64.zip windows-mingw-x64.7z windows-mingw-x64.exe windows-mingw-x64.msi
+            windows-mingw-x86.zip windows-mingw-x86.7z windows-mingw-x86.exe windows-mingw-x86.msi
+            windows-llvm-x64.zip windows-llvm-x64.7z windows-llvm-x64.exe windows-llvm-x64.msi
+            windows-llvm-x86.zip windows-llvm-x86.7z windows-llvm-x86.exe windows-llvm-x86.msi
+            linux-gcc-x64.zip linux-gcc-x64.7z linux-gcc-x64.tar.gz linux-gcc-x64.deb linux-gcc-x64.rpm
+            linux-gcc-arm64.zip linux-gcc-arm64.7z linux-gcc-arm64.tar.gz linux-gcc-arm64.deb linux-gcc-arm64.rpm
+            macos-clang-arm64.zip macos-clang-arm64.7z macos-clang-arm64.tar.gz macos-clang-arm64.dmg
+          )
+          version="${GITHUB_REF_NAME#v}"
+          expected+=("cpp-project-template-${version}-source.zip" "cpp-project-template-${version}-source.tar.gz")
+          for f in "${expected[@]}"; do
+            test -f "$f" || { echo "Missing release asset: $f"; exit 1; }
+          done
+          actual=$(printf '%s\n' * | grep -v '^SHA256SUMS$' | sort)
+          expected_sorted=$(printf '%s\n' "${expected[@]}" | sort)
+          diff -u <(printf '%s\n' "$expected_sorted") <(printf '%s\n' "$actual")
+          sha256sum "${expected[@]}" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+
       - name: Publish release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
