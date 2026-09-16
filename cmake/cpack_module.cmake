@@ -65,6 +65,15 @@ if(BUILD_PROJECTWX)
 endif()
 
 if(WIN32)
+    # CPack serializes these values into build/CPackConfig.cmake. Always use
+    # forward slashes here: raw Windows backslashes become CMake escape
+    # sequences (for example \p) when the generated config is parsed.
+    file(TO_CMAKE_PATH "${PACKAGING_DIR}/windows/icon.ico" _nsis_icon)
+    file(TO_CMAKE_PATH "${PACKAGING_DIR}/windows/nsis/icon.bmp" _nsis_bitmap)
+    file(TO_CMAKE_PATH "${PACKAGING_DIR}/windows/nsis/welcomefinishpage.bmp" _nsis_welcome_bitmap)
+    file(TO_CMAKE_PATH "${PACKAGING_DIR}/windows/wix/banner.bmp" _wix_banner)
+    file(TO_CMAKE_PATH "${PACKAGING_DIR}/windows/wix/dialog.bmp" _wix_dialog)
+
     set(CPACK_NSIS_MANIFEST_DPI_AWARE ON)
     set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
     set(CPACK_NSIS_MODIFY_PATH ON)
@@ -73,12 +82,12 @@ if(WIN32)
     set(CPACK_NSIS_MENU_LINKS
         "share/docs/${PROJECT_NAME}/README.md" "README"
         "${CMAKE_PROJECT_HOMEPAGE_URL}" "${PROJECT_NAME} Web Site")
-    set(CPACK_NSIS_MUI_ICON "${PACKAGING_DIR}/windows/icon.ico")
-    set(CPACK_NSIS_MUI_UNIICON "${PACKAGING_DIR}/windows/icon.ico")
-    set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\${PROJECT_CLI_NAME}.exe")
-    set(CPACK_PACKAGE_ICON "${PACKAGING_DIR}/windows/nsis\\icon.bmp")
-    set(CPACK_NSIS_MUI_WELCOMEFINISHPAGE_BITMAP "${PACKAGING_DIR}/windows/nsis\\welcomefinishpage.bmp")
-    set(CPACK_NSIS_MUI_UNWELCOMEFINISHPAGE_BITMAP "${PACKAGING_DIR}/windows/nsis\\welcomefinishpage.bmp")
+    set(CPACK_NSIS_MUI_ICON "${_nsis_icon}")
+    set(CPACK_NSIS_MUI_UNIICON "${_nsis_icon}")
+    set(CPACK_NSIS_INSTALLED_ICON_NAME "bin/${PROJECT_CLI_NAME}.exe")
+    set(CPACK_PACKAGE_ICON "${_nsis_bitmap}")
+    set(CPACK_NSIS_MUI_WELCOMEFINISHPAGE_BITMAP "${_nsis_welcome_bitmap}")
+    set(CPACK_NSIS_MUI_UNWELCOMEFINISHPAGE_BITMAP "${_nsis_welcome_bitmap}")
     if(BUILD_PROJECTWX)
         set(CPACK_NSIS_MUI_FINISHPAGE_RUN "${PROJECT_WX_NAME}")
     endif()
@@ -115,9 +124,9 @@ if(WIN32)
         VIAddVersionKey /LANG=${VER_VERSION_LANG} \"ProductVersion\" \"v${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${CMAKE_PROJECT_VERSION_TWEAK}\"
         VIAddVersionKey /LANG=${VER_VERSION_LANG} \"Comments\" \"${CPACK_PACKAGE_DESCRIPTION}\"")
 
-    set(CPACK_WIX_PRODUCT_ICON "${PACKAGING_DIR}/windows/icon.ico")
-    set(CPACK_WIX_UI_BANNER "${PACKAGING_DIR}/windows/wix\\banner.bmp")
-    set(CPACK_WIX_UI_DIALOG "${PACKAGING_DIR}/windows/wix\\dialog.bmp")
+    set(CPACK_WIX_PRODUCT_ICON "${_nsis_icon}")
+    set(CPACK_WIX_UI_BANNER "${_wix_banner}")
+    set(CPACK_WIX_UI_DIALOG "${_wix_dialog}")
 
 elseif(APPLE)
     set(MACOSX_BUNDLE_BUNDLE_NAME ${CPACK_PACKAGE_NAME})
