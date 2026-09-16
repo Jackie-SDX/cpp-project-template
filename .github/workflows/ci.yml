@@ -120,8 +120,6 @@ jobs:
         working-directory: project
         run: cmake -P ./.github/scripts/test.cmake
 
-      # Fold packaging verification into the existing Linux Release leg so no
-      # additional runner is allocated just to validate archive/CPack output.
       - name: Packaging smoke test
         if: runner.os == 'Linux' && matrix.build_type == 'Release'
         working-directory: project
@@ -134,8 +132,8 @@ jobs:
           (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.zip" --format=zip .)
           (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.7z" --format=7zip .)
           (cd instdir && tar -czf "../package-smoke/linux-gcc-x64.tar.gz" .)
-          cpack -C Release -G DEB
-          cpack -C Release -G RPM
+          cpack --config build/CPackConfig.cmake -C Release -G DEB
+          cpack --config build/CPackConfig.cmake -C Release -G RPM
           deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
           rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
           test -n "$deb"
