@@ -78,6 +78,16 @@ jobs:
           repository: 'Neumann-A/my-vcpkg-triplets'
           path: './my-vcpkg-triplets'
 
+      - name: Restore GitLab-style vcpkg binary cache
+        if: runner.os == 'Windows'
+        id: vcpkg-binary-cache-restore
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/vcpkg_cache
+          key: windows-vcpkg-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+          restore-keys: |
+            windows-vcpkg-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-
+
       - name: vcpkg
         if: runner.os == 'Windows'
         uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
@@ -88,8 +98,16 @@ jobs:
           triplet: ${{ matrix.config.vcpkg_triplet }}
           extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
           cache-key: ${{ matrix.config.name }}-${{ matrix.build_type }}
+          disable-cache: true
           revision: a1cae005c39be7b18ba319fced856b68d7276271
           token: ${{ github.token }}
+
+      - name: Save GitLab-style vcpkg binary cache
+        if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/vcpkg_cache
+          key: windows-vcpkg-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Configure
         env:
