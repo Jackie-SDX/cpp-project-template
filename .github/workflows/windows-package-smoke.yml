@@ -1,0 +1,135 @@
+name: Windows Package Smoke
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-package-smoke:
+    name: Windows MinGW x64 packaging smoke
+    if: contains(github.event.pull_request.labels.*.name, 'windows-package-smoke')
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: true
+          fetch-depth: 0
+          path: project
+
+      - name: Install packaging dependencies
+        run: |
+          choco install ninja ccache nsis 7zip -y --no-progress
+          choco install wixtoolset -y --no-progress
+
+      - name: Get Windows vcpkg triplets
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: Neumann-A/my-vcpkg-triplets
+          path: my-vcpkg-triplets
+
+      - name: vcpkg
+        uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
+        env:
+          VCPKG_MANIFEST_MODE: OFF
+        with:
+          pkgs: wxwidgets gtest
+          triplet: x64-mingw-dynamic
+          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
+          cache-key: windows-package-smoke-mingw-x64
+          revision: a1cae005c39be7b18ba319fced856b68d7276271
+          token: ${{ github.token }}
+
+      - name: Configure
+        working-directory: project
+        env:
+          CC: gcc
+          CXX: g++
+          RUNNER_OS: Windows
+          VCPKG_TRIPLET: x64-mingw-dynamic
+          BUILD_TYPE: Release
+          PACKAGE_TOOLCHAIN: mingw
+        run: cmake -P ./.github/scripts/configure.cmake
+
+      - name: Build
+        working-directory: project
+        env:
+          CXX: g++
+          RUNNER_OS: Windows
+          BUILD_TYPE: Release
+        run: cmake -P ./.github/scripts/build.cmake
+
+      - name: Test
+        working-directory: project
+        env:
+          CC: gcc
+          CXX: g++
+          RUNNER_OS: Windows
+          BUILD_TYPE: Release
+        run: cmake -P ./.github/scripts/test.cmake
+
+      - name: Install
+        working-directory: project
+        run: cmake --install build --prefix instdir --strip --config Release
+
+      - name: Verify install tree
+        working-directory: project
+        run: test -n "$(find instdir -type f -print -quit)"
+
+      - name: Determine canonical package name
+        id: package_name
+        working-directory: project
+        shell: bash
+        run: |
+          base=$(sed -n 's/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p' build/CPackConfig.cmake | head -1)
+          test -n "$base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Package Windows
+        working-directory: project
+        shell: pwsh
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Compress-Archive -Path instdir\* -DestinationPath "release-assets\windows-mingw-x64.zip" -Force
+          Push-Location build
+          cpack --config CPackConfig.cmake -C Release -G NSIS64
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
+          Copy-Item "package\$env:BASE.exe" "..\release-assets\windows-mingw-x64.exe" -Force
+          cpack --config CPackConfig.cmake -C Release -G 7Z
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
+          Copy-Item "package\$env:BASE.7z" "..\release-assets\windows-mingw-x64.7z" -Force
+          cpack --config CPackConfig.cmake -C Release -G WIX
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
+          Copy-Item "package\$env:BASE.msi" "..\release-assets\windows-mingw-x64.msi" -Force
+          Pop-Location
+          Get-ChildItem release-assets
+
+      - name: Verify exact artifacts and checksums
+        working-directory: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in \
+            windows-mingw-x64.zip \
+            windows-mingw-x64.7z \
+            windows-mingw-x64.exe \
+            windows-mingw-x64.msi; do
+            test -f "release-assets/$f"
+          done
+          sha256sum release-assets/* > release-assets/SHA256SUMS
+          sha256sum -c release-assets/SHA256SUMS
+
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-package-smoke-mingw-x64
+          path: project/release-assets/*
+          if-no-files-found: error
