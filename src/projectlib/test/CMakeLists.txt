@@ -20,11 +20,7 @@ target_link_libraries("${PROJECT_LIB_NAME}_gtest" PRIVATE
 	${GTEST_LIBRARIES}
 )
 
-if (MINGW)
-	target_link_libraries("${PROJECT_LIB_NAME}_gtest" PRIVATE
-		$<$<CONFIG:Release>:-static-libgcc -static-libstdc++ -static>
-	)
-elseif (MSVC)
+if (MSVC)
 	# Match the static Windows vcpkg triplets used by CI.
 	set_property(TARGET "${PROJECT_LIB_NAME}_gtest" PROPERTY
 		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -33,7 +29,11 @@ elseif (MSVC)
 	)
 endif()
 
-# Enable CMake's test runner to discover the tests
-# included in the binary, using the GoogleTest CMake module.
+# Discover tests in the target environment so runtime DLLs copied by vcpkg's
+# z-applocal step are available. A longer timeout also covers Windows LLVM
+# debug startup overhead.
 include(GoogleTest)
-gtest_discover_tests("${PROJECT_LIB_NAME}_gtest")
+gtest_discover_tests("${PROJECT_LIB_NAME}_gtest"
+	DISCOVERY_MODE PRE_TEST
+	DISCOVERY_TIMEOUT 60
+)
