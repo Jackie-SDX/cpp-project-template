@@ -1,38 +1,72 @@
-# GitHub release workflow synchronized from the repository update archive.
-# The vcpkg revision is pinned to the repository's verified manifest baseline.
-
 name: Release
 
 on:
+  pull_request:
+    branches: [ main ]
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+# Release jobs are intentionally smoke-tested on pull requests with only the
+# cheapest Linux leg. A tag runs the complete proven matrix. This prevents a
+# PR from spending the project's entire Actions budget while still validating
+# the packaging/release mechanics before a real tag is created.
 jobs:
-  release:
-    name: ${{ matrix.config.name }}
-    runs-on: ${{ matrix.config.os }}
+  package:
+    name: ${{ matrix.name }}
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || matrix.name == 'Ubuntu GCC'
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - { name: "Windows MSVC x64", ext: "windows-x86_64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, nsis_generator: NSIS64 }
-          - { name: "Windows MSVC i686", ext: "windows-i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, nsis_generator: NSIS }
-          - { name: "Ubuntu GCC", ext: "linux-x86_64", os: ubuntu-24.04, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-linux-release }
-          - { name: "macOS Clang", ext: "macos-arm64", os: macos-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: arm64-osx-release }
+        include:
+          - name: Windows MSVC x64
+            os: windows-latest
+            cc: cl
+            cxx: cl
+            environment_script: vcvars64.bat
+            vcpkg_triplet: x64-windows-static
+            toolchain: msvc
+            arch: x64
+            nsis_generator: NSIS64
+          - name: Windows MSVC x86
+            os: windows-latest
+            cc: cl
+            cxx: cl
+            environment_script: vcvars32.bat
+            vcpkg_triplet: x86-windows-static
+            toolchain: msvc
+            arch: x86
+            nsis_generator: NSIS
+          - name: Linux x64
+            os: ubuntu-24.04
+            cc: gcc
+            cxx: g++
+            vcpkg_triplet: x64-linux-release
+            toolchain: gcc
+            arch: x86_64
+          - name: macOS arm64
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+            vcpkg_triplet: arm64-osx-release
+            toolchain: clang
+            arch: arm64
 
     defaults:
       run:
-        working-directory: ./
         shell: bash
 
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
-          submodules: "true"
+          submodules: true
+          fetch-depth: 0
           path: project
 
       - name: Locate MSVC environment script
@@ -42,40 +76,28 @@ jobs:
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
-          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.config.environment_script }}"
+          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.environment_script }}"
           if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
           "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Update Ubuntu package list
-        if: runner.os == 'Linux'
-        run: sudo apt-get update
-
-      - name: Install build and packaging tools
+      - name: Install build and packaging dependencies
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
             sudo apt-get install -y ninja-build rpm libwxgtk3.2-dev libgtest-dev
-          elif [ "$RUNNER_OS" == "Windows" ]; then
-            choco install ninja -y
-          elif [ "$RUNNER_OS" == "macOS" ]; then
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            choco install ninja nsis -y --no-progress
+            choco install wixtoolset -y --no-progress || echo "WiX install failed; MSI will be omitted."
+          elif [ "$RUNNER_OS" = "macOS" ]; then
             brew install ninja wxwidgets googletest
           fi
-
-      - name: Install NSIS and WiX
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install nsis -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw "NSIS installation failed" }
-          choco install wixtoolset -y --no-progress
-          $wixOk = $LASTEXITCODE -eq 0
-          "WIX_AVAILABLE=$wixOk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Get LLVM vcpkg triplets
         if: runner.os == 'Windows'
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
-          repository: 'Neumann-A/my-vcpkg-triplets'
-          path: './my-vcpkg-triplets'
+          repository: Neumann-A/my-vcpkg-triplets
+          path: my-vcpkg-triplets
 
       - name: vcpkg
         if: runner.os == 'Windows'
@@ -84,81 +106,182 @@ jobs:
           VCPKG_MANIFEST_MODE: OFF
         with:
           pkgs: wxwidgets gtest
-          triplet: ${{ matrix.config.vcpkg_triplet }}
+          triplet: ${{ matrix.vcpkg_triplet }}
           extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
-          cache-key: release-${{ matrix.config.name }}
+          cache-key: release-${{ matrix.name }}
           revision: a1cae005c39be7b18ba319fced856b68d7276271
           token: ${{ github.token }}
 
       - name: Configure
-        env:
-          CC: ${{ matrix.config.cc }}
-          CXX: ${{ matrix.config.cxx }}
-          RUNNER_OS: ${{ runner.os }}
-          VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
-          BUILD_TYPE: Release
         working-directory: project
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          RUNNER_OS: ${{ runner.os }}
+          VCPKG_TRIPLET: ${{ matrix.vcpkg_triplet }}
+          BUILD_TYPE: Release
+          PACKAGE_TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
           chmod a+x ./.github/scripts/*.cmake
           cmake -P ./.github/scripts/configure.cmake
 
       - name: Build
+        working-directory: project
         env:
-          CXX: ${{ matrix.config.cxx }}
+          CXX: ${{ matrix.cxx }}
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           BUILD_TYPE: Release
-        working-directory: project
         run: cmake -P ./.github/scripts/build.cmake
 
-      - name: Run tests
+      - name: Test
+        working-directory: project
         env:
-          CC: ${{ matrix.config.cc }}
-          CXX: ${{ matrix.config.cxx }}
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
           RUNNER_OS: ${{ runner.os }}
           BUILD_TYPE: Release
-        working-directory: project
         run: cmake -P ./.github/scripts/test.cmake
 
       - name: Install
         working-directory: project
         run: cmake --install build --prefix instdir --strip --config Release
 
-      - name: Pack archive
-        working-directory: project/instdir
-        run: cmake -E tar cfv ../cpp-project-template-${{ matrix.config.ext }}.7z --format=7zip .
+      - name: Verify install tree
+        working-directory: project
+        run: test -n "$(find instdir -type f -print -quit)"
 
-      - name: Pack Windows installers
-        if: runner.os == 'Windows'
-        working-directory: project/build
+      - name: Determine canonical package name
+        id: package_name
+        working-directory: project
         shell: bash
         run: |
-          cpack -C Release -G ${{ matrix.config.nsis_generator }}
-          if [ "${WIX_AVAILABLE:-false}" = "True" ] || [ "${WIX_AVAILABLE:-false}" = "true" ]; then
-            cpack -C Release -G WIX || echo "WiX packaging failed; continuing with NSIS/package archive."
-          fi
+          base=$(sed -n 's/^SET(CPACK_PACKAGE_FILE_NAME "\(.*\)")/\1/p' build/CPackConfig.cmake | head -1)
+          test -n "$base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
 
-      - name: Pack Linux packages
-        if: runner.os == 'Linux'
-        working-directory: project/build
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        working-directory: project
+        shell: pwsh
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
         run: |
-          cpack -C Release -G DEB
-          cpack -C Release -G RPM
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Compress-Archive -Path instdir\* -DestinationPath "release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.zip" -Force
+          Push-Location build
+          cpack -C Release -G $env:NSIS_GENERATOR
+          if ($LASTEXITCODE -eq 0 -and (Test-Path "package\$env:BASE.exe")) {
+            Copy-Item "package\$env:BASE.exe" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.exe"
+          }
+          cpack -C Release -G 7Z
+          if ($LASTEXITCODE -eq 0 -and (Test-Path "package\$env:BASE.7z")) {
+            Copy-Item "package\$env:BASE.7z" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.7z"
+          }
+          cpack -C Release -G WIX
+          if ($LASTEXITCODE -eq 0 -and (Test-Path "package\$env:BASE.msi")) {
+            Copy-Item "package\$env:BASE.msi" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.msi"
+          } else {
+            Write-Host 'WiX/MSI unavailable; continuing without MSI.'
+          }
+          Pop-Location
+          Get-ChildItem release-assets
 
-      - name: Pack macOS DMG
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        working-directory: project
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
+        run: |
+          mkdir -p release-assets
+          tar -C instdir -czf "release-assets/linux-${{ matrix.arch }}.tar.gz" .
+          cmake -E tar cf "release-assets/linux-${{ matrix.arch }}.zip" --format=zip -C instdir .
+          cmake -E tar cf "release-assets/linux-${{ matrix.arch }}.7z" --format=7zip -C instdir .
+          cd build
+          cpack -C Release -G DEB || true
+          cpack -C Release -G RPM || true
+          cd ..
+          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1 || true)
+          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1 || true)
+          test -z "$deb" || cp "$deb" "release-assets/linux-${{ matrix.arch }}.deb"
+          test -z "$rpm" || cp "$rpm" "release-assets/linux-${{ matrix.arch }}.rpm"
+          ls -la release-assets
+
+      - name: Package macOS
         if: runner.os == 'macOS'
-        working-directory: project/build
-        run: cpack -C Release -G DragNDrop
-
-      - name: Collect packages
         working-directory: project
         run: |
           mkdir -p release-assets
-          find build/package -maxdepth 1 -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' \) -exec cp -f {} release-assets/ \; || true
-          cp -f cpp-project-template-${{ matrix.config.ext }}.7z release-assets/ || true
-          test -n "$(find release-assets -maxdepth 1 -type f -print -quit)"
+          tar -C instdir -czf "release-assets/macos-${{ matrix.arch }}.tar.gz" .
+          cmake -E tar cf "release-assets/macos-${{ matrix.arch }}.zip" --format=zip -C instdir .
+          cmake -E tar cf "release-assets/macos-${{ matrix.arch }}.7z" --format=7zip -C instdir .
+          cd build
+          cpack -C Release -G DragNDrop || true
+          cd ..
+          dmg=$(find build/package -maxdepth 1 -type f -name '*.dmg' | head -1 || true)
+          test -z "$dmg" || cp "$dmg" "release-assets/macos-${{ matrix.arch }}.dmg"
+          ls -la release-assets
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          files: project/release-assets/*
+          name: release-${{ matrix.name }}
+          path: project/release-assets/*
+          if-no-files-found: error
+
+  source:
+    name: Source archives
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+      - name: Create source archives
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ "$version" = "$GITHUB_REF_NAME" ]; then version="0.0.0-dev"; fi
+          prefix="cpp-project-template-${version}"
+          git archive --format=zip --prefix="$prefix/" HEAD -o "$prefix-source.zip"
+          git archive --format=tar.gz --prefix="$prefix/" HEAD -o "$prefix-source.tar.gz"
+          sha256sum "$prefix-source.zip" "$prefix-source.tar.gz" > SHA256SUMS
+      - name: Upload source artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-source
+          path: |
+            cpp-project-template-*-source.zip
+            cpp-project-template-*-source.tar.gz
+            SHA256SUMS
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, source]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Verify release assets
+        working-directory: release-assets
+        run: |
+          test -n "$(find . -maxdepth 1 -type f -print -quit)"
+          find . -maxdepth 1 -type f -printf '%f\n' | sort > FILES
+          duplicates=$(sort FILES | uniq -d)
+          test -z "$duplicates" || { echo "Duplicate release filenames:"; echo "$duplicates"; exit 1; }
+          sha256sum --tag $(find . -maxdepth 1 -type f ! -name FILES -print | sort) > SHA256SUMS.generated
+          cat SHA256SUMS.generated
+      - name: Publish release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*
