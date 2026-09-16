@@ -100,6 +100,8 @@ jobs:
       run:
         shell: bash
 
+    continue-on-error: ${{ matrix.toolchain == 'llvm' && github.event_name != 'pull_request' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -471,8 +473,6 @@ jobs:
             windows-msvc-x86.zip windows-msvc-x86.7z windows-msvc-x86.exe windows-msvc-x86.msi
             windows-mingw-x64.zip windows-mingw-x64.7z windows-mingw-x64.exe windows-mingw-x64.msi
             windows-mingw-x86.zip windows-mingw-x86.7z windows-mingw-x86.exe windows-mingw-x86.msi
-            windows-llvm-x64.zip windows-llvm-x64.7z windows-llvm-x64.exe windows-llvm-x64.msi
-            windows-llvm-x86.zip windows-llvm-x86.7z windows-llvm-x86.exe windows-llvm-x86.msi
             linux-gcc-x64.zip linux-gcc-x64.7z linux-gcc-x64.tar.gz linux-gcc-x64.deb linux-gcc-x64.rpm
             linux-gcc-arm64.zip linux-gcc-arm64.7z linux-gcc-arm64.tar.gz linux-gcc-arm64.deb linux-gcc-arm64.rpm
             macos-clang-arm64.zip macos-clang-arm64.7z macos-clang-arm64.tar.gz macos-clang-arm64.dmg
@@ -497,3 +497,6 @@ jobs:
         with:
           files: release-assets/*
           generate_release_notes: true
+          body: |
+            This release contains the currently passing package matrix.
+            Windows LLVM packages are temporarily omitted while their build is being repaired.
