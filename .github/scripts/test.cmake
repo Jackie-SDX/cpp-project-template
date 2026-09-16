@@ -6,24 +6,28 @@ ProcessorCount(N)
 set(ENV{CTEST_OUTPUT_ON_FAILURE} "ON")
 
 # CDash: https://cmake.org/cmake/help/book/mastering-cmake/chapter/CDash.html
-# ctest -D Continuous
-# performs the start, update, configure, build, test, coverage, and submit commands.
-set(CTEST_STEPS Start Update Configure Build Test)
+# GitHub Actions checks out pull requests as detached merge commits, so the
+# CTest Update/Submit dashboard steps are not meaningful there and can fail on
+# repository operations. Keep the actual Configure/Build/Test/MemCheck/Coverage
+# stages while making dashboard integration opt-in through CTEST_DASHBOARD.
+set(CTEST_STEPS Start Configure Build Test)
 
-# Conditionally add MemCheck for Linux
+if("$ENV{CTEST_DASHBOARD}" STREQUAL "ON")
+  list(INSERT CTEST_STEPS 1 Update)
+endif()
+
 if("$ENV{RUNNER_OS}" STREQUAL "Linux")
   list(APPEND CTEST_STEPS MemCheck)
 endif()
 
-# Conditionally add Coverage for gcc
 if("$ENV{CC}" STREQUAL "gcc")
   list(APPEND CTEST_STEPS Coverage)
 endif()
 
-# Always add Submit step
-list(APPEND CTEST_STEPS Submit)
+if("$ENV{CTEST_DASHBOARD}" STREQUAL "ON")
+  list(APPEND CTEST_STEPS Submit)
+endif()
 
-# Execute each CTest step individually
 foreach(step IN LISTS CTEST_STEPS)
   execute_process(
     COMMAND ctest -j ${N} -C $ENV{BUILD_TYPE} -D Continuous${step}
