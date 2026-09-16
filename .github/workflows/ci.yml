@@ -83,17 +83,17 @@ jobs:
         id: vcpkg-binary-cache-restore
         uses: actions/cache/restore@v5
         with:
-          path: ${{ runner.temp }}/vcpkg_cache
-          key: windows-vcpkg-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+          path: project/vcpkg_cache
+          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
           restore-keys: |
-            windows-vcpkg-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-
+            windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-
 
       - name: vcpkg
         if: runner.os == 'Windows'
         uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
         env:
           VCPKG_MANIFEST_MODE: OFF
-          VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/vcpkg_cache,readwrite
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
         with:
           pkgs: wxwidgets gtest
           triplet: ${{ matrix.config.vcpkg_triplet }}
@@ -107,8 +107,8 @@ jobs:
         if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
-          path: ${{ runner.temp }}/vcpkg_cache
-          key: windows-vcpkg-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+          path: project/vcpkg_cache
+          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Configure
         env:
