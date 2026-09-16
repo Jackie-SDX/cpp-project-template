@@ -14,7 +14,7 @@ permissions:
 jobs:
   package:
     name: ${{ matrix.name }}
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-release-test')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -142,8 +142,8 @@ jobs:
           }
           7z | Select-Object -First 1
 
-      - name: Get LLVM vcpkg triplets
-        if: runner.os == 'Windows' && matrix.llvm == true
+      - name: Get Windows vcpkg triplets
+        if: runner.os == 'Windows'
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: Neumann-A/my-vcpkg-triplets
@@ -286,7 +286,7 @@ jobs:
 
   package-smoke:
     name: Linux GCC x64 PR packaging smoke
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-release-test')
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
