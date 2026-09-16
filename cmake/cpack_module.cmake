@@ -105,24 +105,12 @@ if(WIN32)
     file(RENAME "${CMAKE_CURRENT_BINARY_DIR}/License_utf8bom.txt" "${CMAKE_CURRENT_BINARY_DIR}/License.txt")
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_BINARY_DIR}/License.txt")
 
-    if(${PROJECT_LANGUAGE_NEUTRAL} EQUAL 0)
-        set(VER_VERSION_LANG "1033")
-    else()
-        set(VER_VERSION_LANG "0")
-    endif()
-    set(CPACK_NSIS_DEFINES
-        "${CPACK_NSIS_DEFINES}
-        VIProductVersion ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${CMAKE_PROJECT_VERSION_TWEAK}
-        VIFileVersion ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${CMAKE_PROJECT_VERSION_TWEAK}
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"CompanyName\" \"${CPACK_PACKAGE_VENDOR}\"
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"FileDescription\" \"${PROJECT_DESCRIPTION} Installer\"
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"FileVersion\" \"v${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${CMAKE_PROJECT_VERSION_TWEAK}\"
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"InternalName\" \"${CPACK_PACKAGE_NAME} Installer\"
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"LegalCopyright\" \"${CPACK_PACKAGE_COPYRIGHT}\"
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"OriginalFilename\" \"${CPACK_PACKAGE_FILE_NAME}.exe\"
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"ProductName\" \"${CPACK_PACKAGE_NAME}\"
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"ProductVersion\" \"v${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${CMAKE_PROJECT_VERSION_TWEAK}\"
-        VIAddVersionKey /LANG=${VER_VERSION_LANG} \"Comments\" \"${CPACK_PACKAGE_DESCRIPTION}\"")
+    # Keep NSIS version metadata simple and parser-safe. CPack's NSIS generator
+    # tokenizes CPACK_NSIS_DEFINES before writing project.nsi; embedding quoted
+    # VIAddVersionKey arguments here causes NSIS to receive malformed one-argument
+    # commands. The package filename/version already carries the release identity,
+    # so avoid generating a broken installer merely for optional resource metadata.
+    set(CPACK_NSIS_DEFINES "")
 
     set(CPACK_WIX_PRODUCT_ICON "${_nsis_icon}")
     set(CPACK_WIX_UI_BANNER "${_wix_banner}")
