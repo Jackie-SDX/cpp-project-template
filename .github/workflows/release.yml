@@ -1,4 +1,164 @@
 # GitHub release workflow synchronized from the repository update archive.
 # The vcpkg revision is pinned to the repository's verified manifest baseline.
 
-"+rel,"branch":"main
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { name: "Windows MSVC x64", ext: "windows-x86_64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, nsis_generator: NSIS64 }
+          - { name: "Windows MSVC i686", ext: "windows-i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, nsis_generator: NSIS }
+          - { name: "Ubuntu GCC", ext: "linux-x86_64", os: ubuntu-24.04, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-linux-release }
+          - { name: "macOS Clang", ext: "macos-arm64", os: macos-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: arm64-osx-release }
+
+    defaults:
+      run:
+        working-directory: ./
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: "true"
+          path: project
+
+      - name: Locate MSVC environment script
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
+          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.config.environment_script }}"
+          if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
+          "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Update Ubuntu package list
+        if: runner.os == 'Linux'
+        run: sudo apt-get update
+
+      - name: Install build and packaging tools
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get install -y ninja-build rpm libwxgtk3.2-dev libgtest-dev
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            choco install ninja -y
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install ninja wxwidgets googletest
+          fi
+
+      - name: Install NSIS and WiX
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "NSIS installation failed" }
+          choco install wixtoolset -y --no-progress
+          $wixOk = $LASTEXITCODE -eq 0
+          "WIX_AVAILABLE=$wixOk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Get LLVM vcpkg triplets
+        if: runner.os == 'Windows'
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: 'Neumann-A/my-vcpkg-triplets'
+          path: './my-vcpkg-triplets'
+
+      - name: vcpkg
+        if: runner.os == 'Windows'
+        uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
+        env:
+          VCPKG_MANIFEST_MODE: OFF
+        with:
+          pkgs: wxwidgets gtest
+          triplet: ${{ matrix.config.vcpkg_triplet }}
+          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
+          cache-key: release-${{ matrix.config.name }}
+          revision: a1cae005c39be7b18ba319fced856b68d7276271
+          token: ${{ github.token }}
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.config.cc }}
+          CXX: ${{ matrix.config.cxx }}
+          RUNNER_OS: ${{ runner.os }}
+          VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
+          BUILD_TYPE: Release
+        working-directory: project
+        run: |
+          chmod a+x ./.github/scripts/*.cmake
+          cmake -P ./.github/scripts/configure.cmake
+
+      - name: Build
+        env:
+          CXX: ${{ matrix.config.cxx }}
+          RUNNER_OS: ${{ runner.os }}
+          BUILD_TYPE: Release
+        working-directory: project
+        run: cmake -P ./.github/scripts/build.cmake
+
+      - name: Run tests
+        env:
+          CC: ${{ matrix.config.cc }}
+          CXX: ${{ matrix.config.cxx }}
+          RUNNER_OS: ${{ runner.os }}
+          BUILD_TYPE: Release
+        working-directory: project
+        run: cmake -P ./.github/scripts/test.cmake
+
+      - name: Install
+        working-directory: project
+        run: cmake --install build --prefix instdir --strip --config Release
+
+      - name: Pack archive
+        working-directory: project/instdir
+        run: cmake -E tar cfv ../cpp-project-template-${{ matrix.config.ext }}.7z --format=7zip .
+
+      - name: Pack Windows installers
+        if: runner.os == 'Windows'
+        working-directory: project/build
+        shell: bash
+        run: |
+          cpack -C Release -G ${{ matrix.config.nsis_generator }}
+          if [ "${WIX_AVAILABLE:-false}" = "True" ] || [ "${WIX_AVAILABLE:-false}" = "true" ]; then
+            cpack -C Release -G WIX || echo "WiX packaging failed; continuing with NSIS/package archive."
+          fi
+
+      - name: Pack Linux packages
+        if: runner.os == 'Linux'
+        working-directory: project/build
+        run: |
+          cpack -C Release -G DEB
+          cpack -C Release -G RPM
+
+      - name: Pack macOS DMG
+        if: runner.os == 'macOS'
+        working-directory: project/build
+        run: cpack -C Release -G DragNDrop
+
+      - name: Collect packages
+        working-directory: project
+        run: |
+          mkdir -p release-assets
+          find build/package -maxdepth 1 -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' \) -exec cp -f {} release-assets/ \; || true
+          cp -f cpp-project-template-${{ matrix.config.ext }}.7z release-assets/ || true
+          test -n "$(find release-assets -maxdepth 1 -type f -print -quit)"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@f4c4b7f1a0f1b8f4fce8a9c1e4d8f1c9c8a6f8d # pinned release action
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: project/release-assets/*
