@@ -35,7 +35,7 @@ jobs:
           - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: arm64-osx }
           - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64 }
           - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86 }
-          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-e5f3f2d06430fa475feccbb34a5d61023807b854-x64 }
+          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64 }
           - { name: "Windows MinGW x64", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64 }
           - { name: "Windows MinGW i686", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86 }
 
@@ -98,11 +98,7 @@ jobs:
         id: compiler-fingerprint
         shell: bash
         run: |
-          if [[ "${{ matrix.config.name }}" == *"MinGW"* ]]; then
-            compiler_path="$(command -v gcc.exe)"
-          else
-            compiler_path="$(command -v clang.exe)"
-          fi
+          compiler_path="$(command -v "${{ matrix.config.cxx }}.exe")"
           test -n "$compiler_path"
           compiler_hash="$(sha256sum "$compiler_path" | awk '{print $1}')"
           echo "compiler_hash=$compiler_hash" >> "$GITHUB_OUTPUT"
@@ -124,7 +120,7 @@ jobs:
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Initialize vcpkg binary cache directory
         if: runner.os == 'Windows'
@@ -165,7 +161,7 @@ jobs:
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Configure
         env:
