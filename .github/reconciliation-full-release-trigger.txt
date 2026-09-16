@@ -1,0 +1,1 @@
+This marker intentionally triggers the full-release-test PR gate after the staged GitLab/GitHub packaging reconciliation passed CI and focused package smoke tests.
