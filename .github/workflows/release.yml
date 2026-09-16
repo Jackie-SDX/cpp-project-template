@@ -170,7 +170,7 @@ jobs:
           extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
           cache-key: release-${{ matrix.name }}
           disable-cache: true
-          revision: a1cae005c39be7b18ba319fced856b68d727627d
+          revision: master
           token: ${{ github.token }}
 
       - name: Save GitLab-style vcpkg binary cache
