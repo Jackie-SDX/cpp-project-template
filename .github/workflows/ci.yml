@@ -121,6 +121,8 @@ jobs:
         with:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
+          restore-keys: |
+            ${{ matrix.config.vcpkg_cache_prefix }}-
 
       - name: Initialize vcpkg binary cache directory
         if: runner.os == 'Windows'
