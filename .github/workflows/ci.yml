@@ -94,8 +94,20 @@ jobs:
         with:
           msystem: ${{ matrix.config.msys2_msystem }}
           update: false
-          path-type: inherit
+          path-type: minimal
           install: ${{ matrix.config.msys2_toolchain }}
+
+      - name: Verify MinGW toolchain
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
+        shell: pwsh
+        run: |
+          $gcc = Get-Command "${{ matrix.config.cc }}.exe" -ErrorAction Stop
+          $gxx = Get-Command "${{ matrix.config.cxx }}.exe" -ErrorAction Stop
+          Write-Host "C compiler: $($gcc.Source)"
+          Write-Host "C++ compiler: $($gxx.Source)"
+          & $gcc.Source --version
+          & $gxx.Source --version
+          & $gxx.Source -dumpmachine
 
       - name: Configure LLVM environment
         if: runner.os == 'Windows' && contains(matrix.config.name, 'LLVM')
@@ -106,6 +118,7 @@ jobs:
           $llvmRoot = Split-Path $llvmBin -Parent
           "LLVMInstallDir=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           $llvmBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & $clangClCommand.Source --version
 
       - name: Get LLVM vcpkg triplets
         if: runner.os == 'Windows'
@@ -179,7 +192,8 @@ jobs:
           VCPKG_MANIFEST_MODE: OFF
           VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/project/vcpkg_cache
           VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
-        run: .\vcpkg\vcpkg.exe install --triplet ${{ matrix.config.vcpkg_triplet }} --host-triplet ${{ matrix.config.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets wxwidgets gtest
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows
+        run: .\vcpkg\vcpkg.exe install --triplet ${{ matrix.config.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets wxwidgets gtest
 
       - name: Save MSVC vcpkg binary cache
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC') && success() && steps.msvc-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
