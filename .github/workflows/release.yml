@@ -126,12 +126,12 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
-            sudo apt-get install -y ninja-build rpm libwxgtk3.2-dev libgtest-dev
+            sudo apt-get install -y ninja-build ccache rpm libwxgtk3.2-dev libgtest-dev
           elif [ "$RUNNER_OS" = "Windows" ]; then
-            choco install ninja nsis 7zip -y --no-progress
+            choco install ninja ccache nsis 7zip -y --no-progress
             choco install wixtoolset -y --no-progress
           elif [ "$RUNNER_OS" = "macOS" ]; then
-            brew install ninja wxwidgets googletest
+            brew install ninja ccache wxwidgets googletest
           fi
 
       - name: Refresh Windows environment
@@ -298,7 +298,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build rpm libwxgtk3.2-dev libgtest-dev
+          sudo apt-get install -y ninja-build ccache rpm libwxgtk3.2-dev libgtest-dev
       - name: Configure
         env:
           CC: gcc
