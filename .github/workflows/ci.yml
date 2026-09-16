@@ -1,5 +1,6 @@
 # GitHub CI workflow synchronized from the repository update archive.
-# Windows Debug jobs remain manual to avoid expensive automatic matrix runs.
+# All matrix combinations are now eligible on push/PR so GitHub can actually
+# materialize and execute the matrix. Coverity remains manual-only.
 
 name: CI
 
@@ -21,7 +22,6 @@ jobs:
   build:
     name: ${{ matrix.config.name }} - ${{ matrix.build_type }}
     runs-on: ${{ matrix.config.os }}
-    if: matrix.build_type != 'Debug' || !contains(matrix.config.name, 'Windows') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -96,6 +96,7 @@ jobs:
         env:
           CC: ${{ matrix.config.cc }}
           CXX: ${{ matrix.config.cxx }}
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
           BUILD_TYPE: ${{ matrix.build_type }}
@@ -107,6 +108,7 @@ jobs:
       - name: Build
         env:
           CXX: ${{ matrix.config.cxx }}
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           BUILD_TYPE: ${{ matrix.build_type }}
         working-directory: project
