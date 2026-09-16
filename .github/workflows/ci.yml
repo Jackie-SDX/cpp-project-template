@@ -39,8 +39,8 @@ jobs:
           - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64 }
           - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86 }
           - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64 }
-          - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain }
-          - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain }
+          - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain, msys2_bin: mingw64\bin }
+          - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain, msys2_bin: mingw32\bin }
 
     defaults:
       run:
@@ -90,12 +90,22 @@ jobs:
 
       - name: Setup MSYS2 MinGW toolchain
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
+        id: msys2
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         with:
           msystem: ${{ matrix.config.msys2_msystem }}
           update: false
           path-type: minimal
           install: ${{ matrix.config.msys2_toolchain }}
+
+      - name: Add selected MSYS2 MinGW bin directory to PATH
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
+        shell: pwsh
+        run: |
+          $bin = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "${{ matrix.config.msys2_bin }}"
+          if (-not (Test-Path $bin)) { throw "Expected MSYS2 compiler directory not found: $bin" }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "MSYS2 compiler directory: $bin"
 
       - name: Verify MinGW toolchain
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
