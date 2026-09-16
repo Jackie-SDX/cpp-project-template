@@ -31,6 +31,11 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND "$ENV{CC}" STREQUAL "gcc" AND "$ENV{B
 	set(actual_build_type "Coverage")
 endif()
 
+set(package_toolchain_arg "")
+if (NOT "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "")
+	set(package_toolchain_arg "-D")	
+endif()
+
 if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
 	execute_process(
@@ -46,6 +51,7 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 			-D VCPKG_TARGET_TRIPLET=$ENV{VCPKG_TRIPLET}
 			-D VCPKG_HOST_TRIPLET=$ENV{VCPKG_TRIPLET}
 			-D VCPKG_MANIFEST_MODE=OFF
+			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
 			--fresh
 		RESULT_VARIABLE result
 	)
@@ -59,6 +65,7 @@ else()
 			-D CMAKE_MAKE_PROGRAM=ninja
 			-D CMAKE_C_COMPILER_LAUNCHER=ccache
 			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
 			--fresh
 		RESULT_VARIABLE result
 	)
