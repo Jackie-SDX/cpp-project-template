@@ -273,7 +273,16 @@ jobs:
         working-directory: project
         run: test -n "$(find instdir -type f -print -quit)"
 
-      - name: Resolve release version
+      - name: Determine canonical package name
+        id: package_name
+        working-directory: project
+        shell: bash
+        run: |
+          base=$(sed -n 's/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p' build/CPackConfig.cmake | head -1)
+          test -n "$base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve release version and naming
         working-directory: project
         shell: bash
         run: |
@@ -282,45 +291,20 @@ jobs:
           else
             version="$(git describe --tags --always --dirty | sed 's/^v//')"
           fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-
-      - name: Resolve canonical release naming
-        shell: bash
-        run: |
           case "$RUNNER_OS" in
-            Linux)
-              platform="linux"
-              ;;
-            Windows)
-              platform="windows"
-              ;;
-            macOS)
-              platform="macos"
-              ;;
-            *)
-              echo "Unsupported runner OS: $RUNNER_OS" >&2
-              exit 1
-              ;;
+            Linux) platform="linux" ;;
+            Windows) platform="windows" ;;
+            macOS) platform="macos" ;;
+            *) echo "Unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
           esac
-
           case "${{ matrix.arch }}" in
-            x64)
-              package_arch="x86_64"
-              ;;
-            x86)
-              package_arch="i686"
-              ;;
-            arm64)
-              package_arch="arm64"
-              ;;
-            *)
-              echo "Unsupported package architecture: ${{ matrix.arch }}" >&2
-              exit 1
-              ;;
+            x64) package_arch="x86_64" ;;
+            x86) package_arch="i686" ;;
+            arm64) package_arch="arm64" ;;
+            *) echo "Unsupported package architecture: ${{ matrix.arch }}" >&2; exit 1 ;;
           esac
-
-          prefix="cpp-project-template_${VERSION}_${platform}-${{ matrix.toolchain }}-${package_arch}"
-          echo "RELEASE_PREFIX=$prefix" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "RELEASE_PREFIX=cpp-project-template_${version}_${platform}-${{ matrix.toolchain }}-${package_arch}" >> "$GITHUB_ENV"
 
       - name: Package Windows
         if: runner.os == 'Windows'
@@ -512,70 +496,44 @@ jobs:
           path: release-assets
       - name: Verify release inventory
         working-directory: release-assets
+        shell: bash
         run: |
-          expected=(
-            cpp-project-template_*.zip cpp-project-template_*.tar.gz
-            cpp-project-template_*_windows-msvc-x86_64.zip
-            cpp-project-template_*_windows-msvc-x86_64.7z
-            cpp-project-template_*_windows-msvc-x86_64_nsis.exe
-            cpp-project-template_*_windows-msvc-x86_64_wix.msi
-            cpp-project-template_*_windows-msvc-i686.zip
-            cpp-project-template_*_windows-msvc-i686.7z
-            cpp-project-template_*_windows-msvc-i686_nsis.exe
-            cpp-project-template_*_windows-msvc-i686_wix.msi
-            cpp-project-template_*_windows-mingw-x86_64.zip
-            cpp-project-template_*_windows-mingw-x86_64.7z
-            cpp-project-template_*_windows-mingw-x86_64_nsis.exe
-            cpp-project-template_*_windows-mingw-x86_64_wix.msi
-            cpp-project-template_*_windows-mingw-i686.zip
-            cpp-project-template_*_windows-mingw-i686.7z
-            cpp-project-template_*_windows-mingw-i686_nsis.exe
-            cpp-project-template_*_windows-mingw-i686_wix.msi
-            cpp-project-template_*_windows-llvm-x86_64.zip
-            cpp-project-template_*_windows-llvm-x86_64.7z
-            cpp-project-template_*_windows-llvm-x86_64_nsis.exe
-            cpp-project-template_*_windows-llvm-x86_64_wix.msi
-            cpp-project-template_*_windows-llvm-i686.zip
-            cpp-project-template_*_windows-llvm-i686.7z
-            cpp-project-template_*_windows-llvm-i686_nsis.exe
-            cpp-project-template_*_windows-llvm-i686_wix.msi
-            cpp-project-template_*_linux-gcc-x86_64.zip
-            cpp-project-template_*_linux-gcc-x86_64.7z
-            cpp-project-template_*_linux-gcc-x86_64.tar.gz
-            cpp-project-template_*_linux-gcc-x86_64.deb
-            cpp-project-template_*_linux-gcc-x86_64.rpm
-            cpp-project-template_*_linux-gcc-arm64.zip
-            cpp-project-template_*_linux-gcc-arm64.7z
-            cpp-project-template_*_linux-gcc-arm64.tar.gz
-            cpp-project-template_*_linux-gcc-arm64.deb
-            cpp-project-template_*_linux-gcc-arm64.rpm
-            cpp-project-template_*_macos-clang-arm64.zip
-            cpp-project-template_*_macos-clang-arm64.7z
-            cpp-project-template_*_macos-clang-arm64.tar.gz
-            cpp-project-template_*_macos-clang-arm64.dmg
-            cpp-project-template_*_source.zip
-            cpp-project-template_*_source.tar.gz
+          shopt -s nullglob
+          version="${GITHUB_REF_NAME#v}"
+          expected_source=(
+            "cpp-project-template_${version}_source.zip"
+            "cpp-project-template_${version}_source.tar.gz"
           )
 
-          actual=(* )
-          shopt -s nullglob
-          actual=(*)
-          unset 'actual[@]'
-          files=(*)
-
-          source_zip=cpp-project-template_*_source.zip
-          source_tar=cpp-project-template_*_source.tar.gz
-          shopt -s nullglob
-          source_files=( $source_zip $source_tar )
-          test "${#source_files[@]}" -eq 2
+          source_files=("${expected_source[@]}")
+          for f in "${source_files[@]}"; do
+            test -f "$f" || { echo "Missing source artifact: $f"; exit 1; }
+          done
 
           package_files=()
           for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi; do
-            [[ -e "$f" ]] && package_files+=("$f")
+            [[ -f "$f" ]] && package_files+=("$f")
           done
 
-          test "${#package_files[@]}" -eq 30 || { echo "Unexpected package artifact count: ${#package_files[@]}"; printf '%s\n' "${package_files[@]}"; exit 1; }
-          test "${#source_files[@]}" -eq 2 || { echo "Unexpected source artifact count: ${#source_files[@]}"; exit 1; }
+          test "${#package_files[@]}" -eq 30 || {
+            echo "Unexpected package artifact count: ${#package_files[@]}"
+            printf '%s\n' "${package_files[@]}"
+            exit 1
+          }
+
+          expected_package_count=30
+          test "${#package_files[@]}" -eq "$expected_package_count"
+
+          for f in "${package_files[@]}"; do
+            case "$f" in
+              cpp-project-template_${version}_windows-msvc-x86_64.zip|cpp-project-template_${version}_windows-msvc-x86_64.7z|cpp-project-template_${version}_windows-msvc-x86_64_nsis.exe|cpp-project-template_${version}_windows-msvc-x86_64_wix.msi|cpp-project-template_${version}_windows-msvc-i686.zip|cpp-project-template_${version}_windows-msvc-i686.7z|cpp-project-template_${version}_windows-msvc-i686_nsis.exe|cpp-project-template_${version}_windows-msvc-i686_wix.msi|cpp-project-template_${version}_windows-mingw-x86_64.zip|cpp-project-template_${version}_windows-mingw-x86_64.7z|cpp-project-template_${version}_windows-mingw-x86_64_nsis.exe|cpp-project-template_${version}_windows-mingw-x86_64_wix.msi|cpp-project-template_${version}_windows-mingw-i686.zip|cpp-project-template_${version}_windows-mingw-i686.7z|cpp-project-template_${version}_windows-mingw-i686_nsis.exe|cpp-project-template_${version}_windows-mingw-i686_wix.msi|cpp-project-template_${version}_windows-llvm-x86_64.zip|cpp-project-template_${version}_windows-llvm-x86_64.7z|cpp-project-template_${version}_windows-llvm-x86_64_nsis.exe|cpp-project-template_${version}_windows-llvm-x86_64_wix.msi|cpp-project-template_${version}_windows-llvm-i686.zip|cpp-project-template_${version}_windows-llvm-i686.7z|cpp-project-template_${version}_windows-llvm-i686_nsis.exe|cpp-project-template_${version}_windows-llvm-i686_wix.msi|cpp-project-template_${version}_linux-gcc-x86_64.zip|cpp-project-template_${version}_linux-gcc-x86_64.7z|cpp-project-template_${version}_linux-gcc-x86_64.tar.gz|cpp-project-template_${version}_linux-gcc-x86_64.deb|cpp-project-template_${version}_linux-gcc-x86_64.rpm|cpp-project-template_${version}_linux-gcc-arm64.zip|cpp-project-template_${version}_linux-gcc-arm64.7z|cpp-project-template_${version}_linux-gcc-arm64.tar.gz|cpp-project-template_${version}_linux-gcc-arm64.deb|cpp-project-template_${version}_linux-gcc-arm64.rpm|cpp-project-template_${version}_macos-clang-arm64.zip|cpp-project-template_${version}_macos-clang-arm64.7z|cpp-project-template_${version}_macos-clang-arm64.tar.gz|cpp-project-template_${version}_macos-clang-arm64.dmg)
+                ;;
+              *)
+                echo "Unexpected release artifact name: $f"
+                exit 1
+                ;;
+            esac
+          done
       - name: Write global SHA256SUMS
         working-directory: release-assets
         run: |
