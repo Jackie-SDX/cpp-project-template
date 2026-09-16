@@ -108,7 +108,7 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: microsoft/vcpkg
-          ref: master
+          ref: ${{ env.VCPKG_GIT_REF }}
           path: vcpkg
 
       - name: Bootstrap vcpkg
@@ -145,7 +145,6 @@ jobs:
 
       - name: Build
         env:
-          CC: ${{ matrix.config.cc }}
           CXX: ${{ matrix.config.cxx }}
           ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
