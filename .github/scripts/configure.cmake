@@ -31,8 +31,24 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND "$ENV{CC}" STREQUAL "gcc" AND "$ENV{B
 	set(actual_build_type "Coverage")
 endif()
 
+set(package_toolchain_arg "")
+if (NOT "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "")
+	set(package_toolchain_arg "-D")	
+endif()
+
 if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
+	set(llvm_x86_target_args)
+	if ("$ENV{VCPKG_TRIPLET}" STREQUAL "x86-win-llvm")
+		# The upstream LLVM overlay triplet chainloads a shared toolchain, but
+		# CMake's initial clang-cl compiler probe on current Windows runners can
+		# still select the host x64 linker target. Pass the documented clang-cl
+		# spelling that forwards the target option to the Clang driver.
+		list(APPEND llvm_x86_target_args
+			-D CMAKE_C_FLAGS_INIT=/clang:--target=i686-pc-windows-msvc
+			-D CMAKE_CXX_FLAGS_INIT=/clang:--target=i686-pc-windows-msvc
+		)
+	endif()
 	execute_process(
 		COMMAND cmake
 			-S .
@@ -46,6 +62,8 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 			-D VCPKG_TARGET_TRIPLET=$ENV{VCPKG_TRIPLET}
 			-D VCPKG_HOST_TRIPLET=$ENV{VCPKG_TRIPLET}
 			-D VCPKG_MANIFEST_MODE=OFF
+			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
+			${llvm_x86_target_args}
 			--fresh
 		RESULT_VARIABLE result
 	)
@@ -59,6 +77,7 @@ else()
 			-D CMAKE_MAKE_PROGRAM=ninja
 			-D CMAKE_C_COMPILER_LAUNCHER=ccache
 			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
 			--fresh
 		RESULT_VARIABLE result
 	)

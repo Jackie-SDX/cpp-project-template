@@ -1,0 +1,192 @@
+name: Windows ARM64 Package Smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - reconcile/gitlab-github-parity
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-arm64-package-smoke:
+    name: Windows MSVC ARM64 packaging smoke
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref == 'reconcile/gitlab-github-parity'
+    runs-on: windows-11-arm
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          submodules: true
+          fetch-depth: 0
+          path: project
+
+      - name: Inspect runner architecture
+        run: |
+          Write-Host "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
+          Write-Host "PROCESSOR_IDENTIFIER=$env:PROCESSOR_IDENTIFIER"
+          if ($env:PROCESSOR_ARCHITECTURE -notmatch 'ARM64') {
+            throw "Expected a native ARM64 Windows runner"
+          }
+
+      - name: Install packaging dependencies
+        run: |
+          choco install ninja ccache nsis 7zip wixtoolset -y --no-progress
+          if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
+            Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+            refreshenv
+          }
+          ninja --version
+          7z | Select-Object -First 1
+
+      - name: Locate native ARM64 Visual Studio
+        run: |
+          $vswhere = (Get-Command vswhere.exe -ErrorAction SilentlyContinue).Source
+          if (-not $vswhere) {
+            $candidates = @(
+              "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe",
+              "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe",
+              "$env:ProgramData\chocolatey\bin\vswhere.exe"
+            )
+            $vswhere = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $vswhere) { throw "vswhere.exe not found on the runner PATH or known install locations" }
+          Write-Host "Using VSWhere: $vswhere"
+          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
+          if (-not $vsRoot) { throw "No Visual Studio installation with native ARM64 C++ tools was found" }
+          $vsRoot = ($vsRoot | Select-Object -First 1).Trim()
+          $vsDevCmd = Join-Path $vsRoot 'Common7\Tools\VsDevCmd.bat'
+          if (-not (Test-Path $vsDevCmd)) { throw "VsDevCmd.bat not found at $vsDevCmd" }
+          $wrapper = Join-Path $env:GITHUB_WORKSPACE 'vs-arm64-env.bat'
+          "@echo off`r`ncall `"$vsDevCmd`" -arch=arm64 -host_arch=arm64`r`n" | Set-Content -Path $wrapper -Encoding ascii
+          "ENVIRONMENT_SCRIPT=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Using $vsDevCmd"
+
+      - name: Restore GitLab-style vcpkg binary cache
+        id: vcpkg-binary-cache-restore
+        uses: actions/cache/restore@v5
+        with:
+          path: project/vcpkg_cache
+          key: windows-arm64-${{ hashFiles('project/vcpkg.json') }}-Release
+          restore-keys: |
+            windows-arm64-
+
+      - name: Bootstrap and install vcpkg
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path vcpkg_cache | Out-Null
+          $manifest = Get-Content vcpkg.json -Raw | ConvertFrom-Json
+          if (-not $manifest.'builtin-baseline') { throw 'vcpkg.json must provide builtin-baseline for the ARM64 smoke' }
+          $vcpkgRef = $manifest.'builtin-baseline'
+          if (Test-Path ..\vcpkg) { Remove-Item -Recurse -Force ..\vcpkg }
+          git init ..\vcpkg
+          git -C ..\vcpkg remote add origin https://github.com/microsoft/vcpkg.git
+          git -C ..\vcpkg fetch --depth 1 --no-tags origin $vcpkgRef
+          if ($LASTEXITCODE -ne 0) { throw "Failed to fetch vcpkg baseline $vcpkgRef" }
+          git -C ..\vcpkg checkout FETCH_HEAD
+          ..\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          $env:VCPKG_MANIFEST_MODE = 'ON'
+          $env:VCPKG_BINARY_SOURCES = "clear;files,$env:GITHUB_WORKSPACE\project\vcpkg_cache,readwrite"
+          ..\vcpkg\vcpkg install --triplet arm64-windows
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
+
+      - name: Save GitLab-style vcpkg binary cache
+        if: success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: project/vcpkg_cache
+          key: windows-arm64-${{ hashFiles('project/vcpkg.json') }}-Release
+
+      - name: Configure
+        working-directory: project
+        env:
+          RUNNER_OS: Windows
+          BUILD_TYPE: Release
+          PACKAGE_TOOLCHAIN: msvc
+          VCPKG_TRIPLET: arm64-windows
+        run: cmake -P ./.github/scripts/configure.cmake
+
+      - name: Build
+        working-directory: project
+        env:
+          RUNNER_OS: Windows
+          BUILD_TYPE: Release
+          CXX: cl
+        run: cmake -P ./.github/scripts/build.cmake
+
+      - name: Test
+        working-directory: project
+        env:
+          RUNNER_OS: Windows
+          BUILD_TYPE: Release
+          CC: cl
+          CXX: cl
+        run: cmake -P ./.github/scripts/test.cmake
+
+      - name: Install
+        working-directory: project
+        run: cmake --install build --prefix instdir --strip --config Release
+
+      - name: Verify install tree
+        working-directory: project
+        run: |
+          $files = Get-ChildItem -Recurse -File instdir
+          if (-not $files) { throw 'Install tree is empty' }
+          $exe = Get-ChildItem -Recurse -File instdir -Filter '*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'No executable found in ARM64 install tree' }
+          & dumpbin.exe /headers $exe.FullName 2>&1 | Select-String 'machine \(ARM64\)' | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0) { throw 'ARM64 machine header not observed' }
+
+      - name: Package Windows
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Compress-Archive -Path instdir\* -DestinationPath release-assets\windows-msvc-arm64.zip -Force
+          $base = (Select-String -Path build\CPackConfig.cmake -Pattern 'CPACK_PACKAGE_FILE_NAME "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if (-not $base) { throw 'Could not determine canonical CPack package name' }
+          Push-Location build
+          cpack --config CPackConfig.cmake -C Release -G NSIS64
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.exe")) { throw 'NSIS64 package generation failed' }
+          Copy-Item "package\$base.exe" "..\release-assets\windows-msvc-arm64.exe" -Force
+          cpack --config CPackConfig.cmake -C Release -G 7Z
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.7z")) { throw '7Z package generation failed' }
+          Copy-Item "package\$base.7z" "..\release-assets\windows-msvc-arm64.7z" -Force
+          cpack --config CPackConfig.cmake -C Release -G WIX
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.msi")) { throw 'MSI package generation failed' }
+          Copy-Item "package\$base.msi" "..\release-assets\windows-msvc-arm64.msi" -Force
+          Pop-Location
+          Get-ChildItem release-assets
+
+      - name: Verify exact artifacts and checksums
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = @(
+            'windows-msvc-arm64.zip',
+            'windows-msvc-arm64.7z',
+            'windows-msvc-arm64.exe',
+            'windows-msvc-arm64.msi'
+          )
+          foreach ($file in $expected) {
+            if (-not (Test-Path "release-assets\$file")) { throw "Missing release artifact: $file" }
+          }
+          Get-FileHash release-assets\*.zip,release-assets\*.7z,release-assets\*.exe,release-assets\*.msi -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLowerInvariant(), $_.Path.Replace((Get-Location).Path + '\', '').Replace('\', '/') } |
+            Set-Content release-assets\SHA256SUMS
+          Get-ChildItem release-assets
+
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-arm64-package-smoke
+          path: project/release-assets/*
+          if-no-files-found: error

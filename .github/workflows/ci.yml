@@ -1,6 +1,5 @@
 # GitHub CI workflow synchronized from the repository update archive.
-# All matrix combinations are now eligible on push/PR so GitHub can actually
-# materialize and execute the matrix. Coverity remains manual-only.
+# All matrix combinations are eligible on push/PR. Coverity remains manual-only.
 
 name: CI
 
@@ -17,6 +16,9 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  CCACHE_DIR: ${{ github.workspace }}/project/.ccache
 
 jobs:
   build:
@@ -46,6 +48,15 @@ jobs:
         with:
           submodules: "true"
           path: project
+
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-
 
       - name: Locate MSVC environment script
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC')
@@ -79,18 +90,37 @@ jobs:
           repository: 'Neumann-A/my-vcpkg-triplets'
           path: './my-vcpkg-triplets'
 
+      - name: Restore GitLab-style vcpkg binary cache
+        if: runner.os == 'Windows'
+        id: vcpkg-binary-cache-restore
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/vcpkg_cache
+          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+          restore-keys: |
+            windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-
+
       - name: vcpkg
         if: runner.os == 'Windows'
         uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
         env:
           VCPKG_MANIFEST_MODE: OFF
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
         with:
           pkgs: wxwidgets gtest
           triplet: ${{ matrix.config.vcpkg_triplet }}
           extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
           cache-key: ${{ matrix.config.name }}-${{ matrix.build_type }}
+          disable-cache: true
           revision: a1cae005c39be7b18ba319fced856b68d7276271
           token: ${{ github.token }}
+
+      - name: Save GitLab-style vcpkg binary cache
+        if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/vcpkg_cache
+          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Configure
         env:
@@ -101,9 +131,7 @@ jobs:
           VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
           BUILD_TYPE: ${{ matrix.build_type }}
         working-directory: project
-        run: |
-          chmod a+x ./.github/scripts/*.cmake
-          cmake -P ./.github/scripts/configure.cmake
+        run: cmake -P ./.github/scripts/configure.cmake
 
       - name: Build
         env:
@@ -114,6 +142,13 @@ jobs:
         working-directory: project
         run: cmake -P ./.github/scripts/build.cmake
 
+      - name: Save compiler cache
+        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+
       - name: Run tests
         env:
           CC: ${{ matrix.config.cc }}
@@ -122,6 +157,33 @@ jobs:
           BUILD_TYPE: ${{ matrix.build_type }}
         working-directory: project
         run: cmake -P ./.github/scripts/test.cmake
+
+      - name: Packaging smoke test
+        if: runner.os == 'Linux' && matrix.build_type == 'Release'
+        working-directory: project
+        env:
+          PACKAGE_TOOLCHAIN: gcc
+        run: |
+          cmake --install build --prefix instdir --strip --config Release
+          test -n "$(find instdir -type f -print -quit)"
+          mkdir -p package-smoke
+          (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.zip" --format=zip .)
+          (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.7z" --format=7zip .)
+          (cd instdir && tar -czf "../package-smoke/linux-gcc-x64.tar.gz" .)
+          cpack --config build/CPackConfig.cmake -C Release -G DEB
+          cpack --config build/CPackConfig.cmake -C Release -G RPM
+          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
+          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
+          test -n "$deb"
+          test -n "$rpm"
+          cp "$deb" package-smoke/linux-gcc-x64.deb
+          cp "$rpm" package-smoke/linux-gcc-x64.rpm
+          test -f package-smoke/linux-gcc-x64.zip
+          test -f package-smoke/linux-gcc-x64.7z
+          test -f package-smoke/linux-gcc-x64.tar.gz
+          test -f package-smoke/linux-gcc-x64.deb
+          test -f package-smoke/linux-gcc-x64.rpm
+          sha256sum package-smoke/* > package-smoke/SHA256SUMS
 
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux' && matrix.build_type == 'Debug'
@@ -135,25 +197,3 @@ jobs:
         with:
           root: project
           coveralls-send: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  coverity:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          submodules: "true"
-          path: project
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libwxgtk3.2-dev libgtest-dev
-      - name: Configure
-        working-directory: project
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-      - name: Coverity scan
-        uses: vapier/coverity-scan-action@1b6fd4eaba6651aa354c9ea7f48caa1710b4e12e # v1
-        with:
-          email: ${{ secrets.COVERITY_SCAN_EMAIL }}
-          token: ${{ secrets.COVERITY_SCAN_TOKEN }}
-          working-directory: project/build
-          command: ninja
