@@ -97,6 +97,14 @@ jobs:
           base=$(sed -n 's/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p' build/CPackConfig.cmake | head -1)
           test -n "$base"
           echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: Inspect generated CPack config
+        if: always()
+        working-directory: project
+        shell: pwsh
+        run: |
+          Write-Host '--- generated build/CPackConfig.cmake lines 30-60 ---'
+          $lines = Get-Content build\CPackConfig.cmake
+          $lines[29..59]
       - name: Package Windows
         working-directory: project
         shell: pwsh
@@ -107,7 +115,13 @@ jobs:
           Compress-Archive -Path instdir\* -DestinationPath "release-assets\windows-mingw-x64.zip" -Force
           Push-Location build
           cpack --config CPackConfig.cmake -C Release -G NSIS64
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) {
+            if (Test-Path "_CPack_Packages\win64\NSIS64\NSISOutput.log") {
+              Write-Host '--- NSISOutput.log ---'
+              Get-Content "_CPack_Packages\win64\NSIS64\NSISOutput.log"
+            }
+            throw "NSIS package generation failed"
+          }
           Copy-Item "package\$env:BASE.exe" "..\release-assets\windows-mingw-x64.exe" -Force
           cpack --config CPackConfig.cmake -C Release -G 7Z
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
