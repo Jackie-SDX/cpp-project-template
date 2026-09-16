@@ -125,13 +125,13 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux' && matrix.build_type == 'Debug'
-        uses: codecov/codecov-action@e28ff129e5458c3803b5a0b916302891229196b3 # v4.5.0
+        uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673 # v4.5.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Coveralls
         if: runner.os == 'Linux' && matrix.build_type == 'Debug'
-        uses: threeal/gcovr-action@b1c128180973589e608f265409361b22f94341f3 # v1.1.0
+        uses: threeal/gcovr-action@9e51adaccda85662e99d0c29087f99fcf976c8dc # v1.1.0
         with:
           root: project
           coveralls-send: true
