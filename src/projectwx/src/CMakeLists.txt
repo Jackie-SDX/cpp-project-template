@@ -6,14 +6,18 @@
 # https://forums.wxwidgets.org/viewtopic.php?t=31482
 # https://docs.wxwidgets.org/2.8/wx_librarieslist.html
 
-find_package(wxWidgets REQUIRED
-	COMPONENTS
-	core
-	base
-	adv)
+if (WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64)$")
+	find_package(wxWidgets CONFIG REQUIRED)
+else()
+	find_package(wxWidgets REQUIRED
+		COMPONENTS
+		core
+		base
+		adv)
 
-# Bring the headers into the project
-include(${wxWidgets_USE_FILE})
+	# Bring the headers into the project
+	include(${wxWidgets_USE_FILE})
+endif()
 
 file(GLOB SRC_FILES "*.cpp")
 
@@ -36,10 +40,16 @@ target_compile_definitions(${PROJECT_WX_NAME} PUBLIC
 target_include_directories(${PROJECT_WX_NAME} PUBLIC "${PROJECT_BINARY_DIR}")
 
 target_include_directories(${PROJECT_WX_NAME} PUBLIC "${PROJECT_LIB_DIR}/src")
-
 target_link_libraries(${PROJECT_WX_NAME} PUBLIC ${PROJECT_LIB_NAME})
 
-target_link_libraries(${PROJECT_WX_NAME} PUBLIC ${wxWidgets_LIBRARIES})
+if (WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64)$")
+	target_link_libraries(${PROJECT_WX_NAME} PUBLIC
+		wx::core
+		wx::base
+		wx::adv)
+else()
+	target_link_libraries(${PROJECT_WX_NAME} PUBLIC ${wxWidgets_LIBRARIES})
+endif()
 
 # Static compile on Windows for Release - inspired by: https://stackoverflow.com/a/24671474/3049315
 # only makes sense for single-target generators, like Makefiles, see: https://stackoverflow.com/a/59314670/3049315
