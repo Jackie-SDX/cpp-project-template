@@ -1,0 +1,12 @@
+# Conan 2 dependency manifest. vcpkg remains the CI default for now.
+
+[requires]
+wxwidgets/[>=3.2 <4]
+gtest/[>=1.14 <2]
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[layout]
+cmake_layout
