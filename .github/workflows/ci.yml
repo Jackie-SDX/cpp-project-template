@@ -126,6 +126,11 @@ jobs:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
 
+      - name: Initialize vcpkg binary cache directory
+        if: runner.os == 'Windows'
+        shell: bash
+        run: mkdir -p project/vcpkg_cache
+
       - name: Checkout vcpkg
         if: runner.os == 'Windows'
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
