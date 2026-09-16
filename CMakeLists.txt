@@ -2,11 +2,6 @@
 ### C++ Project Template ###
 ############################
 
-# Version guard
-# 3.5 required for the environment variable CMAKE_EXPORT_COMPILE_COMMANDS
-# 3.17 for CPACK_NSIS_MUI_HEADERIMAGE
-# 3.18 for CPACK_NSIS_MANIFEST_DPI_AWARE
-# 3.21 for cmake-presets version 3
 cmake_minimum_required (VERSION 3.21)
 
 # Do not allow in-source builds.
@@ -15,6 +10,16 @@ if(CMAKE_CURRENT_BINARY_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 option(BUILD_SOURCE "Build primary libraries and executables." ON)
+
+# CMP0091 controls whether CMAKE_MSVC_RUNTIME_LIBRARY is honored. It must be
+# NEW before the first project()/enable_language() call for MSVC projects.
+if(POLICY CMP0091)
+	cmake_policy(SET CMP0091 NEW)
+endif()
+
+# Keep the MSVC runtime consistent with x*-windows-static vcpkg triplets.
+# This is ignored by compilers that do not target the MSVC ABI.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 set(PROJECT_LANGUAGES NONE)
 if(${BUILD_SOURCE})
@@ -54,11 +59,6 @@ configure_file("${SOURCE_DIR}/config.h.in" config.h)
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard to use")
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Keep the MSVC runtime consistent with the static Windows vcpkg triplets.
-if(MSVC)
-	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
