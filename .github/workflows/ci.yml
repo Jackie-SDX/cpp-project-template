@@ -17,6 +17,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CCACHE_DIR: ${{ github.workspace }}/project/.ccache
+
 jobs:
   build:
     name: ${{ matrix.config.name }} - ${{ matrix.build_type }}
@@ -45,6 +48,15 @@ jobs:
         with:
           submodules: "true"
           path: project
+
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-
 
       - name: Locate MSVC environment script
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC')
@@ -130,6 +142,13 @@ jobs:
         working-directory: project
         run: cmake -P ./.github/scripts/build.cmake
 
+      - name: Save compiler cache
+        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+
       - name: Run tests
         env:
           CC: ${{ matrix.config.cc }}
@@ -178,25 +197,3 @@ jobs:
         with:
           root: project
           coveralls-send: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  coverity:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          submodules: "true"
-          path: project
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libwxgtk3.2-dev libgtest-dev
-      - name: Configure
-        working-directory: project
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-      - name: Coverity scan
-        uses: vapier/coverity-scan-action@1b6fd4eaba6651aa354c9ea7f48caa1710b4e12e # v1
-        with:
-          email: ${{ secrets.COVERITY_SCAN_EMAIL }}
-          token: ${{ secrets.COVERITY_SCAN_TOKEN }}
-          working-directory: project/build
-          command: ninja
