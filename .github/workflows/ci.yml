@@ -35,9 +35,9 @@ jobs:
           - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: arm64-osx }
           - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64 }
           - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86 }
-          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64 }
-          - { name: "Windows MinGW x64", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64 }
-          - { name: "Windows MinGW i686", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86 }
+          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64 }
+          - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain }
+          - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain }
 
     defaults:
       run:
@@ -85,6 +85,27 @@ jobs:
             brew install ninja ccache wxwidgets googletest
           fi
 
+      - name: Setup MSYS2 MinGW toolchain
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: ${{ matrix.config.msys2_msystem }}
+          update: false
+          path-type: inherit
+          install: ${{ matrix.config.msys2_toolchain }}
+
+      - name: Configure LLVM environment
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'LLVM')
+        shell: pwsh
+        run: |
+          $llvmRoot = "${env:ProgramFiles}\LLVM"
+          $clangCl = Join-Path $llvmRoot "bin\clang-cl.exe"
+          if (-not (Test-Path $clangCl)) { throw "LLVM clang-cl was not found at $clangCl" }
+          "LLVMInstallDir=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$llvmRoot\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "CC=clang-cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CXX=clang-cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Get LLVM vcpkg triplets
         if: runner.os == 'Windows'
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -98,10 +119,18 @@ jobs:
         id: compiler-fingerprint
         shell: bash
         run: |
-          compiler_path="$(command -v "${{ matrix.config.cxx }}.exe")"
-          test -n "$compiler_path"
-          compiler_hash="$(sha256sum "$compiler_path" | awk '{print $1}')"
+          c_compiler="${{ matrix.config.cc }}.exe"
+          cxx_compiler="${{ matrix.config.cxx }}.exe"
+          c_path="$(command -v "$c_compiler")"
+          cxx_path="$(command -v "$cxx_compiler")"
+          test -n "$c_path"
+          test -n "$cxx_path"
+          c_hash="$(sha256sum "$c_path" | awk '{print $1}')"
+          cxx_hash="$(sha256sum "$cxx_path" | awk '{print $1}')"
+          compiler_hash="$(printf '%s\n%s\n' "$c_hash" "$cxx_hash" | sha256sum | awk '{print $1}')"
           echo "compiler_hash=$compiler_hash" >> "$GITHUB_OUTPUT"
+          echo "C compiler: $c_path"
+          echo "C++ compiler: $cxx_path"
           echo "Compiler fingerprint: $compiler_hash"
 
       - name: Restore MSVC vcpkg binary cache
@@ -149,7 +178,7 @@ jobs:
           VCPKG_MANIFEST_MODE: OFF
           VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/project/vcpkg_cache
           VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
-        run: .\vcpkg\vcpkg.exe install --triplet ${{ matrix.config.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets wxwidgets gtest
+        run: .\vcpkg\vcpkg.exe install --triplet ${{ matrix.config.vcpkg_triplet }} --host-triplet ${{ matrix.config.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets wxwidgets gtest
 
       - name: Save MSVC vcpkg binary cache
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC') && success() && steps.msvc-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
@@ -167,8 +196,8 @@ jobs:
 
       - name: Configure
         env:
-          CC: ${{ matrix.config.cc }}
-          CXX: ${{ matrix.config.cxx }}
+          CC: ${{ env.CC || matrix.config.cc }}
+          CXX: ${{ env.CXX || matrix.config.cxx }}
           ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
@@ -178,7 +207,7 @@ jobs:
 
       - name: Build
         env:
-          CXX: ${{ matrix.config.cxx }}
+          CXX: ${{ env.CXX || matrix.config.cxx }}
           ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           RUNNER_OS: ${{ runner.os }}
           BUILD_TYPE: ${{ matrix.build_type }}
@@ -194,8 +223,8 @@ jobs:
 
       - name: Run tests
         env:
-          CC: ${{ matrix.config.cc }}
-          CXX: ${{ matrix.config.cxx }}
+          CC: ${{ env.CC || matrix.config.cc }}
+          CXX: ${{ env.CXX || matrix.config.cxx }}
           RUNNER_OS: ${{ runner.os }}
           BUILD_TYPE: ${{ matrix.build_type }}
         working-directory: project
