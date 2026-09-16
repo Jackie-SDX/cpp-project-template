@@ -44,14 +44,20 @@ jobs:
 
       - name: Locate native ARM64 Visual Studio
         run: |
-          $candidates = @(
-            "$env:ProgramFiles(x86)\Microsoft Visual Studio\Installer\vswhere.exe",
-            "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe"
-          )
-          $vswhere = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $vswhere) { throw "vswhere.exe not found" }
+          $vswhere = (Get-Command vswhere.exe -ErrorAction SilentlyContinue).Source
+          if (-not $vswhere) {
+            $candidates = @(
+              "$env:ProgramFiles(x86)\Microsoft Visual Studio\Installer\vswhere.exe",
+              "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe",
+              "$env:ProgramData\chocolatey\bin\vswhere.exe"
+            )
+            $vswhere = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $vswhere) { throw "vswhere.exe not found on the runner PATH or known install locations" }
+          Write-Host "Using VSWhere: $vswhere"
           $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
           if (-not $vsRoot) { throw "No Visual Studio installation with native ARM64 C++ tools was found" }
+          $vsRoot = ($vsRoot | Select-Object -First 1).Trim()
           $vsDevCmd = Join-Path $vsRoot 'Common7\Tools\VsDevCmd.bat'
           if (-not (Test-Path $vsDevCmd)) { throw "VsDevCmd.bat not found at $vsDevCmd" }
           $wrapper = Join-Path $env:GITHUB_WORKSPACE 'vs-arm64-env.bat'
