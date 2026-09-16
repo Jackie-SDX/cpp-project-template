@@ -291,7 +291,7 @@ jobs:
           ls -la release-assets
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43684ab02 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ matrix.name }}
           path: project/release-assets/*
@@ -351,7 +351,7 @@ jobs:
           sha256sum release-assets/* > release-assets/SHA256SUMS
           sha256sum -c release-assets/SHA256SUMS
       - name: Upload smoke artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43684ab02 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-pr-linux-gcc-x64-smoke
           path: release-assets/*
@@ -374,7 +374,7 @@ jobs:
           git archive --format=zip --prefix="$prefix/" HEAD -o "$prefix-source.zip"
           git archive --format=tar.gz --prefix="$prefix/" HEAD -o "$prefix-source.tar.gz"
       - name: Upload source artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43684ab02 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-source
           path: |
