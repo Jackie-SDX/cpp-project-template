@@ -121,7 +121,6 @@ elseif(APPLE)
     set(MACOSX_BUNDLE_ICON_FILE "${PACKAGING_DIR}/apple/icon.icns")
     set_source_files_properties("${PACKAGING_DIR}/apple/icon.icns" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     set(CPACK_DMG_VOLUME_NAME "${PROJECT_NAME}")
-    set(CPACK_DMG_BACKGROUND_IMAGE "${PACKAGING_DIR}/apple/icon.png")
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(RPMBUILD_PATH rpmbuild)
