@@ -196,7 +196,7 @@ jobs:
           token: ${{ github.token }}
 
       - name: Save GitLab-style vcpkg binary cache
-        if: runner.os == 'Windows' && github.event_name != 'pull_request'
+        if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: project/vcpkg_cache
