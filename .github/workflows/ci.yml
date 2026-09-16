@@ -19,6 +19,8 @@ permissions:
 
 env:
   CCACHE_DIR: ${{ github.workspace }}/project/.ccache
+  VCPKG_GIT_REF: master
+  MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
 
 jobs:
   build:
@@ -31,11 +33,11 @@ jobs:
         config:
           - { name: "Ubuntu GCC", os: ubuntu-24.04, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-linux }
           - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: arm64-osx }
-          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static }
-          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static }
-          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: x64-win-llvm }
-          - { name: "Windows MinGW x64", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-mingw-dynamic }
-          - { name: "Windows MinGW i686", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x86-mingw-dynamic }
+          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64 }
+          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86 }
+          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-e5f3f2d06430fa475feccbb34a5d61023807b854-x64 }
+          - { name: "Windows MinGW x64", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64 }
+          - { name: "Windows MinGW i686", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86 }
 
     defaults:
       run:
@@ -88,6 +90,7 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: 'Neumann-A/my-vcpkg-triplets'
+          ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
           path: './my-vcpkg-triplets'
 
       - name: Restore GitLab-style vcpkg binary cache
@@ -96,9 +99,9 @@ jobs:
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
           restore-keys: |
-            windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-
+            ${{ matrix.config.vcpkg_cache_prefix }}-
 
       - name: vcpkg
         if: runner.os == 'Windows'
@@ -120,7 +123,7 @@ jobs:
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-${{ matrix.config.vcpkg_triplet }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Configure
         env:
