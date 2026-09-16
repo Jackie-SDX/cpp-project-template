@@ -33,11 +33,11 @@ jobs:
         config:
           - { name: "Ubuntu GCC", os: ubuntu-24.04, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-linux }
           - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: arm64-osx }
-          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-msvc-x64 }
-          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-msvc-x86 }
-          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-x64-${{ env.MY_VCPKG_TRIPLETS_COMMIT }} }
-          - { name: "Windows MinGW x64", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-x64 }
-          - { name: "Windows MinGW i686", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-x86 }
+          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64 }
+          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86 }
+          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-e5f3f2d06430fa475feccbb34a5d61023807b854-x64 }
+          - { name: "Windows MinGW x64", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64 }
+          - { name: "Windows MinGW i686", os: windows-latest, cc: "gcc", cxx: "g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86 }
 
     defaults:
       run:
@@ -93,15 +93,38 @@ jobs:
           ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
           path: './my-vcpkg-triplets'
 
-      - name: Restore GitLab-style vcpkg binary cache
-        if: runner.os == 'Windows'
-        id: vcpkg-binary-cache-restore
+      - name: Determine Windows compiler fingerprint
+        if: runner.os == 'Windows' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
+        id: compiler-fingerprint
+        shell: bash
+        run: |
+          if [[ "${{ matrix.config.name }}" == *"MinGW"* ]]; then
+            compiler_path="$(command -v gcc.exe)"
+          else
+            compiler_path="$(command -v clang.exe)"
+          fi
+          test -n "$compiler_path"
+          compiler_hash="$(sha256sum "$compiler_path" | awk '{print $1}')"
+          echo "compiler_hash=$compiler_hash" >> "$GITHUB_OUTPUT"
+          echo "Compiler fingerprint: $compiler_hash"
+
+      - name: Restore MSVC vcpkg binary cache
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC')
+        id: msvc-vcpkg-binary-cache-restore
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
           restore-keys: |
             ${{ matrix.config.vcpkg_cache_prefix }}-
+
+      - name: Restore MinGW and LLVM vcpkg binary cache
+        if: runner.os == 'Windows' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
+        id: toolchain-vcpkg-binary-cache-restore
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/vcpkg_cache
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Checkout vcpkg
         if: runner.os == 'Windows'
@@ -125,12 +148,19 @@ jobs:
           VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
         run: .\vcpkg\vcpkg.exe install --triplet ${{ matrix.config.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets wxwidgets gtest
 
-      - name: Save GitLab-style vcpkg binary cache
-        if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+      - name: Save MSVC vcpkg binary cache
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC') && success() && steps.msvc-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+
+      - name: Save MinGW and LLVM vcpkg binary cache
+        if: runner.os == 'Windows' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM')) && success() && steps.toolchain-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: project/vcpkg_cache
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Configure
         env:
