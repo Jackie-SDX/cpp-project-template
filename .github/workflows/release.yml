@@ -273,67 +273,112 @@ jobs:
         working-directory: project
         run: test -n "$(find instdir -type f -print -quit)"
 
-      - name: Determine canonical package name
-        id: package_name
+      - name: Resolve release version
         working-directory: project
         shell: bash
         run: |
-          base=$(sed -n 's/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p' build/CPackConfig.cmake | head -1)
-          test -n "$base"
-          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(git describe --tags --always --dirty | sed 's/^v//')"
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Resolve canonical release naming
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              platform="linux"
+              ;;
+            Windows)
+              platform="windows"
+              ;;
+            macOS)
+              platform="macos"
+              ;;
+            *)
+              echo "Unsupported runner OS: $RUNNER_OS" >&2
+              exit 1
+              ;;
+          esac
+
+          case "${{ matrix.arch }}" in
+            x64)
+              package_arch="x86_64"
+              ;;
+            x86)
+              package_arch="i686"
+              ;;
+            arm64)
+              package_arch="arm64"
+              ;;
+            *)
+              echo "Unsupported package architecture: ${{ matrix.arch }}" >&2
+              exit 1
+              ;;
+          esac
+
+          prefix="cpp-project-template_${VERSION}_${platform}-${{ matrix.toolchain }}-${package_arch}"
+          echo "RELEASE_PREFIX=$prefix" >> "$GITHUB_ENV"
 
       - name: Package Windows
         if: runner.os == 'Windows'
         working-directory: project
         shell: pwsh
         env:
+          PREFIX: ${{ env.RELEASE_PREFIX }}
           BASE: ${{ steps.package_name.outputs.base }}
         run: |
           New-Item -ItemType Directory -Force release-assets | Out-Null
-          Compress-Archive -Path instdir\* -DestinationPath "release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.zip" -Force
+          Compress-Archive -Path instdir\* -DestinationPath "release-assets\$env:PREFIX.zip" -Force
           Push-Location build
           cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
-          Copy-Item "package\$env:BASE.exe" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.exe" -Force
+          Copy-Item "package\$env:BASE.exe" "..\release-assets\$env:PREFIX`_nsis.exe" -Force
           cpack --config CPackConfig.cmake -C Release -G 7Z
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
-          Copy-Item "package\$env:BASE.7z" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.7z" -Force
+          Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
           cpack --config CPackConfig.cmake -C Release -G WIX
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
-          Copy-Item "package\$env:BASE.msi" "..\release-assets\windows-${{ matrix.toolchain }}-${{ matrix.arch }}.msi" -Force
+          Copy-Item "package\$env:BASE.msi" "..\release-assets\$env:PREFIX`_wix.msi" -Force
           Pop-Location
           Get-ChildItem release-assets
 
       - name: Package Linux
         if: runner.os == 'Linux'
         working-directory: project
+        env:
+          PREFIX: ${{ env.RELEASE_PREFIX }}
         run: |
           mkdir -p release-assets
-          (cd instdir && cmake -E tar cf "../release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.zip" --format=zip .)
-          (cd instdir && cmake -E tar cf "../release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.7z" --format=7zip .)
-          (cd instdir && tar -czf "../release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.tar.gz" .)
+          (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
+          (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
+          (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
           cpack --config build/CPackConfig.cmake -C Release -G DEB
           cpack --config build/CPackConfig.cmake -C Release -G RPM
           deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
           rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
           test -n "$deb"
           test -n "$rpm"
-          cp "$deb" "release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.deb"
-          cp "$rpm" "release-assets/linux-${{ matrix.toolchain }}-${{ matrix.arch }}.rpm"
+          cp "$deb" "release-assets/${PREFIX}.deb"
+          cp "$rpm" "release-assets/${PREFIX}.rpm"
           ls -la release-assets
 
       - name: Package macOS
         if: runner.os == 'macOS'
         working-directory: project
+        env:
+          PREFIX: ${{ env.RELEASE_PREFIX }}
         run: |
           mkdir -p release-assets
-          (cd instdir && cmake -E tar cf "../release-assets/macos-${{ matrix.toolchain }}-${{ matrix.arch }}.zip" --format=zip .)
-          (cd instdir && cmake -E tar cf "../release-assets/macos-${{ matrix.toolchain }}-${{ matrix.arch }}.7z" --format=7zip .)
-          (cd instdir && tar -czf "../release-assets/macos-${{ matrix.toolchain }}-${{ matrix.arch }}.tar.gz" .)
+          (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
+          (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
+          (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
           cpack --config build/CPackConfig.cmake -C Release -G DragNDrop
           dmg=$(find build/package -maxdepth 1 -type f -name '*.dmg' | head -1)
           test -n "$dmg"
-          cp "$dmg" "release-assets/macos-${{ matrix.toolchain }}-${{ matrix.arch }}.dmg"
+          cp "$dmg" "release-assets/${PREFIX}.dmg"
           ls -la release-assets
 
       - name: Upload package artifact
@@ -435,8 +480,8 @@ jobs:
         working-directory: project
         run: |
           mkdir -p ../source-assets
-          git archive --format=zip --prefix="cpp-project-template-${VERSION}/" HEAD > "../source-assets/cpp-project-template-${VERSION}.zip"
-          git archive --format=tar.gz --prefix="cpp-project-template-${VERSION}/" HEAD > "../source-assets/cpp-project-template-${VERSION}.tar.gz"
+          git archive --format=zip --prefix="cpp-project-template_${VERSION}_source/" HEAD > "../source-assets/cpp-project-template_${VERSION}_source.zip"
+          git archive --format=tar.gz --prefix="cpp-project-template_${VERSION}_source/" HEAD > "../source-assets/cpp-project-template_${VERSION}_source.tar.gz"
       - name: Upload source artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -469,21 +514,68 @@ jobs:
         working-directory: release-assets
         run: |
           expected=(
-            windows-msvc-x64.zip windows-msvc-x64.7z windows-msvc-x64.exe windows-msvc-x64.msi
-            windows-msvc-x86.zip windows-msvc-x86.7z windows-msvc-x86.exe windows-msvc-x86.msi
-            windows-mingw-x64.zip windows-mingw-x64.7z windows-mingw-x64.exe windows-mingw-x64.msi
-            windows-mingw-x86.zip windows-mingw-x86.7z windows-mingw-x86.exe windows-mingw-x86.msi
-            linux-gcc-x64.zip linux-gcc-x64.7z linux-gcc-x64.tar.gz linux-gcc-x64.deb linux-gcc-x64.rpm
-            linux-gcc-arm64.zip linux-gcc-arm64.7z linux-gcc-arm64.tar.gz linux-gcc-arm64.deb linux-gcc-arm64.rpm
-            macos-clang-arm64.zip macos-clang-arm64.7z macos-clang-arm64.tar.gz macos-clang-arm64.dmg
+            cpp-project-template_*.zip cpp-project-template_*.tar.gz
+            cpp-project-template_*_windows-msvc-x86_64.zip
+            cpp-project-template_*_windows-msvc-x86_64.7z
+            cpp-project-template_*_windows-msvc-x86_64_nsis.exe
+            cpp-project-template_*_windows-msvc-x86_64_wix.msi
+            cpp-project-template_*_windows-msvc-i686.zip
+            cpp-project-template_*_windows-msvc-i686.7z
+            cpp-project-template_*_windows-msvc-i686_nsis.exe
+            cpp-project-template_*_windows-msvc-i686_wix.msi
+            cpp-project-template_*_windows-mingw-x86_64.zip
+            cpp-project-template_*_windows-mingw-x86_64.7z
+            cpp-project-template_*_windows-mingw-x86_64_nsis.exe
+            cpp-project-template_*_windows-mingw-x86_64_wix.msi
+            cpp-project-template_*_windows-mingw-i686.zip
+            cpp-project-template_*_windows-mingw-i686.7z
+            cpp-project-template_*_windows-mingw-i686_nsis.exe
+            cpp-project-template_*_windows-mingw-i686_wix.msi
+            cpp-project-template_*_windows-llvm-x86_64.zip
+            cpp-project-template_*_windows-llvm-x86_64.7z
+            cpp-project-template_*_windows-llvm-x86_64_nsis.exe
+            cpp-project-template_*_windows-llvm-x86_64_wix.msi
+            cpp-project-template_*_windows-llvm-i686.zip
+            cpp-project-template_*_windows-llvm-i686.7z
+            cpp-project-template_*_windows-llvm-i686_nsis.exe
+            cpp-project-template_*_windows-llvm-i686_wix.msi
+            cpp-project-template_*_linux-gcc-x86_64.zip
+            cpp-project-template_*_linux-gcc-x86_64.7z
+            cpp-project-template_*_linux-gcc-x86_64.tar.gz
+            cpp-project-template_*_linux-gcc-x86_64.deb
+            cpp-project-template_*_linux-gcc-x86_64.rpm
+            cpp-project-template_*_linux-gcc-arm64.zip
+            cpp-project-template_*_linux-gcc-arm64.7z
+            cpp-project-template_*_linux-gcc-arm64.tar.gz
+            cpp-project-template_*_linux-gcc-arm64.deb
+            cpp-project-template_*_linux-gcc-arm64.rpm
+            cpp-project-template_*_macos-clang-arm64.zip
+            cpp-project-template_*_macos-clang-arm64.7z
+            cpp-project-template_*_macos-clang-arm64.tar.gz
+            cpp-project-template_*_macos-clang-arm64.dmg
+            cpp-project-template_*_source.zip
+            cpp-project-template_*_source.tar.gz
           )
-          test -f cpp-project-template-*.zip
-          test -f cpp-project-template-*.tar.gz
-          for f in "${expected[@]}"; do
-            test -f "$f" || { echo "Missing required artifact: $f"; exit 1; }
+
+          actual=(* )
+          shopt -s nullglob
+          actual=(*)
+          unset 'actual[@]'
+          files=(*)
+
+          source_zip=cpp-project-template_*_source.zip
+          source_tar=cpp-project-template_*_source.tar.gz
+          shopt -s nullglob
+          source_files=( $source_zip $source_tar )
+          test "${#source_files[@]}" -eq 2
+
+          package_files=()
+          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi; do
+            [[ -e "$f" ]] && package_files+=("$f")
           done
-          count=$(find . -maxdepth 1 -type f | wc -l)
-          test "$count" -eq $((${#expected[@]} + 2)) || { echo "Unexpected artifact count: $count"; exit 1; }
+
+          test "${#package_files[@]}" -eq 30 || { echo "Unexpected package artifact count: ${#package_files[@]}"; printf '%s\n' "${package_files[@]}"; exit 1; }
+          test "${#source_files[@]}" -eq 2 || { echo "Unexpected source artifact count: ${#source_files[@]}"; exit 1; }
       - name: Write global SHA256SUMS
         working-directory: release-assets
         run: |
@@ -499,4 +591,4 @@ jobs:
           generate_release_notes: true
           body: |
             This release contains the currently passing package matrix.
-            Windows LLVM packages are temporarily omitted while their build is being repaired.
+            Windows LLVM packages are included when their build succeeds; failed LLVM matrix legs remain non-blocking.
