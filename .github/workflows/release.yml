@@ -12,6 +12,7 @@ permissions:
   contents: read
 
 env:
+  VCPKG_GIT_REF: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
 
 jobs:
@@ -148,15 +149,36 @@ jobs:
           path: my-vcpkg-triplets
           fetch-depth: 1
 
+      - name: Resolve GitLab-style vcpkg cache key
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          case "${{ matrix.toolchain }}" in
+            msvc)
+              cache_prefix="windows-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release"
+              ;;
+            mingw)
+              cache_prefix="windows-mingw-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release"
+              ;;
+            llvm)
+              cache_prefix="windows-llvm-${VCPKG_GIT_REF}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release"
+              ;;
+            *)
+              echo "Unsupported Windows cache toolchain: ${{ matrix.toolchain }}" >&2
+              exit 1
+              ;;
+          esac
+          echo "VCPKG_CACHE_PREFIX=${cache_prefix}" >> "$GITHUB_ENV"
+
       - name: Restore GitLab-style vcpkg binary cache
         if: runner.os == 'Windows'
         id: vcpkg-binary-cache-restore
         uses: actions/cache/restore@v5
         with:
           path: project/vcpkg_cache
-          key: windows-llvm-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-Release-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
           restore-keys: |
-            windows-llvm-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-Release-
+            ${{ env.VCPKG_CACHE_PREFIX }}-
 
       - name: vcpkg
         if: runner.os == 'Windows'
@@ -174,11 +196,11 @@ jobs:
           token: ${{ github.token }}
 
       - name: Save GitLab-style vcpkg binary cache
-        if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-release-test')
+        if: runner.os == 'Windows' && github.event_name != 'pull_request'
         uses: actions/cache/save@v5
         with:
           path: project/vcpkg_cache
-          key: windows-llvm-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-Release-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Configure
         working-directory: project
@@ -424,11 +446,13 @@ jobs:
             linux-gcc-arm64.zip linux-gcc-arm64.7z linux-gcc-arm64.tar.gz linux-gcc-arm64.deb linux-gcc-arm64.rpm
             macos-clang-arm64.zip macos-clang-arm64.7z macos-clang-arm64.tar.gz macos-clang-arm64.dmg
           )
-          for f in "${expected[@]}" cpp-project-template-*.zip cpp-project-template-*.tar.gz; do
+          test -f cpp-project-template-*.zip
+          test -f cpp-project-template-*.tar.gz
+          for f in "${expected[@]}"; do
             test -f "$f" || { echo "Missing required artifact: $f"; exit 1; }
           done
           count=$(find . -maxdepth 1 -type f | wc -l)
-          test "$count" -eq $((${#expected[@]} + 2)) || { echo "Unexpected artifact count: $count"; exit 1; }
+          test "$count" -eq $((${#expected[@]} + 3)) || { echo "Unexpected artifact count: $count"; exit 1; }
       - name: Write global SHA256SUMS
         working-directory: release-assets
         run: |
