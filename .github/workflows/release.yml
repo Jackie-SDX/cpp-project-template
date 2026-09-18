@@ -104,7 +104,7 @@ jobs:
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: .ccache
-        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
         restore-keys: 'ccache-${{ runner.os }}-${{ matrix.name }}-Release-
 
           '
@@ -216,7 +216,7 @@ jobs:
       uses: actions/cache/save@v5
       with:
         path: .ccache
-        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
     - name: Test
       working-directory: project
       env:
@@ -361,7 +361,7 @@ jobs:
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: .ccache
-        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
         restore-keys: 'ccache-Linux-Linux-GCC-x64-PR-Release-
 
           '
@@ -390,7 +390,7 @@ jobs:
       uses: actions/cache/save@v5
       with:
         path: .ccache
-        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
     - name: Test
       env:
         CC: gcc
@@ -523,20 +523,22 @@ jobs:
               "cpp-project-template_"$version"_"$compiler_arch".dmg" >> expected.txt
           done
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-            printf '%s\n' "cpp-project-template_"$version"_android-ndk-"$abi".zip" >> expected.txt
+            printf '%s\n' \
+              "cpp-project-template_"$version"_android-ndk-"$abi".apk" \
+              "cpp-project-template_"$version"_android-ndk-"$abi".zip" >> expected.txt
           done
 
           sort -u expected.txt > expected.sorted
-          test "$(wc -l < expected.sorted)" -eq 81
+          test "$(wc -l < expected.sorted)" -eq 85
 
           : > actual.txt
-          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
+          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
             [ -f "$f" ] || continue
             case "$f" in *_source.zip|*_source.tar.gz) continue ;; esac
             printf '%s\n' "$f" >> actual.txt
           done
           sort -u actual.txt > actual.sorted
-          test "$(wc -l < actual.sorted)" -eq 81
+          test "$(wc -l < actual.sorted)" -eq 85
 
           cmp -s expected.sorted actual.sorted || { echo 'Release inventory mismatch:'; comm -3 expected.sorted actual.sorted; exit 1; }
           while IFS= read -r f; do
@@ -598,20 +600,22 @@ jobs:
         "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz"
         "cpp-project-template_${version}_${compiler_arch}.dmg" >> expected.txt; done
 
-        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' "cpp-project-template_${version}_android-ndk-${abi}.zip" >> expected.txt; done
+        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' \
+        "cpp-project-template_${version}_android-ndk-${abi}.apk" \
+        "cpp-project-template_${version}_android-ndk-${abi}.zip" >> expected.txt; done
 
         sort -u expected.txt > expected.sorted
 
-        test "$(wc -l < expected.sorted)" -eq 81
+        test "$(wc -l < expected.sorted)" -eq 85
 
         : > actual.txt
 
-        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
+        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
         printf ''%s\n'' "$f" >> actual.txt; done
 
         sort -u actual.txt > actual.sorted
 
-        test "$(wc -l < actual.sorted)" -eq 81
+        test "$(wc -l < actual.sorted)" -eq 85
 
         cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }'
     - name: Write global SHA256SUMS
@@ -628,14 +632,14 @@ jobs:
       working-directory: release-assets
       shell: bash
       run: 'set -euo pipefail
-        package_count=$(for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
+        package_count=$(for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
           [ -f "$f" ] || continue
           case "$f" in *_source.zip|*_source.tar.gz) continue ;; esac
           printf "."
         done | wc -c)
-        test "$package_count" -eq 81
+        test "$package_count" -eq 85
         test -s SHA256SUMS
-        test "$(wc -l < SHA256SUMS)" -eq 83
+        test "$(wc -l < SHA256SUMS)" -eq 87
         sha256sum -c SHA256SUMS'
 
     - name: Publish GitHub release
@@ -752,7 +756,7 @@ jobs:
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: .ccache
-        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
         restore-keys: ccache-${{ runner.os }}-${{ matrix.name }}-Release-
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
@@ -888,7 +892,7 @@ jobs:
       uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: .ccache
-        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
     - name: Test
       if: matrix.build_testing != 'OFF'
       working-directory: project
@@ -1129,23 +1133,39 @@ jobs:
     - name: Package Android
       working-directory: project
       shell: bash
-      run: 'set -euo pipefail
-
-        if [ "$GITHUB_REF_TYPE" = "tag" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then version=$(printf ''%s'' "$GITHUB_REF_NAME" | sed ''s/^v//''); else version=$(git
-        describe --tags --always --dirty | sed ''s/^v//''); fi
-
-        target=$(find build/bin -maxdepth 1 -type f -name ''projectcli*'' -print -quit)
-
+      env:
+        ANDROID_ABI: ${{ matrix.abi }}
+        ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+        ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+        ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+      run: |
+        set -euo pipefail
+        if [ "$GITHUB_REF_TYPE" = "tag" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
+          version="${GITHUB_REF_NAME#v}"
+        else
+          version="$(git describe --tags --always --dirty | sed 's/^v//')"
+        fi
+        target="$(find build/bin -maxdepth 1 -type f -name 'projectcli*' -print -quit)"
         test -n "$target"
-
         mkdir -p android-release/bin release-assets
-
         cp "$target" android-release/bin/
-
-        printf ''Project: cpp-project-template\nVersion: %s\nAndroid ABI: %s\nNDK: %s\nAPI: %s\n'' "$version" ${{ matrix.abi }} "$ANDROID_NDK_VERSION" "$ANDROID_PLATFORM"
-        > android-release/BUILD-INFO.txt
-
-        (cd android-release && zip -q -r "../release-assets/cpp-project-template_${version}_android-ndk-${{ matrix.abi }}.zip" .)'
+        printf 'Project: cpp-project-template\nVersion: %s\nAndroid ABI: %s\nNDK: %s\nAPI: %s\n' "$version" "$ANDROID_ABI" "$ANDROID_NDK_VERSION" "$ANDROID_PLATFORM" > android-release/BUILD-INFO.txt
+        (cd android-release && zip -q -r "../release-assets/cpp-project-template_${version}_android-ndk-${ANDROID_ABI}.zip" .)
+        bash ./.github/scripts/package_android_apk.sh           "$target"           "$ANDROID_ABI"           "$version"           "$ANDROID_NDK_VERSION"           "$ANDROID_PLATFORM"           "release-assets/cpp-project-template_${version}_android-ndk-${ANDROID_ABI}.apk"
+    - name: Verify Android APK
+      working-directory: project
+      shell: bash
+      env:
+        ANDROID_ABI: ${{ matrix.abi }}
+      run: |
+        set -euo pipefail
+        apk="$(find release-assets -maxdepth 1 -type f -name "cpp-project-template_*_android-ndk-${ANDROID_ABI}.apk" -print -quit)"
+        test -n "$apk"
+        test -s "$apk"
+        sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+        build_tools="$(find "$sdk_root/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -1)"
+        "$sdk_root/build-tools/$build_tools/apksigner" verify --verbose "$apk"
     - name: Upload Android package artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
