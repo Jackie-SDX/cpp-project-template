@@ -1,0 +1,323 @@
+# GitHub CI workflow synchronized from the repository update archive.
+# All matrix combinations are eligible on push/PR. Coverity remains manual-only.
+
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+  MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
+  CCACHE_COMPILERCHECK: content
+
+jobs:
+  build:
+    name: ${{ matrix.config.name }} - ${{ matrix.build_type }}
+    runs-on: ${{ matrix.config.os }}
+    env:
+      CC: ${{ matrix.config.cc }}
+      CXX: ${{ matrix.config.cxx }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+        config:
+          - { name: "Ubuntu GCC", os: ubuntu-24.04, cc: "gcc", cxx: "g++", arch: x64, vcpkg_triplet: x64-linux, use_vcpkg: "ON" }
+          - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: arm64-osx, use_vcpkg: "ON" }
+          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", arch: x64, environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64, use_vcpkg: "ON" }
+          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", arch: x86, environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86, use_vcpkg: "ON" }
+          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", arch: x64, vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64, use_vcpkg: "ON" }
+          - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", arch: x64, vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, use_vcpkg: "ON", msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain, msys2_bin: mingw64\bin }
+          - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", arch: x86, vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, use_vcpkg: "ON", msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain, msys2_bin: mingw32\bin }
+          - { name: "Windows CLANGARM64 MinGW", os: windows-11-arm, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: none, use_vcpkg: "OFF", msys2_msystem: CLANGARM64, msys2_toolchain: mingw-w64-clang-aarch64-toolchain, msys2_packages: wxwidgets3.2-msw:p gtest:p, msys2_bin: clangarm64\bin }
+          - { name: "Linux Clang ARM64", os: ubuntu-24.04-arm, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: none, use_vcpkg: "OFF" }
+
+    defaults:
+      run:
+        working-directory: ./
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "true"
+          path: project
+
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-
+
+      - name: Locate MSVC environment script
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && contains(matrix.config.name, 'MSVC')
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
+          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.config.environment_script }}"
+          if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
+          "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Update Ubuntu package list
+        if: runner.os == 'Linux'
+        run: sudo apt-get update
+
+      - name: Install build dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get install -y ninja-build ccache lcov valgrind libwxgtk3.2-dev libgtest-dev
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            choco install ninja ccache -y
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install ninja ccache wxwidgets googletest
+          fi
+
+      - name: Setup MSYS2 MinGW toolchain
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: ${{ matrix.config.msys2_msystem }}
+          update: false
+          release: false
+          cache: true
+          path-type: minimal
+          install: ${{ matrix.config.msys2_toolchain }}
+          pacboy: ${{ matrix.config.msys2_packages }}
+
+      - name: Add selected MSYS2 MinGW bin directory to PATH
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
+        shell: pwsh
+        run: |
+          $bin = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "${{ matrix.config.msys2_bin }}"
+          if (-not (Test-Path $bin)) { throw "Expected MSYS2 compiler directory not found: $bin" }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "MSYS2 compiler directory: $bin"
+          if ("${{ matrix.config.msys2_msystem }}" -eq "CLANGARM64") {
+            $prefix = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "clangarm64"
+            if (-not (Test-Path $prefix)) { throw "Expected MSYS2 CLANGARM64 prefix not found: $prefix" }
+            "CMAKE_PREFIX_PATH=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Verify MinGW toolchain
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
+        shell: pwsh
+        run: |
+          $gcc = Get-Command "${{ matrix.config.cc }}.exe" -ErrorAction Stop
+          $gxx = Get-Command "${{ matrix.config.cxx }}.exe" -ErrorAction Stop
+          Write-Host "C compiler: $($gcc.Source)"
+          Write-Host "C++ compiler: $($gxx.Source)"
+          & $gcc.Source --version
+          & $gxx.Source --version
+          & $gxx.Source -dumpmachine
+
+      - name: Configure LLVM environment
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'LLVM')
+        shell: pwsh
+        run: |
+          $clangClCommand = Get-Command clang-cl.exe -ErrorAction Stop
+          $llvmBin = Split-Path $clangClCommand.Source -Parent
+          $llvmRoot = Split-Path $llvmBin -Parent
+          "LLVMInstallDir=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $llvmBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & $clangClCommand.Source --version
+
+      - name: Get LLVM vcpkg triplets
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: 'Neumann-A/my-vcpkg-triplets'
+          ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
+          path: './my-vcpkg-triplets'
+
+      - name: Determine Windows compiler fingerprint
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
+        id: compiler-fingerprint
+        shell: bash
+        run: |
+          c_compiler="${{ matrix.config.cc }}.exe"
+          cxx_compiler="${{ matrix.config.cxx }}.exe"
+          c_path="$(command -v "$c_compiler")"
+          cxx_path="$(command -v "$cxx_compiler")"
+          test -n "$c_path"
+          test -n "$cxx_path"
+          c_hash="$(sha256sum "$c_path" | awk '{print $1}')"
+          cxx_hash="$(sha256sum "$cxx_path" | awk '{print $1}')"
+          compiler_hash="$(printf '%s\n%s\n' "$c_hash" "$cxx_hash" | sha256sum | awk '{print $1}')"
+          echo "compiler_hash=$compiler_hash" >> "$GITHUB_OUTPUT"
+          echo "C compiler: $c_path"
+          echo "C++ compiler: $cxx_path"
+          echo "Compiler fingerprint: $compiler_hash"
+
+      - name: Restore MSVC vcpkg binary cache
+        if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC')
+        id: msvc-vcpkg-binary-cache-restore
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: project/vcpkg_cache
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+          restore-keys: |
+            ${{ matrix.config.vcpkg_cache_prefix }}-
+
+      - name: Restore MinGW and LLVM vcpkg binary cache
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
+        id: toolchain-vcpkg-binary-cache-restore
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: project/vcpkg_cache
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
+          restore-keys: |
+            ${{ matrix.config.vcpkg_cache_prefix }}-
+
+      - name: Initialize vcpkg binary cache directory
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
+        shell: bash
+        run: mkdir -p project/vcpkg_cache
+
+      - name: Checkout vcpkg
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_GIT_REF }}
+          path: vcpkg
+
+      - name: Restore Windows vcpkg tool cache
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
+        id: vcpkg-tool-cache-restore
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: vcpkg/vcpkg.exe
+          key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+          restore-keys: |
+            vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
+      - name: Bootstrap Windows vcpkg
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && steps.vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      - name: Verify Windows vcpkg tool
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe is missing' }
+          & .\vcpkg\vcpkg.exe version
+      - name: Save Windows vcpkg tool cache
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && success() && steps.vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: vcpkg/vcpkg.exe
+          key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+      - name: vcpkg
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
+        shell: pwsh
+        env:
+          VCPKG_MANIFEST_MODE: OFF
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/project/vcpkg_cache
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows
+        run: .\vcpkg\vcpkg.exe install --triplet ${{ matrix.config.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets wxwidgets gtest
+
+      - name: Save MSVC vcpkg binary cache
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && contains(matrix.config.name, 'MSVC') && success() && steps.msvc-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: project/vcpkg_cache
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+
+      - name: Save MinGW and LLVM vcpkg binary cache
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM')) && success() && steps.toolchain-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: project/vcpkg_cache
+          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
+
+      - name: Configure
+        env:
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          RUNNER_OS: ${{ runner.os }}
+          VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
+          BUILD_TYPE: ${{ matrix.build_type }}
+          USE_VCPKG: ${{ matrix.config.use_vcpkg }}
+        working-directory: project
+        run: cmake -P ./.github/scripts/configure.cmake
+
+      - name: Build
+        env:
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          RUNNER_OS: ${{ runner.os }}
+          BUILD_TYPE: ${{ matrix.build_type }}
+        working-directory: project
+        run: cmake -P ./.github/scripts/build.cmake
+
+      - name: Save compiler cache
+        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+
+      - name: Run tests
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          BUILD_TYPE: ${{ matrix.build_type }}
+        working-directory: project
+        run: cmake -P ./.github/scripts/test.cmake
+
+      - name: Packaging smoke test
+        if: runner.os == 'Linux' && matrix.build_type == 'Release'
+        working-directory: project
+        env:
+          PACKAGE_TOOLCHAIN: gcc
+        run: |
+          cmake --install build --prefix instdir --strip --config Release
+          test -n "$(find instdir -type f -print -quit)"
+          mkdir -p package-smoke
+          (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.zip" --format=zip .)
+          (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.7z" --format=7zip .)
+          (cd instdir && tar -czf "../package-smoke/linux-gcc-x64.tar.gz" .)
+          cpack --config build/CPackConfig.cmake -C Release -G DEB
+          cpack --config build/CPackConfig.cmake -C Release -G RPM
+          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
+          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
+          test -n "$deb"
+          test -n "$rpm"
+          cp "$deb" package-smoke/linux-gcc-x64.deb
+          cp "$rpm" package-smoke/linux-gcc-x64.rpm
+          test -f package-smoke/linux-gcc-x64.zip
+          test -f package-smoke/linux-gcc-x64.7z
+          test -f package-smoke/linux-gcc-x64.tar.gz
+          test -f package-smoke/linux-gcc-x64.deb
+          test -f package-smoke/linux-gcc-x64.rpm
+          sha256sum package-smoke/* > package-smoke/SHA256SUMS
+
+      - name: Upload coverage to Codecov
+        if: runner.os == 'Linux' && matrix.build_type == 'Debug'
+        uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673 # v4.5.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Coveralls
+        if: runner.os == 'Linux' && matrix.build_type == 'Debug'
+        uses: threeal/gcovr-action@9e51adaccda85662e99d0c29087f99fcf976c8dc # v1.1.0
+        with:
+          root: project
+          coveralls-send: true

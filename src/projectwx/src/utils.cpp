@@ -1,6 +1,7 @@
 #include "utils.hpp"
 
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -9,6 +10,9 @@ namespace cpp_proj
 
 std::string wordWrap(const std::string &s, size_t width)
 {
+	if (width == 0)
+		throw std::invalid_argument("wordWrap width must be greater than zero");
+
 	std::stringstream ss(s);
 	std::string line;
 	std::vector<std::string> lines;
@@ -21,10 +25,16 @@ std::string wordWrap(const std::string &s, size_t width)
 
 			if (index == std::string::npos)
 			{
+				// Split a word exactly at width; do not drop the next character.
 				index = width;
+				lines.push_back(line.substr(0, index));
+				line = line.substr(index);
 			}
-			lines.push_back(line.substr(0, index));
-			line = line.substr(index + (index == std::string::npos ? 0 : 1));
+			else
+			{
+				lines.push_back(line.substr(0, index));
+				line = line.substr(index + 1);
+			}
 		}
 		lines.push_back(line);
 	}

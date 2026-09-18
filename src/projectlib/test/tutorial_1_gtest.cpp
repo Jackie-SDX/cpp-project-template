@@ -1,36 +1,40 @@
 /**
  * @file tutorial_1_gtest.cpp
- * @author David Gonçalves (11088596+MangaD@users.noreply.github.com)
- * @brief This file contains unit tests for the functions in \ref tutorial_1.hpp.
- * @version 0.1
- * @date 2023-06-01
- *
- * @copyright Copyright (c) 2023 David Gonçalves
+ * @brief Unit tests for tutorial_1.hpp.
  */
 
 #include <gtest/gtest.h>
 
+#include <limits>
+#include <stdexcept>
+#include <type_traits>
+
 #include "tutorial_1.hpp"
 
-/**
- * @brief Demonstrate some basic assertions.
- */
 TEST(HelloTest, BasicAssertions)
 {
-	// Expect two strings not to be equal.
 	EXPECT_STRNE("hello", "world");
-	// Expect equality.
 	EXPECT_EQ(7 * 6, 42);
 }
 
-/**
- * @brief Test the factorial function.
- */
-TEST(Tutorial1, Factorial) { EXPECT_EQ(tut1::factorial(4), 24); }
+TEST(Tutorial1, Factorial)
+{
+	EXPECT_EQ(tut1::factorial(0), 1);
+	EXPECT_EQ(tut1::factorial(1), 1);
+	EXPECT_EQ(tut1::factorial(4), 24);
+	static_assert(tut1::factorial(5) == 120);
+}
 
-/**
- * @brief Entry point for running our unit tests.
- */
+TEST(Tutorial1, RejectsNegativeInput)
+{
+	EXPECT_THROW(tut1::factorial(-1), std::domain_error);
+}
+
+TEST(Tutorial1, DetectsOverflow)
+{
+	EXPECT_THROW(tut1::factorial(std::numeric_limits<int>::max()), std::overflow_error);
+}
+
 int main(int argc, char **argv)
 {
 	testing::InitGoogleTest(&argc, argv);

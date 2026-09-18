@@ -1,0 +1,32 @@
+# conanfile.txt
+#
+# Conan 2 manifest, mirroring vcpkg.json's dependencies (wxwidgets, gtest).
+# See cmake/PackageManager.cmake for how this gets selected and consumed.
+#
+# 2026-09-10: added per employer request, alongside vcpkg -- see
+# PROGRESS_BOOK.md for the pros/cons discussion. Version RANGES rather than
+# pinned exact versions, deliberately: vcpkg.json doesn't pin an exact
+# wxWidgets version either (it resolves via builtin-baseline instead), so
+# this matches that existing convention rather than introducing a different
+# versioning discipline for the same dependency under a second package
+# manager. After your first `conan install`, check the resolved versions in
+# its output (or conan.lock) and consider pinning them explicitly later for
+# full reproducibility -- same reasoning as this project's outstanding
+# vcpkg builtin-baseline item.
+
+[requires]
+wxwidgets/[>=3.2 <4]
+gtest/[>=1.14 <2]
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[layout]
+cmake_layout
+
+# If `conan install` reports a recipe as not found, check that your Conan 2
+# install's default remote points at ConanCenter's Conan-2-specific index
+# (center2.conan.io) rather than the legacy Conan-1-only one -- ConanCenter
+# split the two in 2025. `conan remote list` shows what's currently
+# configured.
