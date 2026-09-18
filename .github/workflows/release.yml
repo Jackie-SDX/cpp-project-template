@@ -600,9 +600,7 @@ jobs:
         "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz"
         "cpp-project-template_${version}_${compiler_arch}.dmg" >> expected.txt; done
 
-        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' \
-        "cpp-project-template_${version}_android-ndk-${abi}.apk" \
-        "cpp-project-template_${version}_android-ndk-${abi}.zip" >> expected.txt; done
+        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' "cpp-project-template_${version}_android-ndk-${abi}.apk" "cpp-project-template_${version}_android-ndk-${abi}.zip" >> expected.txt; done
 
         sort -u expected.txt > expected.sorted
 
