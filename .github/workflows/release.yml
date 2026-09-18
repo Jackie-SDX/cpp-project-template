@@ -827,35 +827,47 @@ jobs:
         ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
         path: my-vcpkg-triplets
         fetch-depth: 1
+    - name: Resolve expanded Windows vcpkg cache key
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      shell: bash
+      run: |
+        case "${{ matrix.compiler }}" in
+          msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+          mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+          llvm) echo "VCPKG_CACHE_PREFIX=windows-llvm-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+          *) echo "Unsupported Windows vcpkg compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
+        esac
     - name: Restore Windows vcpkg binary cache
       id: vcpkg-cache-restore
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: project/vcpkg_cache
-        key: vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-${{ hashFiles('project/vcpkg.json')
-          }}
-        restore-keys: 'vcpkg-experimental-${{ matrix.cache_id }}-
-
-          '
-    - name: Bootstrap and install vcpkg
+        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        restore-keys: |
+          ${{ env.VCPKG_CACHE_PREFIX }}-
+          vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-
+    - name: vcpkg
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
-      shell: pwsh
-      run: "$ErrorActionPreference = \"Stop\"\nNew-Item -ItemType Directory -Force -Path project\\vcpkg_cache | Out-Null\nif (Test-Path vcpkg) { Remove-Item\
-        \ -Recurse -Force vcpkg }\ngit init vcpkg\ngit -C vcpkg remote add origin https://github.com/microsoft/vcpkg.git\ngit -C vcpkg fetch --depth 1 --no-tags\
-        \ origin $env:VCPKG_GIT_REF\nif ($LASTEXITCODE -ne 0) { throw \"Failed to fetch vcpkg $env:VCPKG_GIT_REF\" }\ngit -C vcpkg checkout FETCH_HEAD\n\
-        .\\vcpkg\\bootstrap-vcpkg.bat -disableMetrics\n$env:VCPKG_MANIFEST_MODE = \"OFF\"\n$env:VCPKG_DEFAULT_HOST_TRIPLET = \"${{ matrix.vcpkg_host_triplet\
-        \ }}\"\n$env:VCPKG_BINARY_SOURCES = \"clear;files,$env:GITHUB_WORKSPACE\\project\\vcpkg_cache,readwrite\"\nif (\"${{ matrix.external_triplets }}\"\
-        \ -eq \"true\") {\n  .\\vcpkg\\vcpkg.exe install --triplet \"${{ matrix.vcpkg_triplet }}\" --overlay-triplets=\"$env:GITHUB_WORKSPACE\\my-vcpkg-triplets\"\
-        \ wxwidgets gtest\n} else {\n  .\\vcpkg\\vcpkg.exe install --triplet \"${{ matrix.vcpkg_triplet }}\" wxwidgets gtest\n}\nif ($LASTEXITCODE -ne 0)\
-        \ { throw \"vcpkg install failed\" }\n"
+      uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d
+      env:
+        VCPKG_MANIFEST_MODE: OFF
+        VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
+        VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.vcpkg_host_triplet }}
+      with:
+        pkgs: wxwidgets gtest
+        triplet: ${{ matrix.vcpkg_triplet }}
+        extra-args: ${{ matrix.external_triplets && format('--overlay-triplets={0}/my-vcpkg-triplets', github.workspace) || '' }}
+        cache-key: release-${{ matrix.name }}
+        disable-cache: true
+        revision: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+        token: ${{ github.token }}
     - name: Save Windows vcpkg binary cache
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: project/vcpkg_cache
-        key: vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-${{ hashFiles('project/vcpkg.json')
-          }}
+        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
     - name: Configure
       working-directory: project
       env:
