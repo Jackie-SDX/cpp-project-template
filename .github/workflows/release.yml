@@ -33,15 +33,18 @@ jobs:
         include:
           - name: Windows MSVC x64
             os: windows-latest
-            cache_prefix: windows-master-x64-Release
+            compiler: msvc
+            arch: x64
             tool_arch: X64
           - name: Windows MSVC x86
             os: windows-latest
-            cache_prefix: windows-master-x86-Release
+            compiler: msvc
+            arch: x86
             tool_arch: X64
           - name: Windows MSVC ARM64
             os: windows-11-arm
-            cache_prefix: windows-master-arm64-Release
+            compiler: msvc
+            arch: arm64
             tool_arch: ARM64
           - name: Windows LLVM x64
             os: windows-latest
@@ -55,11 +58,13 @@ jobs:
             tool_arch: X64
           - name: Windows MinGW x64
             os: windows-latest
-            cache_prefix: windows-mingw-master-x64-Release
+            compiler: mingw
+            arch: x64
             tool_arch: X64
           - name: Windows MinGW x86
             os: windows-latest
-            cache_prefix: windows-mingw-master-x86-Release
+            compiler: mingw
+            arch: x86
             tool_arch: X64
     steps:
       - name: Checkout project
@@ -82,6 +87,7 @@ jobs:
           key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
           restore-keys: |
             ${{ env.VCPKG_CACHE_PREFIX }}-
+          lookup-only: true
       - name: Checkout vcpkg
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -97,10 +103,11 @@ jobs:
           key: vcpkg-tool-windows-${{ matrix.tool_arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
           restore-keys: |
             vcpkg-tool-windows-${{ matrix.tool_arch }}-${{ env.VCPKG_GIT_REF }}-
+          lookup-only: true
       - name: Enforce upstream release cache contract
         if: github.repository == 'NaylaCruz/cpp-project-template' && (steps.package-cache.outputs.cache-hit != 'true' || steps.vcpkg-tool-cache.outputs.cache-hit != 'true')
         shell: pwsh
-        run: throw "Release cache gate failed for ${{ matrix.name }}. Package cache hit=${{ steps.package-cache.outputs.cache-hit }}, vcpkg tool cache hit=${{ steps.vcpkg-tool-cache.outputs.cache-hit }}. Seed main with vcpkg-cache-warmup before tagging."
+        run: throw "Release cache gate failed for ${{ matrix.name }}. Package cache hit=${{ steps.package-cache.outputs.cache-hit }}, vcpkg tool cache hit=${{ steps.vcpkg-tool-cache.outputs.cache-hit }}. Seed the release vcpkg caches with vcpkg-cache-warmup before tagging."
   package:
     needs: cache-gate
     name: ${{ matrix.name }}
@@ -333,7 +340,7 @@ jobs:
         BUILD_TYPE: Release
       run: cmake -P ./.github/scripts/build.cmake
     - name: Save compiler cache
-      if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+      if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
@@ -1038,6 +1045,12 @@ jobs:
       with:
         path: vcpkg/vcpkg.exe
         key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+    - name: Save Windows vcpkg binary cache
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: project/vcpkg_cache
+        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
     - name: Configure
       working-directory: project
       env:
