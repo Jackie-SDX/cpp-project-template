@@ -37,6 +37,7 @@ jobs:
             vcpkg_triplet: x64-windows-static
             toolchain: msvc
             arch: x64
+            external_triplets: true
           - name: Windows MSVC x86
             os: windows-latest
             cc: cl
@@ -45,6 +46,7 @@ jobs:
             vcpkg_triplet: x86-windows-static
             toolchain: msvc
             arch: x86
+            external_triplets: true
           - name: Windows MinGW x64
             os: windows-latest
             cc: gcc
@@ -52,6 +54,7 @@ jobs:
             vcpkg_triplet: x64-mingw-dynamic
             toolchain: mingw
             arch: x64
+            external_triplets: true
           - name: Windows MinGW x86
             os: windows-latest
             cc: gcc
@@ -59,6 +62,7 @@ jobs:
             vcpkg_triplet: x86-mingw-dynamic
             toolchain: mingw
             arch: x86
+            external_triplets: true
           - name: Windows LLVM x64
             os: windows-latest
             cc: clang-cl
@@ -67,6 +71,7 @@ jobs:
             vcpkg_triplet: x64-win-llvm-release
             toolchain: llvm
             arch: x64
+            external_triplets: true
           - name: Windows LLVM x86
             os: windows-latest
             cc: clang-cl
@@ -75,6 +80,7 @@ jobs:
             vcpkg_triplet: x86-win-llvm
             toolchain: llvm
             arch: x86
+            external_triplets: true
           - name: Windows MSVC ARM64
             os: windows-11-arm
             cc: cl
