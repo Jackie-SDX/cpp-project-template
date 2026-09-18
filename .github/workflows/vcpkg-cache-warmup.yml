@@ -3,6 +3,12 @@ name: Release vcpkg cache warmup
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'vcpkg.json'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/vcpkg-cache-warmup.yml'
+      - '.gitlab/vcpkg-triplets/**'
   schedule:
     - cron: '15 3 * * 0'
   workflow_dispatch:
@@ -11,9 +17,8 @@ permissions:
   contents: read
 
 env:
-  VCPKG_GIT_REF: master
+  VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
-  VCPKG_RELEASE_REVISION: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
 
 jobs:
   warmup:
@@ -156,7 +161,7 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_RELEASE_REVISION }}
+          ref: ${{ env.VCPKG_GIT_REF }}
           path: vcpkg
           fetch-depth: 1
 
@@ -166,9 +171,9 @@ jobs:
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
         with:
           path: vcpkg/vcpkg.exe
-          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_RELEASE_REVISION }}
+          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
           restore-keys: |
-            vcpkg-tool-windows-arm64-
+            vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-
 
       - name: Bootstrap ARM64 vcpkg tool
         if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
@@ -210,7 +215,7 @@ jobs:
           extra-args: ${{ matrix.external_triplets != false && format('--overlay-triplets={0}/my-vcpkg-triplets', github.workspace) || '' }}
           cache-key: release-${{ matrix.name }}
           disable-cache: true
-          revision: ${{ env.VCPKG_RELEASE_REVISION }}
+          revision: ${{ env.VCPKG_GIT_REF }}
           token: ${{ github.token }}
 
       - name: vcpkg ARM64

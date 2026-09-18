@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  VCPKG_GIT_REF: a1cae005c39be7b18ba319fced856b68d7276271
+  VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_COMPILERCHECK: content

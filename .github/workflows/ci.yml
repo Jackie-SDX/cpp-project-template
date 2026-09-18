@@ -19,7 +19,7 @@ permissions:
 
 env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
-  VCPKG_GIT_REF: master
+  VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
   CCACHE_COMPILERCHECK: content
 
@@ -201,7 +201,7 @@ jobs:
           path: vcpkg/vcpkg.exe
           key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
           restore-keys: |
-            vcpkg-tool-windows-arm64-
+            vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-
       - name: Bootstrap vcpkg
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && !(matrix.config.arch == 'arm64' && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit == 'true')
         shell: pwsh

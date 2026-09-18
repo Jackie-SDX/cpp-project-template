@@ -5,7 +5,7 @@ concurrency:
 permissions:
   contents: read
 env:
-  VCPKG_GIT_REF: master
+  VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   ANDROID_NDK_VERSION: 30.0.16248370
@@ -865,9 +865,9 @@ jobs:
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: vcpkg/vcpkg.exe
-        key: vcpkg-tool-windows-arm64-e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+        key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
         restore-keys: |
-          vcpkg-tool-windows-arm64-
+          vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-
 
     - name: Bootstrap ARM64 vcpkg tool
       if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64' && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
@@ -887,7 +887,7 @@ jobs:
       uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: vcpkg/vcpkg.exe
-        key: vcpkg-tool-windows-arm64-e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+        key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
 
     - name: vcpkg
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && !(matrix.compiler == 'msvc' && matrix.arch == 'arm64')
