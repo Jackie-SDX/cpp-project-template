@@ -412,13 +412,14 @@ jobs:
           BUILD_TYPE: Release
         run: cmake -P ./.github/scripts/configure.cmake
 
-      - name: Verify compiler
+      - name: Verify configured compiler
         working-directory: project
         shell: bash
         run: |
-          cc_bin="\${CC:-\${{ matrix.cc }}}"
-          cxx_bin="\${CXX:-\${{ matrix.cxx }}}"
-          "$cc_bin" --version
+          cxx_bin="$(sed -n 's/^CMAKE_CXX_COMPILER:FILEPATH=//p' build/CMakeCache.txt | head -1)"
+          test -n "$cxx_bin"
+          test -x "$cxx_bin"
+          echo "Configured CXX: $cxx_bin"
           "$cxx_bin" --version
 
       - name: Build
