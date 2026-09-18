@@ -823,7 +823,7 @@ jobs:
       with:
         msystem: CLANGARM64
         update: false
-        release: true
+        release: false
         cache: true
         path-type: minimal
         install: ${{ matrix.msys2_toolchain }}
