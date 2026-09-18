@@ -635,7 +635,7 @@ jobs:
         done | wc -c)
         test "$package_count" -eq 81
         test -s SHA256SUMS
-        test "$(wc -l < SHA256SUMS)" -eq 84
+        test "$(wc -l < SHA256SUMS)" -eq 83
         sha256sum -c SHA256SUMS'
 
     - name: Publish GitHub release
