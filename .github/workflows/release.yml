@@ -650,7 +650,7 @@ jobs:
               "cpp-project-template_"$version"_"$compiler_arch"_nsis.exe" \
               "cpp-project-template_"$version"_"$compiler_arch"_wix.msi" >> expected.txt
           done
-          for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64 windows-llvm-arm64; do
+          for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do
             printf '%s\n' \
               "cpp-project-template_"$version"_"$compiler_arch".zip" \
               "cpp-project-template_"$version"_"$compiler_arch".7z" \
@@ -744,7 +744,7 @@ jobs:
         ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe"
         "cpp-project-template_${version}_${compiler_arch}_wix.msi" >> expected.txt; done
 
-        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64 windows-llvm-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe" "cpp-project-template_${version}_${compiler_arch}_wix.msi"
+        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe" "cpp-project-template_${version}_${compiler_arch}_wix.msi"
         >> expected.txt; done
 
         for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip"
