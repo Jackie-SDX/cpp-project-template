@@ -68,8 +68,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${ANDROID_SDK_ROOT:-}"
-          ndk_home="$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}"
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$sdk_root"
+          ndk_home="$sdk_root/ndk/${ANDROID_NDK_VERSION}"
           test -f "$ndk_home/build/cmake/android.toolchain.cmake"
           echo "ANDROID_NDK_HOME=$ndk_home" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ndk_home"
