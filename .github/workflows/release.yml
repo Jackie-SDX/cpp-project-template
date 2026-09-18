@@ -1,5 +1,7 @@
 name: Release
 
+# Workflow-definition refresh: tag pushes (v*) are the production release trigger.
+# Keep this comment with the trigger block so GitHub re-registers the current definition.
 on:
   push:
     tags:
