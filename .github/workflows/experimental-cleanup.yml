@@ -6,6 +6,10 @@ on:
       - experimental/all-platforms-architectures-v2
   workflow_dispatch:
 
+concurrency:
+  group: experimental-cleanup-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   actions: write
   contents: write
@@ -21,9 +25,14 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          runs_json="$(curl -fsSL             -H "Accept: application/vnd.github+json"             -H "Authorization: Bearer $GH_TOKEN"             -H "X-GitHub-Api-Version: 2026-03-10"             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs?branch=${BRANCH}&per_page=100")"
+          runs_file="$(mktemp)"
+          curl -fsSL -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2026-03-10" "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs?branch=${BRANCH}&per_page=100" > "$runs_file"
 
-          python3 - "$CURRENT_SHA" "$runs_json" <<'PY'
+          python3 - "$CURRENT_SHA" "$runs_file" <<'PY'
+          import json, os, subprocess, sys
+          current_sha, path = sys.argv[1], sys.argv[2]
+          with open(path, encoding="utf-8") as fh:
+              raw = fh.read()
           import json, os, subprocess, sys
           current_sha, raw = sys.argv[1], sys.argv[2]
           data = json.loads(raw)
