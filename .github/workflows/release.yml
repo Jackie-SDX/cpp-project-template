@@ -1096,7 +1096,7 @@ jobs:
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.compiler }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
         restore-keys: |
           vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
     - name: vcpkg
@@ -1128,7 +1128,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.compiler }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
     - name: Save Windows vcpkg tool cache
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
