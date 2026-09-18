@@ -1192,11 +1192,11 @@ jobs:
 
         Push-Location build
         cpack --config CPackConfig.cmake -C Release -G NSIS64
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw 'NSIS64 package generation failed' }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw ''NSIS64 package generation failed'' }
         Copy-Item "package\$env:BASE.exe" "..\release-assets\$env:PREFIX`_nsis.exe" -Force
 
         cpack --config CPackConfig.cmake -C Release -G WIX
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw 'MSI package generation failed' }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw ''MSI package generation failed'' }
         Copy-Item "package\$env:BASE.msi" "..\release-assets\$env:PREFIX`_wix.msi" -Force
         Pop-Location'
     - name: Package Linux
