@@ -1,0 +1,31 @@
+name: Workflow Lint
+
+on:
+  push:
+    branches:
+      - main
+      - experimental/all-platforms-architectures-v2
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Lint workflows
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/repo" \
+            --workdir /repo \
+            rhysd/actionlint:1.7.12 \
+            -color
