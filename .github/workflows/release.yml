@@ -690,10 +690,15 @@ jobs:
 
       - name: Write global SHA256SUMS
         working-directory: release-assets
+        shell: bash
         run: |
           set -euo pipefail
           rm -f SHA256SUMS
-          sha256sum -- * > SHA256SUMS
+          files=()
+          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
+            [ -f "$f" ] && files+=("$f")
+          done
+          printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
 
       - name: Verify checksums
         working-directory: release-assets
@@ -761,11 +766,15 @@ jobs:
         cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }'
     - name: Write global SHA256SUMS
       working-directory: release-assets
-      run: 'rm -f SHA256SUMS
-
-        sha256sum -- * > SHA256SUMS
-
-        '
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -f SHA256SUMS
+        files=()
+        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
+          [ -f "$f" ] && files+=("$f")
+        done
+        printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
     - name: Verify checksums
       working-directory: release-assets
       run: sha256sum -c SHA256SUMS
