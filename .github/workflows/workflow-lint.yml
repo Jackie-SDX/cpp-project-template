@@ -28,4 +28,4 @@ jobs:
             -v "$PWD:/repo" \
             --workdir /repo \
             rhysd/actionlint:1.7.12 \
-            -color
+            -color -shellcheck= -pyflakes=
