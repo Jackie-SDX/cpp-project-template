@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 permissions:
   contents: read
