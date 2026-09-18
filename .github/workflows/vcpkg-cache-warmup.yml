@@ -151,6 +151,44 @@ jobs:
           esac
           echo "VCPKG_CACHE_PREFIX=${cache_prefix}" >> "$GITHUB_ENV"
 
+      - name: Checkout ARM64 vcpkg tool
+        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc'
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_RELEASE_REVISION }}
+          path: vcpkg
+          fetch-depth: 1
+
+      - name: Restore ARM64 vcpkg tool cache
+        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc'
+        id: arm64-vcpkg-tool-cache-restore
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+        with:
+          path: vcpkg/vcpkg.exe
+          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_RELEASE_REVISION }}
+          restore-keys: |
+            vcpkg-tool-windows-arm64-
+
+      - name: Bootstrap ARM64 vcpkg tool
+        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+        shell: pwsh
+        working-directory: vcpkg
+        run: .\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Verify ARM64 vcpkg tool
+        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'ARM64 vcpkg.exe was not restored or bootstrapped' }
+          & .\vcpkg\vcpkg.exe version
+
+      - name: Save ARM64 vcpkg tool cache
+        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && success() && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+        with:
+          path: vcpkg/vcpkg.exe
+          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_RELEASE_REVISION }}
       - name: Restore release vcpkg binary cache
         id: vcpkg-binary-cache-restore
         uses: actions/cache/restore@v5
@@ -161,7 +199,7 @@ jobs:
             ${{ env.VCPKG_CACHE_PREFIX }}-
 
       - name: vcpkg
-        if: steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        if: steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true' && !(matrix.arch == 'arm64' && matrix.toolchain == 'msvc')
         uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
         env:
           VCPKG_MANIFEST_MODE: OFF
@@ -175,6 +213,16 @@ jobs:
           revision: ${{ env.VCPKG_RELEASE_REVISION }}
           token: ${{ github.token }}
 
+      - name: vcpkg ARM64
+        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          VCPKG_MANIFEST_MODE: OFF
+          VCPKG_BINARY_SOURCES: clear;files:${{ github.workspace }}\project\vcpkg_cache,readwrite
+          VCPKG_DEFAULT_HOST_TRIPLET: arm64-windows
+        run: |
+          & .\vcpkg\vcpkg.exe install --triplet arm64-windows wxwidgets gtest
+          if ($LASTEXITCODE -ne 0) { throw "ARM64 vcpkg install failed with exit code $LASTEXITCODE" }
       - name: Save release vcpkg binary cache
         if: success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
