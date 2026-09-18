@@ -42,7 +42,7 @@ jobs:
           - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64 }
           - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain, msys2_bin: mingw64\bin }
           - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain, msys2_bin: mingw32\bin }
-          - { name: "Windows CLANGARM64 MinGW", os: windows-11-arm, cc: "clang", cxx: "clang++", vcpkg_triplet: none, use_vcpkg: "OFF", msys2_msystem: CLANGARM64, msys2_toolchain: mingw-w64-clang-aarch64-toolchain, msys2_bin: clangarm64\bin }
+          - { name: "Windows CLANGARM64 MinGW", os: windows-11-arm, cc: "clang", cxx: "clang++", vcpkg_triplet: none, use_vcpkg: "OFF", msys2_msystem: CLANGARM64, msys2_toolchain: mingw-w64-clang-aarch64-toolchain, msys2_packages: wxwidgets3.2-msw:p gtest:p, msys2_bin: clangarm64\bin }
           - { name: "Linux Clang ARM64", os: ubuntu-24.04-arm, cc: "clang", cxx: "clang++", vcpkg_triplet: none, use_vcpkg: "OFF" }
 
     defaults:
@@ -100,6 +100,7 @@ jobs:
           update: false
           path-type: minimal
           install: ${{ matrix.config.msys2_toolchain }}
+          pacboy: ${{ matrix.config.msys2_packages }}
 
       - name: Add selected MSYS2 MinGW bin directory to PATH
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
@@ -109,6 +110,11 @@ jobs:
           if (-not (Test-Path $bin)) { throw "Expected MSYS2 compiler directory not found: $bin" }
           $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           Write-Host "MSYS2 compiler directory: $bin"
+          if ("${{ matrix.config.msys2_msystem }}" -eq "CLANGARM64") {
+            $prefix = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "clangarm64"
+            if (-not (Test-Path $prefix)) { throw "Expected MSYS2 CLANGARM64 prefix not found: $prefix" }
+            "CMAKE_PREFIX_PATH=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
 
       - name: Verify MinGW toolchain
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MinGW')
