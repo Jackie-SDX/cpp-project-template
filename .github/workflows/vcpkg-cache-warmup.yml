@@ -157,44 +157,40 @@ jobs:
           esac
           echo "VCPKG_CACHE_PREFIX=${cache_prefix}" >> "$GITHUB_ENV"
 
-      - name: Checkout ARM64 vcpkg tool
-        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout Windows vcpkg
+        if: runner.os == 'Windows'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: microsoft/vcpkg
           ref: ${{ env.VCPKG_GIT_REF }}
           path: vcpkg
           fetch-depth: 1
-
-      - name: Restore ARM64 vcpkg tool cache
-        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc'
-        id: arm64-vcpkg-tool-cache-restore
+      - name: Restore Windows vcpkg tool cache
+        if: runner.os == 'Windows'
+        id: vcpkg-tool-cache
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: vcpkg/vcpkg.exe
-          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+          key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
           restore-keys: |
-            vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-
-
-      - name: Bootstrap ARM64 vcpkg tool
-        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+            vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
+      - name: Bootstrap Windows vcpkg
+        if: runner.os == 'Windows' && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
         shell: pwsh
         working-directory: vcpkg
         run: .\bootstrap-vcpkg.bat -disableMetrics
-
-      - name: Verify ARM64 vcpkg tool
-        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc'
+      - name: Verify Windows vcpkg tool
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'ARM64 vcpkg.exe was not restored or bootstrapped' }
+          if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe was not restored or bootstrapped' }
           & .\vcpkg\vcpkg.exe version
-
-      - name: Save ARM64 vcpkg tool cache
-        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && success() && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+      - name: Save Windows vcpkg tool cache
+        if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: vcpkg/vcpkg.exe
-          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+          key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
       - name: Restore release vcpkg binary cache
         id: vcpkg-binary-cache-restore
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -205,20 +201,19 @@ jobs:
             ${{ env.VCPKG_CACHE_PREFIX }}-
 
       - name: vcpkg
-        if: steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true' && !(matrix.arch == 'arm64' && matrix.toolchain == 'msvc')
-        uses: johnwason/vcpkg-action@04c68c847bf5196ecaa72331ecf51208583916ef # v6
+        if: steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        shell: pwsh
         env:
           VCPKG_MANIFEST_MODE: OFF
-          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
-        with:
-          pkgs: wxwidgets gtest
-          triplet: ${{ matrix.vcpkg_triplet }}
-          extra-args: ${{ matrix.external_triplets != false && format('--overlay-triplets={0}/my-vcpkg-triplets', github.workspace) || '' }}
-          cache-key: release-${{ matrix.name }}
-          disable-cache: true
-          revision: ${{ env.VCPKG_GIT_REF }}
-          token: ${{ github.token }}
-
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\project\vcpkg_cache,readwrite
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.vcpkg_host_triplet }}
+        run: |
+          if ("${{ matrix.external_triplets }}" -eq "true") {
+            & .\vcpkg\vcpkg.exe install --triplet "${{ matrix.vcpkg_triplet }}" --overlay-triplets="${{ github.workspace }}\my-vcpkg-triplets" wxwidgets gtest
+          } else {
+            & .\vcpkg\vcpkg.exe install --triplet "${{ matrix.vcpkg_triplet }}" wxwidgets gtest
+          }
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed with exit code $LASTEXITCODE" }
       - name: vcpkg ARM64
         if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         shell: pwsh
