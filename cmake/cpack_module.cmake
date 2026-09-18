@@ -47,6 +47,12 @@ endif()
 if(WIN32 AND _arch STREQUAL "arm64")
     set(CPACK_WIX_ARCHITECTURE "arm64")
 endif()
+
+# WiX can produce a native ARM64 MSI. Keep the installer architecture aligned
+# with the payload instead of letting CPack default the Windows ARM package to x64.
+if(WIN32 AND _arch STREQUAL "arm64")
+    set(CPACK_WIX_ARCHITECTURE "arm64")
+endif()
 endif()
 
 # PACKAGE_TOOLCHAIN is supplied by the non-default toolchain jobs. MSVC is the
