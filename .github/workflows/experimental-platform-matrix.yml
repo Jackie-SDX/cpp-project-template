@@ -429,7 +429,7 @@ jobs:
           test -x "$cxx_bin"
           echo "Configured CXX: $cxx_bin"
           if [[ "${{ matrix.compiler }}" == "msvc" ]]; then
-            "$cxx_bin" /Bv
+            CXX_BIN="$cxx_bin" powershell -NoProfile -Command '& "$env:CXX_BIN" /Bv'
           else
             "$cxx_bin" --version
           fi
