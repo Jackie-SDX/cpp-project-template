@@ -36,6 +36,46 @@ if (NOT "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "")
 	set(package_toolchain_arg "-D")	
 endif()
 
+if ("$ENV{RUNNER_OS}" STREQUAL "macOS")
+	if ("$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "apple-clang")
+		set(ENV{CC} "/usr/bin/clang")
+		set(ENV{CXX} "/usr/bin/clang++")
+	elseif ("$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "llvm")
+		execute_process(
+			COMMAND brew --prefix llvm
+			OUTPUT_VARIABLE llvm_prefix
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+			RESULT_VARIABLE llvm_prefix_result
+		)
+		if (NOT llvm_prefix_result EQUAL 0 OR NOT EXISTS "${llvm_prefix}/bin/clang++")
+			message(FATAL_ERROR "Homebrew LLVM installation was not found")
+		endif()
+		set(ENV{CC} "${llvm_prefix}/bin/clang")
+		set(ENV{CXX} "${llvm_prefix}/bin/clang++")
+	elseif ("$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "gcc")
+		execute_process(
+			COMMAND brew --prefix gcc
+			OUTPUT_VARIABLE gcc_prefix
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+			RESULT_VARIABLE gcc_prefix_result
+		)
+		if (NOT gcc_prefix_result EQUAL 0)
+			message(FATAL_ERROR "Homebrew GCC installation was not found")
+		endif()
+		file(GLOB gcc_bins "${gcc_prefix}/bin/gcc-[0-9]*")
+		file(GLOB gxx_bins "${gcc_prefix}/bin/g++-[0-9]*")
+		list(SORT gcc_bins COMPARE NATURAL ORDER DESCENDING)
+		list(SORT gxx_bins COMPARE NATURAL ORDER DESCENDING)
+		if (NOT gcc_bins OR NOT gxx_bins)
+			message(FATAL_ERROR "Versioned Homebrew GCC binaries were not found")
+		endif()
+		list(GET gcc_bins 0 gcc_bin)
+		list(GET gxx_bins 0 gxx_bin)
+		set(ENV{CC} "${gcc_bin}")
+		set(ENV{CXX} "${gxx_bin}")
+	endif()
+endif()
+
 if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND NOT "$ENV{ANDROID_ABI}" STREQUAL "")
 	file(TO_CMAKE_PATH "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" android_toolchain_file)
 	if (NOT EXISTS "${android_toolchain_file}")
