@@ -1177,8 +1177,6 @@ jobs:
     branches:
     - main
   push:
-    branches:
-    - experimental/all-platforms-architectures-v2
     tags:
     - v*
   workflow_dispatch: null
