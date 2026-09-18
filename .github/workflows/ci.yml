@@ -21,6 +21,7 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   VCPKG_GIT_REF: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
+  CCACHE_COMPILERCHECK: content
 
 jobs:
   build:
