@@ -291,16 +291,42 @@ jobs:
       run: |
         if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe was not restored or bootstrapped' }
         & .\vcpkg\vcpkg.exe version
+    - name: Restore vcpkg download cache
+      if: runner.os == 'Windows'
+      id: vcpkg-download-cache
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: vcpkg_downloads
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        restore-keys: |
+          vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
     - name: vcpkg
       if: runner.os == 'Windows'
       shell: pwsh
       env:
         VCPKG_MANIFEST_MODE: OFF
         VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\project\vcpkg_cache,readwrite
+        VCPKG_DOWNLOADS: ${{ github.workspace }}\vcpkg_downloads
         VCPKG_DEFAULT_HOST_TRIPLET: x64-windows
       run: |
-        & .\vcpkg\vcpkg.exe install --triplet ${{ matrix.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}\my-vcpkg-triplets wxwidgets gtest
-        if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed with exit code $LASTEXITCODE" }
+        $installArgs = @('--triplet', '${{ matrix.vcpkg_triplet }}', '--overlay-triplets=${{ github.workspace }}\my-vcpkg-triplets', 'wxwidgets', 'gtest')
+        $lastExitCode = 1
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+          & .\vcpkg\vcpkg.exe install @installArgs
+          $lastExitCode = $LASTEXITCODE
+          if ($lastExitCode -eq 0) { break }
+          if ($attempt -lt 5) {
+            Write-Host "vcpkg install failed with exit code $lastExitCode; retrying attempt $($attempt + 1)/5..."
+            Start-Sleep -Seconds ([int][Math]::Pow(2, $attempt))
+          }
+        }
+        if ($lastExitCode -ne 0) { throw "vcpkg install failed after 5 attempts with exit code $lastExitCode" }
+    - name: Save vcpkg download cache
+      if: always() && runner.os == 'Windows' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != ''
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: vcpkg_downloads
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
     - name: Save Windows vcpkg tool cache
       if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -1064,20 +1090,45 @@ jobs:
       run: |
         if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe was not restored or bootstrapped' }
         & .\vcpkg\vcpkg.exe version
+    - name: Restore vcpkg download cache
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      id: vcpkg-download-cache
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: vcpkg_downloads
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        restore-keys: |
+          vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
     - name: vcpkg
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
       shell: pwsh
       env:
         VCPKG_MANIFEST_MODE: OFF
         VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\project\vcpkg_cache,readwrite
+        VCPKG_DOWNLOADS: ${{ github.workspace }}\vcpkg_downloads
         VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.vcpkg_host_triplet }}
       run: |
+        $installArgs = @('--triplet', '${{ matrix.vcpkg_triplet }}', 'wxwidgets', 'gtest')
         if ("${{ matrix.external_triplets }}" -eq "true") {
-          & .\vcpkg\vcpkg.exe install --triplet "${{ matrix.vcpkg_triplet }}" --overlay-triplets="${{ github.workspace }}\my-vcpkg-triplets" wxwidgets gtest
-        } else {
-          & .\vcpkg\vcpkg.exe install --triplet "${{ matrix.vcpkg_triplet }}" wxwidgets gtest
+          $installArgs = @('--triplet', '${{ matrix.vcpkg_triplet }}', '--overlay-triplets=${{ github.workspace }}\my-vcpkg-triplets', 'wxwidgets', 'gtest')
         }
-        if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed with exit code $LASTEXITCODE" }
+        $lastExitCode = 1
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+          & .\vcpkg\vcpkg.exe install @installArgs
+          $lastExitCode = $LASTEXITCODE
+          if ($lastExitCode -eq 0) { break }
+          if ($attempt -lt 5) {
+            Write-Host "vcpkg install failed with exit code $lastExitCode; retrying attempt $($attempt + 1)/5..."
+            Start-Sleep -Seconds ([int][Math]::Pow(2, $attempt))
+          }
+        }
+        if ($lastExitCode -ne 0) { throw "vcpkg install failed after 5 attempts with exit code $lastExitCode" }
+    - name: Save vcpkg download cache
+      if: always() && runner.os == 'Windows' && matrix.compiler != 'clangarm64' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != ''
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: vcpkg_downloads
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
     - name: Save Windows vcpkg tool cache
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
