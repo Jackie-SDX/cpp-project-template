@@ -227,14 +227,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
           path: project
 
       - name: Restore compiler cache
         id: ccache-restore
-        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: .ccache
           key: ccache-experimental-v2-${{ matrix.cache_id }}-Release
@@ -358,7 +358,7 @@ jobs:
 
       - name: Get custom Windows vcpkg triplets
         if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && matrix.external_triplets == true
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Neumann-A/my-vcpkg-triplets
           ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
@@ -368,7 +368,7 @@ jobs:
       - name: Restore Windows vcpkg binary cache
         id: vcpkg-cache-restore
         if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
-        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
           key: vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-${{ hashFiles('project/vcpkg.json') }}
@@ -400,7 +400,7 @@ jobs:
 
       - name: Save Windows vcpkg binary cache
         if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
           key: vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-${{ hashFiles('project/vcpkg.json') }}
@@ -449,7 +449,7 @@ jobs:
 
       - name: Save compiler cache
         if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: .ccache
           key: ccache-experimental-v2-${{ matrix.cache_id }}-Release

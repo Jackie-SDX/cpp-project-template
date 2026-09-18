@@ -52,14 +52,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: "true"
           path: project
 
       - name: Restore compiler cache
         id: ccache-restore
-        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: .ccache
           key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
@@ -135,7 +135,7 @@ jobs:
 
       - name: Get LLVM vcpkg triplets
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: 'Neumann-A/my-vcpkg-triplets'
           ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
@@ -163,7 +163,7 @@ jobs:
       - name: Restore MSVC vcpkg binary cache
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC')
         id: msvc-vcpkg-binary-cache-restore
-        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
@@ -173,7 +173,7 @@ jobs:
       - name: Restore MinGW and LLVM vcpkg binary cache
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
         id: toolchain-vcpkg-binary-cache-restore
-        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
@@ -187,7 +187,7 @@ jobs:
 
       - name: Checkout vcpkg
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: microsoft/vcpkg
           ref: ${{ env.VCPKG_GIT_REF }}
@@ -196,7 +196,7 @@ jobs:
       - name: Restore ARM64 vcpkg tool cache
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && matrix.config.arch == 'arm64'
         id: arm64-vcpkg-tool-cache-restore
-        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: vcpkg/vcpkg.exe
           key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
@@ -216,7 +216,7 @@ jobs:
 
       - name: Save ARM64 vcpkg tool cache
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && matrix.config.arch == 'arm64' && success() && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: vcpkg/vcpkg.exe
           key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
@@ -232,14 +232,14 @@ jobs:
 
       - name: Save MSVC vcpkg binary cache
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && contains(matrix.config.name, 'MSVC') && success() && steps.msvc-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Save MinGW and LLVM vcpkg binary cache
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM')) && success() && steps.toolchain-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
@@ -264,7 +264,7 @@ jobs:
 
       - name: Save compiler cache
         if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: .ccache
           key: ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}

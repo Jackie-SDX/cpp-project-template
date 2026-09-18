@@ -95,14 +95,14 @@ jobs:
         shell: bash
     steps:
     - name: Checkout
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         submodules: true
         fetch-depth: 0
         path: project
     - name: Restore compiler cache
       id: ccache-restore
-      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
         key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
@@ -136,7 +136,7 @@ jobs:
         \n  refreshenv\n}\n7z | Select-Object -First 1\n"
     - name: Get Windows vcpkg triplets
       if: runner.os == 'Windows'
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: Neumann-A/my-vcpkg-triplets
         ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
@@ -152,7 +152,7 @@ jobs:
     - name: Restore GitLab-style vcpkg binary cache
       if: runner.os == 'Windows'
       id: vcpkg-binary-cache-restore
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
         key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
@@ -161,7 +161,7 @@ jobs:
           '
     - name: vcpkg
       if: runner.os == 'Windows'
-      uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d
+      uses: johnwason/vcpkg-action@04c68c847bf5196ecaa72331ecf51208583916ef
       env:
         VCPKG_MANIFEST_MODE: OFF
         VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
@@ -175,7 +175,7 @@ jobs:
         token: ${{ github.token }}
     - name: Save GitLab-style vcpkg binary cache
       if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
         key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
@@ -214,7 +214,7 @@ jobs:
       run: cmake -P ./.github/scripts/build.cmake
     - name: Save compiler cache
       if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
         key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
@@ -354,12 +354,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - name: Checkout
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         submodules: true
     - name: Restore compiler cache
       id: ccache-restore
-      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
         key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
@@ -388,7 +388,7 @@ jobs:
       run: cmake -P ./.github/scripts/build.cmake
     - name: Save compiler cache
       if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
         key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
@@ -433,7 +433,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - name: Checkout
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
         path: project
@@ -745,14 +745,14 @@ jobs:
           cache_id: macos-llvm-arm64
     steps:
     - name: Checkout
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
         submodules: true
         path: project
     - name: Restore compiler cache
       id: ccache-restore
-      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
         key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
@@ -823,7 +823,7 @@ jobs:
         \ }\n  \"ENVIRONMENT_SCRIPT=$script\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8\n}\n"
     - name: Get custom Windows vcpkg triplets
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && matrix.external_triplets == true
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: Neumann-A/my-vcpkg-triplets
         ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
@@ -842,7 +842,7 @@ jobs:
     - name: Restore Windows vcpkg binary cache
       id: vcpkg-cache-restore
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
-      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
         key: ${{ env.VCPKG_CACHE_PREFIX  }}-${{ hashFiles('project/vcpkg.json')  }}
@@ -852,7 +852,7 @@ jobs:
 
     - name: Checkout ARM64 vcpkg tool
       if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64'
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: microsoft/vcpkg
         ref: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
@@ -862,7 +862,7 @@ jobs:
     - name: Restore ARM64 vcpkg tool cache
       if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64'
       id: arm64-vcpkg-tool-cache-restore
-      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg/vcpkg.exe
         key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
@@ -884,14 +884,14 @@ jobs:
 
     - name: Save ARM64 vcpkg tool cache
       if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64' && success() && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg/vcpkg.exe
         key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
 
     - name: vcpkg
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && !(matrix.compiler == 'msvc' && matrix.arch == 'arm64')
-      uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d
+      uses: johnwason/vcpkg-action@04c68c847bf5196ecaa72331ecf51208583916ef
       env:
         VCPKG_MANIFEST_MODE: OFF
         VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace  }}/project/vcpkg_cache,readwrite
@@ -918,7 +918,7 @@ jobs:
 
     - name: Save Windows vcpkg binary cache
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
         key: ${{ env.VCPKG_CACHE_PREFIX  }}-${{ hashFiles('project/vcpkg.json')  }}
@@ -953,7 +953,7 @@ jobs:
       run: cmake -P ./.github/scripts/build.cmake
     - name: Save compiler cache
       if: success() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
-      uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
         key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
@@ -1111,7 +1111,7 @@ jobs:
           cache_id: android-x86
     steps:
     - name: Checkout
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
         submodules: true
@@ -1150,7 +1150,7 @@ jobs:
         '
     - name: Restore compiler cache
       id: ccache-restore
-      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
         key: ccache-experimental-v2-${{ matrix.cache_id }}-Release
@@ -1177,7 +1177,7 @@ jobs:
       run: cmake -P ./.github/scripts/build.cmake
     - name: Save compiler cache
       if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
-      uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
     - name: Verify Android ELF architecture
