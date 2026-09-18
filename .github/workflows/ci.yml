@@ -171,7 +171,7 @@ jobs:
             ${{ matrix.config.vcpkg_cache_prefix }}-
 
       - name: Restore MinGW and LLVM vcpkg binary cache
-        if: runner.os == 'Windows' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
         id: toolchain-vcpkg-binary-cache-restore
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
