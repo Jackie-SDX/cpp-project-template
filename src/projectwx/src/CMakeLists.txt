@@ -53,7 +53,7 @@ endif()
 
 # Static compile on Windows for Release - inspired by: https://stackoverflow.com/a/24671474/3049315
 # only makes sense for single-target generators, like Makefiles, see: https://stackoverflow.com/a/59314670/3049315
-if (MINGW)
+if (MINGW AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 	target_link_libraries(${PROJECT_WX_NAME} PRIVATE
 		$<$<CONFIG:Release>:-static-libgcc -static-libstdc++ -static>
 	)
