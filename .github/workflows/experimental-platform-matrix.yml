@@ -120,7 +120,7 @@ jobs:
             cc: clang
             cxx: clang++
             arch: arm64
-            use_vcpkg: false
+            use_vcpkg: OFF
             msys2_msystem: CLANGARM64
             msys2_toolchain: mingw-w64-clang-aarch64-toolchain
             msys2_packages: mingw-w64-clang-aarch64-wxwidgets3.2-msw mingw-w64-clang-aarch64-gtest
