@@ -274,7 +274,7 @@ jobs:
           fi
 
       - name: Install Windows tools
-        if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: choco install ninja ccache -y --no-progress
 
@@ -456,7 +456,7 @@ jobs:
             file "$target"
             case "${{ matrix.arch }}" in
               x86) file "$target" | grep -Eq '32-bit|Intel 80386' ;;
-              arm64) file "$target" | grep -Eq 'ARM aarch64|ARM64' ;;
+              arm64) file "$target" | grep -Eiq 'arm aarch64|arm64' ;;
               x64) file "$target" | grep -Eq 'x86-64|x86_64|Mach-O 64-bit executable x86_64' ;;
               *) exit 1 ;;
             esac
