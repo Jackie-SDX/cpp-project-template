@@ -40,6 +40,7 @@ endif()
 set(_arch_display "${_arch}")
 if(_arch_display STREQUAL "i686")
     set(_arch_display "x86")
+endif()
 
 # WiX can produce a native ARM64 MSI. Keep the installer architecture aligned
 # with the payload instead of letting CPack default the Windows ARM package to x64.
