@@ -157,7 +157,7 @@ jobs:
       if: runner.os == 'Windows'
       shell: bash
       run: "case \"${{ matrix.toolchain }}\" in\n  msvc) cache_prefix=\"windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  mingw) cache_prefix=\"\
-        windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  llvm) cache_prefix=\"windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{\
+        windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  llvm) cache_prefix=\"windows-llvm-${VCPKG_GIT_REF}-${MY_VCPKG_TRIPLETS_COMMIT}-${{\
         \ matrix.arch }}-Release\" ;;\n  *) echo \"Unsupported Windows cache toolchain: ${{ matrix.toolchain }}\" >&2; exit 1 ;;\nesac\necho \"VCPKG_CACHE_PREFIX=${cache_prefix}\"\
         \ >> \"$GITHUB_ENV\"\n"
     - name: Restore GitLab-style vcpkg binary cache
@@ -605,93 +605,53 @@ jobs:
     - name: Verify release inventory
       working-directory: release-assets
       shell: bash
-      run: |
-        set -euo pipefail
-        version=${GITHUB_REF_NAME#v}
-        test -n "${version}"
+      run: 'set -euo pipefail
+
+        version=$(printf ''%s'' "$GITHUB_REF_NAME" | sed ''s/^v//'')
 
         : > expected.txt
 
-        for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686; do
-          printf '%s\n' \
-            "cpp-project-template_${version}_${compiler_arch}.zip" \
-            "cpp-project-template_${version}_${compiler_arch}.7z" \
-            "cpp-project-template_${version}_${compiler_arch}_nsis.exe" \
-            "cpp-project-template_${version}_${compiler_arch}_wix.msi" >> expected.txt
-        done
+        for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686; do printf
+        ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe"
+        "cpp-project-template_${version}_${compiler_arch}_wix.msi" >> expected.txt; done
 
-        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do
-          printf '%s\n' \
-            "cpp-project-template_${version}_${compiler_arch}.zip" \
-            "cpp-project-template_${version}_${compiler_arch}.7z" >> expected.txt
-        done
+        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z"
+        >> expected.txt; done
 
-        for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do
-          printf '%s\n' \
-            "cpp-project-template_${version}_${compiler_arch}.zip" \
-            "cpp-project-template_${version}_${compiler_arch}.7z" \
-            "cpp-project-template_${version}_${compiler_arch}.tar.gz" \
-            "cpp-project-template_${version}_${compiler_arch}.deb" \
-            "cpp-project-template_${version}_${compiler_arch}.rpm" >> expected.txt
-        done
+        for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip"
+        "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz" "cpp-project-template_${version}_${compiler_arch}.deb"
+        "cpp-project-template_${version}_${compiler_arch}.rpm" >> expected.txt; done
 
-        for compiler_arch in macos-clang-arm64 macos-apple-clang-x86_64 macos-gcc-x86_64 macos-gcc-arm64 macos-llvm-x86_64 macos-llvm-arm64; do
-          printf '%s\n' \
-            "cpp-project-template_${version}_${compiler_arch}.zip" \
-            "cpp-project-template_${version}_${compiler_arch}.7z" \
-            "cpp-project-template_${version}_${compiler_arch}.tar.gz" \
-            "cpp-project-template_${version}_${compiler_arch}.dmg" >> expected.txt
-        done
+        for compiler_arch in macos-clang-arm64 macos-apple-clang-x86_64 macos-gcc-x86_64 macos-gcc-arm64 macos-llvm-x86_64 macos-llvm-arm64; do printf ''%s\n''
+        "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz"
+        "cpp-project-template_${version}_${compiler_arch}.dmg" >> expected.txt; done
 
-        for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-          printf '%s\n' \
-            "cpp-project-template_${version}_android-ndk-${abi}.apk" \
-            "cpp-project-template_${version}_android-ndk-${abi}.zip" >> expected.txt
-        done
+        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' "cpp-project-template_${version}_android-ndk-${abi}.apk" "cpp-project-template_${version}_android-ndk-${abi}.zip" >> expected.txt; done
 
         sort -u expected.txt > expected.sorted
+
         test "$(wc -l < expected.sorted)" -eq 85
 
         : > actual.txt
-        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
-          [ -f "$f" ] || continue
-          case "$f" in
-            *_source.zip|*_source.tar.gz) continue ;;
-          esac
-          printf '%s\n' "$f" >> actual.txt
-        done
+
+        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
+        printf ''%s\n'' "$f" >> actual.txt; done
 
         sort -u actual.txt > actual.sorted
+
         test "$(wc -l < actual.sorted)" -eq 85
-        cmp -s expected.sorted actual.sorted || {
-          echo 'Release inventory mismatch:'
-          comm -3 expected.sorted actual.sorted
-          exit 1
-        }
 
-        while IFS= read -r f; do
-          test -s "$f" || {
-            echo "Empty artifact: $f"
-            exit 1
-          }
-        done < actual.sorted
-
+        cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }'
     - name: Write global SHA256SUMS
       working-directory: release-assets
-      shell: bash
-      run: |
-        set -euo pipefail
-        rm -f SHA256SUMS
-        sha256sum -- * > SHA256SUMS
-        test "$(wc -l < SHA256SUMS)" -eq 87
+      run: 'rm -f SHA256SUMS
 
+        sha256sum -- * > SHA256SUMS
+
+        '
     - name: Verify checksums
       working-directory: release-assets
-      shell: bash
-      run: |
-        set -euo pipefail
-        sha256sum -c SHA256SUMS
-
+      run: sha256sum -c SHA256SUMS
     - name: Preflight release upload
       working-directory: release-assets
       shell: bash
@@ -719,7 +679,6 @@ jobs:
         token: ${{ github.token }}
         generate_release_notes: true
         body: 'This release contains the validated cross-platform package matrix and source archives.'
-
   expanded-package:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -904,8 +863,8 @@ jobs:
       shell: bash
       run: |
         case "${{ matrix.compiler }}" in
-          msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-          mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+          msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+          mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
           llvm) echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
           *) echo "Unsupported Windows vcpkg compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
         esac
