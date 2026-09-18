@@ -18,6 +18,7 @@ permissions:
 
 env:
   VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+  VCPKG_CACHE_NAMESPACE: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
 
 jobs:
@@ -141,13 +142,13 @@ jobs:
         run: |
           case "${{ matrix.toolchain }}" in
             msvc)
-              cache_prefix="windows-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release"
+              cache_prefix="windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release"
               ;;
             mingw)
-              cache_prefix="windows-mingw-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release"
+              cache_prefix="windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release"
               ;;
             llvm)
-              cache_prefix="windows-llvm-${VCPKG_GIT_REF}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release"
+              cache_prefix="windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release"
               ;;
             *)
               echo "Unsupported Windows cache toolchain: ${{ matrix.toolchain }}" >&2
@@ -193,7 +194,7 @@ jobs:
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: vcpkg/vcpkg.exe
-          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_RELEASE_REVISION }}
+          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
       - name: Restore release vcpkg binary cache
         id: vcpkg-binary-cache-restore
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
