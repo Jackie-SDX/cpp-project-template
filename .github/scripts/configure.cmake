@@ -27,6 +27,13 @@ set(actual_build_type "$ENV{BUILD_TYPE}")
 if (actual_build_type STREQUAL "")
 	set(actual_build_type "Release")
 endif()
+set(extra_config_args)
+if (NOT "$ENV{BUILD_PROJECTWX}" STREQUAL "")
+	list(APPEND extra_config_args "-DBUILD_PROJECTWX:BOOL=$ENV{BUILD_PROJECTWX}")
+endif()
+if (NOT "$ENV{BUILD_TESTING}" STREQUAL "")
+	list(APPEND extra_config_args "-DBUILD_TESTING:BOOL=$ENV{BUILD_TESTING}")
+endif()
 if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND "$ENV{CC}" STREQUAL "gcc" AND "$ENV{BUILD_TYPE}" STREQUAL "Debug")
 	set(actual_build_type "Coverage")
 endif()
@@ -81,16 +88,6 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND NOT "$ENV{ANDROID_ABI}" STREQUAL "")
 	if (NOT EXISTS "${android_toolchain_file}")
 		message(FATAL_ERROR "Android NDK CMake toolchain not found: ${android_toolchain_file}")
 	endif()
-	if ("$ENV{BUILD_PROJECTWX}" STREQUAL "")
-		set(android_build_projectwx "OFF")
-	else()
-		set(android_build_projectwx "$ENV{BUILD_PROJECTWX}")
-	endif()
-	if ("$ENV{BUILD_TESTING}" STREQUAL "")
-		set(android_build_testing "OFF")
-	else()
-		set(android_build_testing "$ENV{BUILD_TESTING}")
-	endif()
 	execute_process(
 		COMMAND cmake
 			-S .
@@ -103,8 +100,7 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND NOT "$ENV{ANDROID_ABI}" STREQUAL "")
 			-D CMAKE_TOOLCHAIN_FILE=${android_toolchain_file}
 			-D ANDROID_ABI=$ENV{ANDROID_ABI}
 			-D ANDROID_PLATFORM=$ENV{ANDROID_PLATFORM}
-			-D BUILD_PROJECTWX=${android_build_projectwx}
-			-D BUILD_TESTING=${android_build_testing}
+			${extra_config_args}
 			-D PACKAGE_TOOLCHAIN=android
 			--fresh
 		RESULT_VARIABLE result
@@ -146,7 +142,9 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF
 			-D VCPKG_TARGET_TRIPLET=$ENV{VCPKG_TRIPLET}
 			${vcpkg_host_triplet_arg}
 			-D VCPKG_MANIFEST_MODE=OFF
+			${extra_config_args}
 			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
+			${extra_config_args}
 			${llvm_x86_target_args}
 			${llvm_archive_tool_args}
 			--fresh

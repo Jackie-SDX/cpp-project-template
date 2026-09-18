@@ -17,6 +17,7 @@ env:
   VCPKG_GIT_REF: a1cae005c39be7b18ba319fced856b68d7276271
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
   CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_COMPILERCHECK: content
 
 jobs:
   build:
@@ -123,7 +124,7 @@ jobs:
             use_vcpkg: OFF
             msys2_msystem: CLANGARM64
             msys2_toolchain: mingw-w64-clang-aarch64-toolchain
-            msys2_packages: mingw-w64-clang-aarch64-wxwidgets3.2-msw mingw-w64-clang-aarch64-gtest
+            msys2_packages: wxwidgets3.2-msw:p gtest:p
             msys2_bin: clangarm64/bin
             cache_id: windows-clangarm64
 
@@ -194,6 +195,8 @@ jobs:
             cc: gcc
             cxx: g++
             arch: x64
+            build_projectwx: OFF
+            build_testing: OFF
             cache_id: macos-gcc-x64
 
           - name: macOS GCC ARM64
@@ -202,6 +205,8 @@ jobs:
             cc: gcc
             cxx: g++
             arch: arm64
+            build_projectwx: OFF
+            build_testing: OFF
             cache_id: macos-gcc-arm64
 
           - name: macOS LLVM x64
@@ -232,8 +237,9 @@ jobs:
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: .ccache
-          key: ccache-experimental-${{ matrix.cache_id }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+          key: ccache-experimental-v2-${{ matrix.cache_id }}-Release
           restore-keys: |
+            ccache-experimental-v2-${{ matrix.cache_id }}-Release-
             ccache-experimental-${{ matrix.cache_id }}-Release-
 
       - name: Install Linux dependencies
@@ -410,6 +416,8 @@ jobs:
           USE_VCPKG: ${{ matrix.use_vcpkg }}
           PACKAGE_TOOLCHAIN: ${{ matrix.compiler }}
           BUILD_TYPE: Release
+          BUILD_PROJECTWX: ${{ matrix.build_projectwx }}
+          BUILD_TESTING: ${{ matrix.build_testing }}
         run: cmake -P ./.github/scripts/configure.cmake
 
       - name: Verify configured compiler
@@ -420,7 +428,11 @@ jobs:
           test -n "$cxx_bin"
           test -x "$cxx_bin"
           echo "Configured CXX: $cxx_bin"
-          "$cxx_bin" --version
+          if [[ "${{ matrix.compiler }}" == "msvc" ]]; then
+            "$cxx_bin" /Bv
+          else
+            "$cxx_bin" --version
+          fi
 
       - name: Build
         working-directory: project
@@ -430,6 +442,13 @@ jobs:
           ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
           BUILD_TYPE: Release
         run: cmake -P ./.github/scripts/build.cmake
+
+      - name: Save compiler cache
+        if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: .ccache
+          key: ccache-experimental-v2-${{ matrix.cache_id }}-Release
 
       - name: Test
         working-directory: project
@@ -452,12 +471,28 @@ jobs:
             powershell -NoProfile -Command '
               $exe = Get-ChildItem -Recurse -File build\bin -Filter projectcli.exe | Select-Object -First 1
               if (-not $exe) { throw "projectcli.exe not found" }
-              $text = & dumpbin.exe /headers $exe.FullName 2>&1 | Out-String
-              switch ("${{ matrix.arch }}") {
-                "arm64" { if ($text -notmatch "machine \(ARM64\)") { throw "Expected ARM64 binary" } }
-                "x86" { if ($text -notmatch "machine \(x86\)") { throw "Expected x86 binary" } }
-                default { if ($text -notmatch "machine \(x64\)") { throw "Expected x64 binary" } }
+              $bytes = [IO.File]::ReadAllBytes($exe.FullName)
+              if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+                throw "Not a valid PE executable: $($exe.FullName)"
               }
+              $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+              if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) {
+                throw "Invalid PE header offset: $peOffset"
+              }
+              if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or
+                  $bytes[$peOffset + 2] -ne 0x00 -or $bytes[$peOffset + 3] -ne 0x00) {
+                throw "Invalid PE signature"
+              }
+              $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+              $expected = switch ("${{ matrix.arch }}") {
+                "arm64" { [UInt16]0xAA64 }
+                "x86"   { [UInt16]0x014C }
+                default { [UInt16]0x8664 }
+              }
+              if ($machine -ne $expected) {
+                throw ("Expected {0} PE (0x{1:X4}), got 0x{2:X4}" -f "${{ matrix.arch }}", $expected, $machine)
+              }
+              "Verified $($exe.FullName): PE machine 0x{0:X4}" -f $machine
             '
           else
             target="$(find build/bin -maxdepth 1 -type f -perm -111 -print -quit)"
@@ -471,9 +506,3 @@ jobs:
             esac
           fi
 
-      - name: Save compiler cache
-        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
-        with:
-          path: .ccache
-          key: ccache-experimental-${{ matrix.cache_id }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}

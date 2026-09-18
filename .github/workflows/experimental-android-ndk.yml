@@ -17,6 +17,7 @@ env:
   ANDROID_NDK_VERSION: 30.0.16248370
   ANDROID_PLATFORM: android-28
   CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_COMPILERCHECK: content
 
 jobs:
   build:
@@ -82,8 +83,9 @@ jobs:
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: .ccache
-          key: ccache-experimental-${{ matrix.cache_id }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**') }}
+          key: ccache-experimental-v2-${{ matrix.cache_id }}-Release
           restore-keys: |
+            ccache-experimental-v2-${{ matrix.cache_id }}-Release-
             ccache-experimental-${{ matrix.cache_id }}-Release-
 
       - name: Configure
@@ -104,6 +106,12 @@ jobs:
           BUILD_TYPE: Release
         run: cmake -P ./.github/scripts/build.cmake
 
+      - name: Save compiler cache
+        if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: .ccache-experimental-v2-${{ matrix.cache_id }}-Release
+
       - name: Verify Android ELF architecture
         working-directory: project
         shell: bash
@@ -114,9 +122,3 @@ jobs:
           readelf -h "$target"
           readelf -h "$target" | grep -F "Machine:" | grep -F -- "${{ matrix.expected_machine }}"
 
-      - name: Save compiler cache
-        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
-        with:
-          path: .ccache
-          key: ccache-experimental-${{ matrix.cache_id }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**') }}
