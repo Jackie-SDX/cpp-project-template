@@ -142,7 +142,6 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF
 			-D VCPKG_TARGET_TRIPLET=$ENV{VCPKG_TRIPLET}
 			${vcpkg_host_triplet_arg}
 			-D VCPKG_MANIFEST_MODE=OFF
-			${extra_config_args}
 			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
 			${extra_config_args}
 			${llvm_x86_target_args}
@@ -161,6 +160,7 @@ else()
 			-D CMAKE_C_COMPILER_LAUNCHER=ccache
 			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
 			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
+			${extra_config_args}
 			${llvm_archive_tool_args}
 			--fresh
 		RESULT_VARIABLE result
