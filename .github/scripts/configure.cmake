@@ -36,7 +36,40 @@ if (NOT "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "")
 	set(package_toolchain_arg "-D")	
 endif()
 
-if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
+if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND NOT "$ENV{ANDROID_ABI}" STREQUAL "")
+	file(TO_CMAKE_PATH "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" android_toolchain_file)
+	if (NOT EXISTS "${android_toolchain_file}")
+		message(FATAL_ERROR "Android NDK CMake toolchain not found: ${android_toolchain_file}")
+	endif()
+	if ("$ENV{BUILD_PROJECTWX}" STREQUAL "")
+		set(android_build_projectwx "OFF")
+	else()
+		set(android_build_projectwx "$ENV{BUILD_PROJECTWX}")
+	endif()
+	if ("$ENV{BUILD_TESTING}" STREQUAL "")
+		set(android_build_testing "OFF")
+	else()
+		set(android_build_testing "$ENV{BUILD_TESTING}")
+	endif()
+	execute_process(
+		COMMAND cmake
+			-S .
+			-B build
+			-D CMAKE_BUILD_TYPE=${actual_build_type}
+			-G "Ninja"
+			-D CMAKE_MAKE_PROGRAM=ninja
+			-D CMAKE_C_COMPILER_LAUNCHER=ccache
+			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+			-D CMAKE_TOOLCHAIN_FILE=${android_toolchain_file}
+			-D ANDROID_ABI=$ENV{ANDROID_ABI}
+			-D ANDROID_PLATFORM=$ENV{ANDROID_PLATFORM}
+			-D BUILD_PROJECTWX=${android_build_projectwx}
+			-D BUILD_TESTING=${android_build_testing}
+			-D PACKAGE_TOOLCHAIN=android
+			--fresh
+		RESULT_VARIABLE result
+	)
+elseif ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
 	set(llvm_x86_target_args)
 	if ("$ENV{VCPKG_TRIPLET}" STREQUAL "x86-win-llvm")
