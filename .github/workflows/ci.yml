@@ -98,6 +98,8 @@ jobs:
         with:
           msystem: ${{ matrix.config.msys2_msystem }}
           update: false
+          release: false
+          cache: true
           path-type: minimal
           install: ${{ matrix.config.msys2_toolchain }}
           pacboy: ${{ matrix.config.msys2_packages }}
