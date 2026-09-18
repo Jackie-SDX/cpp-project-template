@@ -13,16 +13,18 @@ permissions:
 env:
   VCPKG_GIT_REF: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
+  VCPKG_RELEASE_REVISION: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
 
 jobs:
   warmup:
     name: ${{ matrix.name }}
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Windows MSVC x64
+            os: windows-latest
             cc: cl
             cxx: cl
             environment_script: vcvars64.bat
@@ -30,6 +32,7 @@ jobs:
             toolchain: msvc
             arch: x64
           - name: Windows MSVC x86
+            os: windows-latest
             cc: cl
             cxx: cl
             environment_script: vcvars32.bat
@@ -37,18 +40,21 @@ jobs:
             toolchain: msvc
             arch: x86
           - name: Windows MinGW x64
+            os: windows-latest
             cc: gcc
             cxx: g++
             vcpkg_triplet: x64-mingw-dynamic
             toolchain: mingw
             arch: x64
           - name: Windows MinGW x86
+            os: windows-latest
             cc: gcc
             cxx: g++
             vcpkg_triplet: x86-mingw-dynamic
             toolchain: mingw
             arch: x86
           - name: Windows LLVM x64
+            os: windows-latest
             cc: clang-cl
             cxx: clang-cl
             environment_script: vcvars64.bat
@@ -62,6 +68,15 @@ jobs:
             vcpkg_triplet: x86-win-llvm
             toolchain: llvm
             arch: x86
+          - name: Windows MSVC ARM64
+            os: windows-11-arm
+            cc: cl
+            cxx: cl
+            environment_script: vcvars-arm64.bat
+            vcpkg_triplet: arm64-windows
+            toolchain: msvc
+            arch: arm64
+            external_triplets: false
 
     steps:
       - name: Checkout
@@ -75,12 +90,24 @@ jobs:
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
-          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.environment_script }}"
-          if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
-          "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
+          if (-not (Test-Path $vswhere)) { $vswhere = "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" }
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          if ("${{ matrix.arch }}" -eq "arm64") {
+            $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
+            if (-not $vsRoot) { throw "Native ARM64 MSVC toolset not found" }
+            $vsRoot = ($vsRoot | Select-Object -First 1).Trim()
+            $script = Join-Path $vsRoot "Common7\Tools\VsDevCmd.bat"
+            $wrapper = Join-Path $env:GITHUB_WORKSPACE "vs-arm64-env.bat"
+            Set-Content -Path $wrapper -Value "@echo off" -Encoding ascii
+            Add-Content -Path $wrapper -Value ('call "' + $script + '" -arch=arm64 -host_arch=arm64') -Encoding ascii
+            "ENVIRONMENT_SCRIPT=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } else {
+            $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
+            $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.environment_script }}"
+            if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
+            "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
       - name: Install cache tooling
         shell: bash
         run: choco install 7zip -y --no-progress
@@ -95,6 +122,7 @@ jobs:
           7z | Select-Object -First 1
 
       - name: Get Windows vcpkg triplets
+        if: matrix.external_triplets != false
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: Neumann-A/my-vcpkg-triplets
@@ -140,10 +168,10 @@ jobs:
         with:
           pkgs: wxwidgets gtest
           triplet: ${{ matrix.vcpkg_triplet }}
-          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
+          extra-args: ${{ matrix.external_triplets != false && format('--overlay-triplets={0}/my-vcpkg-triplets', github.workspace) || '' }}
           cache-key: release-${{ matrix.name }}
           disable-cache: true
-          revision: master
+          revision: ${{ env.VCPKG_RELEASE_REVISION }}
           token: ${{ github.token }}
 
       - name: Save release vcpkg binary cache
