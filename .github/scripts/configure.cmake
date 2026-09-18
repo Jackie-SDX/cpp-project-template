@@ -36,7 +36,7 @@ if (NOT "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "")
 	set(package_toolchain_arg "-D")	
 endif()
 
-if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
+if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
 	set(llvm_x86_target_args)
 	if ("$ENV{VCPKG_TRIPLET}" STREQUAL "x86-win-llvm")
@@ -44,6 +44,12 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 			-D CMAKE_C_FLAGS_INIT=/clang:--target=i686-pc-windows-msvc
 			-D CMAKE_CXX_FLAGS_INIT=/clang:--target=i686-pc-windows-msvc
 		)
+	endif()
+	set(vcpkg_host_triplet_arg "")
+	if (NOT "$ENV{VCPKG_HOST_TRIPLET}" STREQUAL "")
+		set(vcpkg_host_triplet_arg -D VCPKG_HOST_TRIPLET=$ENV{VCPKG_HOST_TRIPLET})
+	else()
+		set(vcpkg_host_triplet_arg -D VCPKG_HOST_TRIPLET=x64-windows)
 	endif()
 	execute_process(
 		COMMAND cmake
@@ -56,7 +62,7 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows")
 			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
 			-D CMAKE_TOOLCHAIN_FILE=${toolchain_file}
 			-D VCPKG_TARGET_TRIPLET=$ENV{VCPKG_TRIPLET}
-			-D VCPKG_HOST_TRIPLET=x64-windows
+			${vcpkg_host_triplet_arg}
 			-D VCPKG_MANIFEST_MODE=OFF
 			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
 			${llvm_x86_target_args}
