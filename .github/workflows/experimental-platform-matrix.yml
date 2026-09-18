@@ -294,9 +294,11 @@ jobs:
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         with:
           msystem: CLANGARM64
-          update: false
+          update: true
+          release: true
           path-type: minimal
-          install: ${{ matrix.msys2_toolchain }} ${{ matrix.msys2_packages }}
+          install: ${{ matrix.msys2_toolchain }}
+          pacboy: ${{ matrix.msys2_packages }}
 
       - name: Add MSYS2 compiler to PATH
         if: runner.os == 'Windows' && (matrix.compiler == 'mingw' || matrix.compiler == 'clangarm64')
