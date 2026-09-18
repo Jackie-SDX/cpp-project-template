@@ -1,4 +1,7 @@
 name: Release
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 env:
@@ -167,7 +170,7 @@ jobs:
         extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
         cache-key: release-${{ matrix.name }}
         disable-cache: true
-        revision: 2026.07.29
+        revision: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
         token: ${{ github.token }}
     - name: Save GitLab-style vcpkg binary cache
       if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
