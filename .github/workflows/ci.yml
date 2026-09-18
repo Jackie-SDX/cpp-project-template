@@ -35,15 +35,15 @@ jobs:
       matrix:
         build_type: [Debug, Release]
         config:
-          - { name: "Ubuntu GCC", os: ubuntu-24.04, cc: "gcc", cxx: "g++", vcpkg_triplet: x64-linux }
-          - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", vcpkg_triplet: arm64-osx }
-          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64 }
-          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86 }
-          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64 }
-          - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain, msys2_bin: mingw64\bin }
-          - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain, msys2_bin: mingw32\bin }
-          - { name: "Windows CLANGARM64 MinGW", os: windows-11-arm, cc: "clang", cxx: "clang++", vcpkg_triplet: none, use_vcpkg: "OFF", msys2_msystem: CLANGARM64, msys2_toolchain: mingw-w64-clang-aarch64-toolchain, msys2_packages: wxwidgets3.2-msw:p gtest:p, msys2_bin: clangarm64\bin }
-          - { name: "Linux Clang ARM64", os: ubuntu-24.04-arm, cc: "clang", cxx: "clang++", vcpkg_triplet: none, use_vcpkg: "OFF" }
+          - { name: "Ubuntu GCC", os: ubuntu-24.04, cc: "gcc", cxx: "g++", arch: x64, vcpkg_triplet: x64-linux, use_vcpkg: "ON" }
+          - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: arm64-osx, use_vcpkg: "ON" }
+          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", arch: x64, environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64, use_vcpkg: "ON" }
+          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", arch: x86, environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86, use_vcpkg: "ON" }
+          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", arch: x64, vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64, use_vcpkg: "ON" }
+          - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", arch: x64, vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, use_vcpkg: "ON", msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain, msys2_bin: mingw64\bin }
+          - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", arch: x86, vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, use_vcpkg: "ON", msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain, msys2_bin: mingw32\bin }
+          - { name: "Windows CLANGARM64 MinGW", os: windows-11-arm, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: none, use_vcpkg: "OFF", msys2_msystem: CLANGARM64, msys2_toolchain: mingw-w64-clang-aarch64-toolchain, msys2_packages: wxwidgets3.2-msw:p gtest:p, msys2_bin: clangarm64\bin }
+          - { name: "Linux Clang ARM64", os: ubuntu-24.04-arm, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: none, use_vcpkg: "OFF" }
 
     defaults:
       run:
