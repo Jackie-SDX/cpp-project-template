@@ -75,7 +75,8 @@ jobs:
             *) echo "Unsupported cache compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
           esac
       - name: Restore release package cache
-        id: package-cache        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        id: package-cache
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: project/vcpkg_cache
           key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
