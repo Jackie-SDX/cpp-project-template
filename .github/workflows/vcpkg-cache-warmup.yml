@@ -245,7 +245,7 @@ jobs:
         with:
           msystem: CLANGARM64
           update: false
-          release: true
+          release: false
           cache: true
           path-type: minimal
           install: mingw-w64-clang-aarch64-toolchain
