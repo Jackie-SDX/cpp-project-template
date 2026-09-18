@@ -36,19 +36,16 @@ jobs:
           - name: Windows MSVC x64
             compiler: msvc
             os: windows-latest
-            compiler: msvc
             arch: x64
             tool_arch: X64
           - name: Windows MSVC x86
             compiler: msvc
             os: windows-latest
-            compiler: msvc
             arch: x86
             tool_arch: X64
           - name: Windows MSVC ARM64
             compiler: msvc
             os: windows-11-arm
-            compiler: msvc
             arch: arm64
             tool_arch: ARM64
           - name: Windows LLVM x64
@@ -69,13 +66,11 @@ jobs:
           - name: Windows MinGW x64
             compiler: mingw
             os: windows-latest
-            compiler: mingw
             arch: x64
             tool_arch: X64
           - name: Windows MinGW x86
             compiler: mingw
             os: windows-latest
-            compiler: mingw
             arch: x86
             tool_arch: X64
     steps:
