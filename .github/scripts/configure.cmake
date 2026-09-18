@@ -123,6 +123,7 @@ else()
 			-D CMAKE_C_COMPILER_LAUNCHER=ccache
 			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
 			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
+			${llvm_archive_tool_args}
 			--fresh
 		RESULT_VARIABLE result
 	)
