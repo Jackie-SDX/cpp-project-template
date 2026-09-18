@@ -31,13 +31,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: "Windows MSVC x64", os: windows-latest, cache_prefix: windows-master-x64-Release, tool_arch: X64 }
-          - { name: "Windows MSVC x86", os: windows-latest, cache_prefix: windows-master-x86-Release, tool_arch: X64 }
-          - { name: "Windows MSVC ARM64", os: windows-11-arm, cache_prefix: windows-master-arm64-Release, tool_arch: ARM64 }
-          - { name: "Windows LLVM x64", os: windows-latest, cache_prefix: windows-llvm-master-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-x64-Release, tool_arch: X64 }
-          - { name: "Windows LLVM x86", os: windows-latest, cache_prefix: windows-llvm-master-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-x86-Release, tool_arch: X64 }
-          - { name: "Windows MinGW x64", os: windows-latest, cache_prefix: windows-mingw-master-x64-Release, tool_arch: X64 }
-          - { name: "Windows MinGW x86", os: windows-latest, cache_prefix: windows-mingw-master-x86-Release, tool_arch: X64 }
+          - name: Windows MSVC x64
+            os: windows-latest
+            cache_prefix: windows-master-x64-Release
+            tool_arch: X64
+          - name: Windows MSVC x86
+            os: windows-latest
+            cache_prefix: windows-master-x86-Release
+            tool_arch: X64
+          - name: Windows MSVC ARM64
+            os: windows-11-arm
+            cache_prefix: windows-master-arm64-Release
+            tool_arch: ARM64
+          - name: Windows LLVM x64
+            os: windows-latest
+            cache_prefix: windows-llvm-master-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-x64-Release
+            tool_arch: X64
+          - name: Windows LLVM x86
+            os: windows-latest
+            cache_prefix: windows-llvm-master-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-x86-Release
+            tool_arch: X64
+          - name: Windows MinGW x64
+            os: windows-latest
+            cache_prefix: windows-mingw-master-x64-Release
+            tool_arch: X64
+          - name: Windows MinGW x86
+            os: windows-latest
+            cache_prefix: windows-mingw-master-x86-Release
+            tool_arch: X64
     steps:
       - name: Checkout project
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
