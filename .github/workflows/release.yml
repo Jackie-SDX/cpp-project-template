@@ -584,21 +584,21 @@ jobs:
         : > expected.txt
 
         for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686; do printf
-        ''%s\n'' "cpp-project-template_$version_$compiler_arch.zip" "cpp-project-template_$version_$compiler_arch.7z" "cpp-project-template_$version_$compiler_arch_nsis.exe"
-        "cpp-project-template_$version_$compiler_arch_wix.msi" >> expected.txt; done
+        ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe"
+        "cpp-project-template_${version}_${compiler_arch}_wix.msi" >> expected.txt; done
 
-        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_$version_$compiler_arch.zip" "cpp-project-template_$version_$compiler_arch.7z"
+        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z"
         >> expected.txt; done
 
-        for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do printf ''%s\n'' "cpp-project-template_$version_$compiler_arch.zip"
-        "cpp-project-template_$version_$compiler_arch.7z" "cpp-project-template_$version_$compiler_arch.tar.gz" "cpp-project-template_$version_$compiler_arch.deb"
-        "cpp-project-template_$version_$compiler_arch.rpm" >> expected.txt; done
+        for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip"
+        "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz" "cpp-project-template_${version}_${compiler_arch}.deb"
+        "cpp-project-template_${version}_${compiler_arch}.rpm" >> expected.txt; done
 
         for compiler_arch in macos-clang-arm64 macos-apple-clang-x86_64 macos-gcc-x86_64 macos-gcc-arm64 macos-llvm-x86_64 macos-llvm-arm64; do printf ''%s\n''
-        "cpp-project-template_$version_$compiler_arch.zip" "cpp-project-template_$version_$compiler_arch.7z" "cpp-project-template_$version_$compiler_arch.tar.gz"
-        "cpp-project-template_$version_$compiler_arch.dmg" >> expected.txt; done
+        "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz"
+        "cpp-project-template_${version}_${compiler_arch}.dmg" >> expected.txt; done
 
-        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' "cpp-project-template_$version_android-ndk-$abi.zip" >> expected.txt; done
+        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' "cpp-project-template_${version}_android-ndk-${abi}.zip" >> expected.txt; done
 
         sort -u expected.txt > expected.sorted
 
@@ -1130,7 +1130,7 @@ jobs:
         printf ''Project: cpp-project-template\nVersion: %s\nAndroid ABI: %s\nNDK: %s\nAPI: %s\n'' "$version" ${{ matrix.abi }} "$ANDROID_NDK_VERSION" "$ANDROID_PLATFORM"
         > android-release/BUILD-INFO.txt
 
-        (cd android-release && zip -q -r "../release-assets/cpp-project-template_$version_android-ndk-${{ matrix.abi }}.zip" .)'
+        (cd android-release && zip -q -r "../release-assets/cpp-project-template_${version}_android-ndk-${{ matrix.abi }}.zip" .)'
     - name: Upload Android package artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
