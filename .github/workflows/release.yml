@@ -105,7 +105,7 @@ jobs:
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: .ccache
-        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
         restore-keys: 'ccache-${{ runner.os }}-${{ matrix.name }}-Release-
 
           '
@@ -217,7 +217,7 @@ jobs:
       uses: actions/cache/save@v5
       with:
         path: .ccache
-        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
     - name: Test
       working-directory: project
       env:
@@ -362,7 +362,7 @@ jobs:
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: .ccache
-        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
+        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
         restore-keys: 'ccache-Linux-Linux-GCC-x64-PR-Release-
 
           '
@@ -391,7 +391,7 @@ jobs:
       uses: actions/cache/save@v5
       with:
         path: .ccache
-        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
+        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
     - name: Test
       env:
         CC: gcc
@@ -755,7 +755,7 @@ jobs:
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: .ccache
-        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
         restore-keys: ccache-${{ runner.os }}-${{ matrix.name }}-Release-
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
@@ -845,31 +845,83 @@ jobs:
       uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        key: ${{ env.VCPKG_CACHE_PREFIX  }}-${{ hashFiles('project/vcpkg.json')  }}
         restore-keys: |
-          ${{ env.VCPKG_CACHE_PREFIX }}-
-          vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-
+          ${{ env.VCPKG_CACHE_PREFIX  }}-
+          vcpkg-experimental-${{ matrix.cache_id  }}-${{ env.VCPKG_GIT_REF  }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT  }}-${{ matrix.vcpkg_triplet  }}-
+
+    - name: Checkout ARM64 vcpkg tool
+      if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64'
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        repository: microsoft/vcpkg
+        ref: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+        path: vcpkg
+        fetch-depth: 1
+
+    - name: Restore ARM64 vcpkg tool cache
+      if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64'
+      id: arm64-vcpkg-tool-cache-restore
+      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: vcpkg/vcpkg.exe
+        key: vcpkg-tool-windows-arm64-e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+        restore-keys: |
+          vcpkg-tool-windows-arm64-
+
+    - name: Bootstrap ARM64 vcpkg tool
+      if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64' && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+      shell: pwsh
+      working-directory: vcpkg
+      run: .\bootstrap-vcpkg.bat -disableMetrics
+
+    - name: Verify ARM64 vcpkg tool
+      if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64'
+      shell: pwsh
+      run: |
+        if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'ARM64 vcpkg.exe was not restored or bootstrapped' }
+        & .\vcpkg\vcpkg.exe version
+
+    - name: Save ARM64 vcpkg tool cache
+      if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64' && success() && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: vcpkg/vcpkg.exe
+        key: vcpkg-tool-windows-arm64-e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+
     - name: vcpkg
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && !(matrix.compiler == 'msvc' && matrix.arch == 'arm64')
       uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d
       env:
         VCPKG_MANIFEST_MODE: OFF
-        VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
-        VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.vcpkg_host_triplet }}
+        VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace  }}/project/vcpkg_cache,readwrite
+        VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.vcpkg_host_triplet  }}
       with:
         pkgs: wxwidgets gtest
-        triplet: ${{ matrix.vcpkg_triplet }}
-        extra-args: ${{ matrix.external_triplets && format('--overlay-triplets={0}/my-vcpkg-triplets', github.workspace) || '' }}
-        cache-key: release-${{ matrix.name }}
+        triplet: ${{ matrix.vcpkg_triplet  }}
+        extra-args: ${{ matrix.external_triplets && format('--overlay-triplets={0}/my-vcpkg-triplets', github.workspace) || ''  }}
+        cache-key: release-${{ matrix.name  }}
         disable-cache: true
         revision: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
-        token: ${{ github.token }}
+        token: ${{ github.token  }}
+
+    - name: vcpkg ARM64
+      if: runner.os == 'Windows' && matrix.compiler == 'msvc' && matrix.arch == 'arm64'
+      shell: pwsh
+      env:
+        VCPKG_MANIFEST_MODE: OFF
+        VCPKG_BINARY_SOURCES: clear;files:${{ github.workspace }}\project\vcpkg_cache,readwrite
+        VCPKG_DEFAULT_HOST_TRIPLET: arm64-windows
+      run: |
+        & .\vcpkg\vcpkg.exe install --triplet arm64-windows wxwidgets gtest
+        if ($LASTEXITCODE -ne 0) { throw "ARM64 vcpkg install failed with exit code $LASTEXITCODE" }
+
     - name: Save Windows vcpkg binary cache
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        key: ${{ env.VCPKG_CACHE_PREFIX  }}-${{ hashFiles('project/vcpkg.json')  }}
     - name: Configure
       working-directory: project
       env:
@@ -900,11 +952,11 @@ jobs:
         BUILD_TYPE: Release
       run: cmake -P ./.github/scripts/build.cmake
     - name: Save compiler cache
-      if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
+      if: success() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
       uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
         path: .ccache
-        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'vcpkg.json') }}
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
     - name: Test
       if: matrix.build_testing != 'OFF'
       working-directory: project
