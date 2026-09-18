@@ -410,8 +410,8 @@ jobs:
         working-directory: project
         shell: bash
         run: |
-          cc_bin="\${CC:-\${{ matrix.cc }}"
-          cxx_bin="\${CXX:-\${{ matrix.cxx }}"
+          cc_bin="\${CC:-\${{ matrix.cc }}}"
+          cxx_bin="\${CXX:-\${{ matrix.cxx }}}"
           "$cc_bin" --version
           "$cxx_bin" --version
 
