@@ -214,16 +214,6 @@ jobs:
             & .\vcpkg\vcpkg.exe install --triplet "${{ matrix.vcpkg_triplet }}" wxwidgets gtest
           }
           if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed with exit code $LASTEXITCODE" }
-      - name: vcpkg ARM64
-        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-        shell: pwsh
-        env:
-          VCPKG_MANIFEST_MODE: OFF
-          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\project\vcpkg_cache,readwrite
-          VCPKG_DEFAULT_HOST_TRIPLET: arm64-windows
-        run: |
-          & .\vcpkg\vcpkg.exe install --triplet arm64-windows wxwidgets gtest
-          if ($LASTEXITCODE -ne 0) { throw "ARM64 vcpkg install failed with exit code $LASTEXITCODE" }
       - name: Save release vcpkg binary cache
         if: success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
