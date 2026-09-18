@@ -69,7 +69,16 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND NOT "$ENV{ANDROID_ABI}" STREQUAL "")
 			--fresh
 		RESULT_VARIABLE result
 	)
-elseif ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
+elseif ("$ENV{RUNNER_OS}" STREQUAL "macOS" AND "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "llvm")
+	set(llvm_archive_tool_args
+		-D CMAKE_AR=/usr/bin/ar
+		-D CMAKE_RANLIB=/usr/bin/ranlib
+	)
+else()
+	set(llvm_archive_tool_args)
+endif()
+
+if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
 	set(llvm_x86_target_args)
 	if ("$ENV{VCPKG_TRIPLET}" STREQUAL "x86-win-llvm")
@@ -99,6 +108,7 @@ elseif ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL 
 			-D VCPKG_MANIFEST_MODE=OFF
 			-D PACKAGE_TOOLCHAIN=$ENV{PACKAGE_TOOLCHAIN}
 			${llvm_x86_target_args}
+			${llvm_archive_tool_args}
 			--fresh
 		RESULT_VARIABLE result
 	)
