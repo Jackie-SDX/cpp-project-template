@@ -1,21 +1,10 @@
 name: Release
-
-on:
-  pull_request:
-    branches: [ main ]
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-
 permissions:
   contents: read
-
 env:
   VCPKG_GIT_REF: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
   CCACHE_DIR: ${{ github.workspace }}/.ccache
-
 jobs:
   package:
     name: ${{ matrix.name }}
@@ -25,483 +14,1038 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Windows MSVC x64
-            os: windows-latest
-            cc: cl
-            cxx: cl
-            environment_script: vcvars64.bat
-            vcpkg_triplet: x64-windows-static
-            toolchain: msvc
-            arch: x64
-            nsis_generator: NSIS64
-          - name: Windows MSVC x86
-            os: windows-latest
-            cc: cl
-            cxx: cl
-            environment_script: vcvars32.bat
-            vcpkg_triplet: x86-windows-static
-            toolchain: msvc
-            arch: x86
-            nsis_generator: NSIS
-          - name: Windows MinGW x64
-            os: windows-latest
-            cc: gcc
-            cxx: g++
-            vcpkg_triplet: x64-mingw-dynamic
-            toolchain: mingw
-            arch: x64
-            nsis_generator: NSIS64
-          - name: Windows MinGW x86
-            os: windows-latest
-            cc: gcc
-            cxx: g++
-            vcpkg_triplet: x86-mingw-dynamic
-            toolchain: mingw
-            arch: x86
-            nsis_generator: NSIS
-          - name: Windows LLVM x64
-            os: windows-latest
-            cc: clang-cl
-            cxx: clang-cl
-            environment_script: vcvars64.bat
-            vcpkg_triplet: x64-win-llvm-release
-            toolchain: llvm
-            arch: x64
-            nsis_generator: NSIS64
-          - name: Windows LLVM x86
-            os: windows-latest
-            cc: clang-cl
-            cxx: clang-cl
-            environment_script: vcvars32.bat
-            vcpkg_triplet: x86-win-llvm
-            toolchain: llvm
-            arch: x86
-            nsis_generator: NSIS
-          - name: Linux GCC x64
-            os: ubuntu-24.04
-            cc: gcc
-            cxx: g++
-            toolchain: gcc
-            arch: x64
-          - name: Linux GCC arm64
-            os: ubuntu-24.04-arm
-            cc: gcc
-            cxx: g++
-            toolchain: gcc
-            arch: arm64
-          - name: macOS Clang arm64
-            os: macos-latest
-            cc: clang
-            cxx: clang++
-            toolchain: clang
-            arch: arm64
-
+        - name: Windows MSVC x64
+          os: windows-latest
+          cc: cl
+          cxx: cl
+          environment_script: vcvars64.bat
+          vcpkg_triplet: x64-windows-static
+          toolchain: msvc
+          arch: x64
+          nsis_generator: NSIS64
+        - name: Windows MSVC x86
+          os: windows-latest
+          cc: cl
+          cxx: cl
+          environment_script: vcvars32.bat
+          vcpkg_triplet: x86-windows-static
+          toolchain: msvc
+          arch: x86
+          nsis_generator: NSIS
+        - name: Windows MinGW x64
+          os: windows-latest
+          cc: gcc
+          cxx: g++
+          vcpkg_triplet: x64-mingw-dynamic
+          toolchain: mingw
+          arch: x64
+          nsis_generator: NSIS64
+        - name: Windows MinGW x86
+          os: windows-latest
+          cc: gcc
+          cxx: g++
+          vcpkg_triplet: x86-mingw-dynamic
+          toolchain: mingw
+          arch: x86
+          nsis_generator: NSIS
+        - name: Windows LLVM x64
+          os: windows-latest
+          cc: clang-cl
+          cxx: clang-cl
+          environment_script: vcvars64.bat
+          vcpkg_triplet: x64-win-llvm-release
+          toolchain: llvm
+          arch: x64
+          nsis_generator: NSIS64
+        - name: Windows LLVM x86
+          os: windows-latest
+          cc: clang-cl
+          cxx: clang-cl
+          environment_script: vcvars32.bat
+          vcpkg_triplet: x86-win-llvm
+          toolchain: llvm
+          arch: x86
+          nsis_generator: NSIS
+        - name: Linux GCC x64
+          os: ubuntu-24.04
+          cc: gcc
+          cxx: g++
+          toolchain: gcc
+          arch: x64
+        - name: Linux GCC arm64
+          os: ubuntu-24.04-arm
+          cc: gcc
+          cxx: g++
+          toolchain: gcc
+          arch: arm64
+        - name: macOS Clang arm64
+          os: macos-latest
+          cc: clang
+          cxx: clang++
+          toolchain: clang
+          arch: arm64
     defaults:
       run:
         shell: bash
-
-    continue-on-error: ${{ matrix.toolchain == 'llvm' && github.event_name != 'pull_request' }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          submodules: true
-          fetch-depth: 0
-          path: project
+    - name: Checkout
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        submodules: true
+        fetch-depth: 0
+        path: project
+    - name: Restore compiler cache
+      id: ccache-restore
+      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: .ccache
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        restore-keys: 'ccache-${{ runner.os }}-${{ matrix.name }}-Release-
 
-      - name: Restore compiler cache
-        id: ccache-restore
-        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
-        with:
-          path: .ccache
-          key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ matrix.name }}-Release-
+          '
+    - name: Locate MSVC environment script
+      if: runner.os == 'Windows' && (matrix.toolchain == 'msvc' || matrix.toolchain == 'llvm')
+      shell: pwsh
+      run: '$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 
-      - name: Locate MSVC environment script
-        if: runner.os == 'Windows' && (matrix.toolchain == 'msvc' || matrix.toolchain == 'llvm')
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
-          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.environment_script }}"
-          if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
-          "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 
-      - name: Install packaging dependencies
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update
-            sudo apt-get install -y ninja-build ccache rpm libwxgtk3.2-dev libgtest-dev
-          elif [ "$RUNNER_OS" = "Windows" ]; then
-            choco install ninja ccache nsis 7zip -y --no-progress
-            choco install wixtoolset -y --no-progress
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            brew install ninja ccache wxwidgets googletest
-          fi
+        if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
 
-      - name: Refresh Windows environment
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
-            Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
-            refreshenv
-          }
-          7z | Select-Object -First 1
+        $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.environment_script }}"
 
-      - name: Get Windows vcpkg triplets
-        if: runner.os == 'Windows'
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          repository: Neumann-A/my-vcpkg-triplets
-          ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
-          path: my-vcpkg-triplets
-          fetch-depth: 1
+        if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
 
-      - name: Resolve GitLab-style vcpkg cache key
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          case "${{ matrix.toolchain }}" in
-            msvc) cache_prefix="windows-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release" ;;
-            mingw) cache_prefix="windows-mingw-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release" ;;
-            llvm) cache_prefix="windows-llvm-${VCPKG_GIT_REF}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" ;;
-            *) echo "Unsupported Windows cache toolchain: ${{ matrix.toolchain }}" >&2; exit 1 ;;
-          esac
-          echo "VCPKG_CACHE_PREFIX=${cache_prefix}" >> "$GITHUB_ENV"
+        "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Restore GitLab-style vcpkg binary cache
-        if: runner.os == 'Windows'
-        id: vcpkg-binary-cache-restore
-        uses: actions/cache/restore@v5
-        with:
-          path: project/vcpkg_cache
-          key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
-          restore-keys: |
-            ${{ env.VCPKG_CACHE_PREFIX }}-
+        '
+    - name: Install packaging dependencies
+      run: "if [ \"$RUNNER_OS\" = \"Linux\" ]; then\n  sudo apt-get update\n  sudo apt-get install -y ninja-build ccache rpm libwxgtk3.2-dev libgtest-dev\n\
+        elif [ \"$RUNNER_OS\" = \"Windows\" ]; then\n  choco install ninja ccache nsis 7zip -y --no-progress\n  choco install wixtoolset -y --no-progress\n\
+        elif [ \"$RUNNER_OS\" = \"macOS\" ]; then\n  brew install ninja ccache wxwidgets googletest\nfi\n"
+    - name: Refresh Windows environment
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: "if (Test-Path \"$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1\") {\n  Import-Module \"$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1\"\
+        \n  refreshenv\n}\n7z | Select-Object -First 1\n"
+    - name: Get Windows vcpkg triplets
+      if: runner.os == 'Windows'
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        repository: Neumann-A/my-vcpkg-triplets
+        ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
+        path: my-vcpkg-triplets
+        fetch-depth: 1
+    - name: Resolve GitLab-style vcpkg cache key
+      if: runner.os == 'Windows'
+      shell: bash
+      run: "case \"${{ matrix.toolchain }}\" in\n  msvc) cache_prefix=\"windows-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release\" ;;\n  mingw) cache_prefix=\"\
+        windows-mingw-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release\" ;;\n  llvm) cache_prefix=\"windows-llvm-${VCPKG_GIT_REF}-${MY_VCPKG_TRIPLETS_COMMIT}-${{\
+        \ matrix.arch }}-Release\" ;;\n  *) echo \"Unsupported Windows cache toolchain: ${{ matrix.toolchain }}\" >&2; exit 1 ;;\nesac\necho \"VCPKG_CACHE_PREFIX=${cache_prefix}\"\
+        \ >> \"$GITHUB_ENV\"\n"
+    - name: Restore GitLab-style vcpkg binary cache
+      if: runner.os == 'Windows'
+      id: vcpkg-binary-cache-restore
+      uses: actions/cache/restore@v5
+      with:
+        path: project/vcpkg_cache
+        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        restore-keys: '${{ env.VCPKG_CACHE_PREFIX }}-
 
-      - name: vcpkg
-        if: runner.os == 'Windows'
-        uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
-        env:
-          VCPKG_MANIFEST_MODE: OFF
-          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
-        with:
-          pkgs: wxwidgets gtest
-          triplet: ${{ matrix.vcpkg_triplet }}
-          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
-          cache-key: release-${{ matrix.name }}
-          disable-cache: true
-          revision: master
-          token: ${{ github.token }}
+          '
+    - name: vcpkg
+      if: runner.os == 'Windows'
+      uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d
+      env:
+        VCPKG_MANIFEST_MODE: false
+        VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
+      with:
+        pkgs: wxwidgets gtest
+        triplet: ${{ matrix.vcpkg_triplet }}
+        extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
+        cache-key: release-${{ matrix.name }}
+        disable-cache: true
+        revision: master
+        token: ${{ github.token }}
+    - name: Save GitLab-style vcpkg binary cache
+      if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: project/vcpkg_cache
+        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+    - name: Configure
+      working-directory: project
+      env:
+        CC: ${{ matrix.cc }}
+        CXX: ${{ matrix.cxx }}
+        ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+        RUNNER_OS: ${{ runner.os }}
+        VCPKG_TRIPLET: ${{ matrix.vcpkg_triplet }}
+        BUILD_TYPE: Release
+        PACKAGE_TOOLCHAIN: ${{ matrix.toolchain }}
+      run: cmake -P ./.github/scripts/configure.cmake
+    - name: Verify toolchain identity
+      if: runner.os == 'Windows'
+      working-directory: project
+      env:
+        TOOLCHAIN: ${{ matrix.toolchain }}
+      run: 'if [ "$TOOLCHAIN" = "llvm" ]; then clang-cl --version
 
-      - name: Save GitLab-style vcpkg binary cache
-        if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: project/vcpkg_cache
-          key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        elif [ "$TOOLCHAIN" = "mingw" ]; then g++ --version
 
-      - name: Configure
-        working-directory: project
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
-          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
-          RUNNER_OS: ${{ runner.os }}
-          VCPKG_TRIPLET: ${{ matrix.vcpkg_triplet }}
-          BUILD_TYPE: Release
-          PACKAGE_TOOLCHAIN: ${{ matrix.toolchain }}
-        run: cmake -P ./.github/scripts/configure.cmake
+        else cmd.exe /c "cl" 2>&1 | head -3
 
-      - name: Verify toolchain identity
-        if: runner.os == 'Windows'
-        working-directory: project
-        env:
-          TOOLCHAIN: ${{ matrix.toolchain }}
-        run: |
-          if [ "$TOOLCHAIN" = "llvm" ]; then clang-cl --version
-          elif [ "$TOOLCHAIN" = "mingw" ]; then g++ --version
-          else cmd.exe /c "cl" 2>&1 | head -3
-          fi
+        fi
 
-      - name: Build
-        working-directory: project
-        env:
-          CXX: ${{ matrix.cxx }}
-          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
-          RUNNER_OS: ${{ runner.os }}
-          BUILD_TYPE: Release
-        run: cmake -P ./.github/scripts/build.cmake
+        '
+    - name: Build
+      working-directory: project
+      env:
+        CXX: ${{ matrix.cxx }}
+        ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+        RUNNER_OS: ${{ runner.os }}
+        BUILD_TYPE: Release
+      run: cmake -P ./.github/scripts/build.cmake
+    - name: Save compiler cache
+      if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: .ccache
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+    - name: Test
+      working-directory: project
+      env:
+        CC: ${{ matrix.cc }}
+        CXX: ${{ matrix.cxx }}
+        RUNNER_OS: ${{ runner.os }}
+        BUILD_TYPE: Release
+      run: cmake -P ./.github/scripts/test.cmake
+    - name: Install
+      working-directory: project
+      run: cmake --install build --prefix instdir --strip --config Release
+    - name: Verify install tree
+      working-directory: project
+      run: test -n "$(find instdir -type f -print -quit)"
+    - name: Determine canonical package name
+      id: package_name
+      working-directory: project
+      shell: bash
+      run: 'base=$(sed -n ''s/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p'' build/CPackConfig.cmake | head -1)
 
-      - name: Save compiler cache
-        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: .ccache
-          key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        test -n "$base"
 
-      - name: Test
-        working-directory: project
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
-          RUNNER_OS: ${{ runner.os }}
-          BUILD_TYPE: Release
-        run: cmake -P ./.github/scripts/test.cmake
+        echo "base=$base" >> "$GITHUB_OUTPUT"
 
-      - name: Install
-        working-directory: project
-        run: cmake --install build --prefix instdir --strip --config Release
+        '
+    - name: Resolve release version and naming
+      working-directory: project
+      shell: bash
+      run: 'if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags
+        --always --dirty | sed ''s/^v//'')"; fi
 
-      - name: Verify install tree
-        working-directory: project
-        run: test -n "$(find instdir -type f -print -quit)"
+        case "$RUNNER_OS" in Linux) platform="linux" ;; Windows) platform="windows" ;; macOS) platform="macos" ;; *) exit 1 ;; esac
 
-      - name: Determine canonical package name
-        id: package_name
-        working-directory: project
-        shell: bash
-        run: |
-          base=$(sed -n 's/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p' build/CPackConfig.cmake | head -1)
-          test -n "$base"
-          echo "base=$base" >> "$GITHUB_OUTPUT"
+        case "${{ matrix.arch }}" in x64) package_arch="x86_64" ;; x86) package_arch="i686" ;; arm64) package_arch="arm64" ;; *) exit 1 ;; esac
 
-      - name: Resolve release version and naming
-        working-directory: project
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags --always --dirty | sed 's/^v//')"; fi
-          case "$RUNNER_OS" in Linux) platform="linux" ;; Windows) platform="windows" ;; macOS) platform="macos" ;; *) exit 1 ;; esac
-          case "${{ matrix.arch }}" in x64) package_arch="x86_64" ;; x86) package_arch="i686" ;; arm64) package_arch="arm64" ;; *) exit 1 ;; esac
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-          echo "RELEASE_PREFIX=cpp-project-template_${version}_${platform}-${{ matrix.toolchain }}-${package_arch}" >> "$GITHUB_ENV"
+        echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - name: Package Windows
-        if: runner.os == 'Windows'
-        working-directory: project
-        shell: pwsh
-        env:
-          PREFIX: ${{ env.RELEASE_PREFIX }}
-          BASE: ${{ steps.package_name.outputs.base }}
-        run: |
-          New-Item -ItemType Directory -Force release-assets | Out-Null
-          Compress-Archive -Path instdir\* -DestinationPath "release-assets\$env:PREFIX.zip" -Force
-          Push-Location build
-          cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
-          Copy-Item "package\$env:BASE.exe" "..\release-assets\$env:PREFIX`_nsis.exe" -Force
-          cpack --config CPackConfig.cmake -C Release -G 7Z
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
-          Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
-          cpack --config CPackConfig.cmake -C Release -G WIX
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
-          Copy-Item "package\$env:BASE.msi" "..\release-assets\$env:PREFIX`_wix.msi" -Force
-          Pop-Location
+        echo "RELEASE_PREFIX=cpp-project-template_${version}_${platform}-${{ matrix.toolchain }}-${package_arch}" >> "$GITHUB_ENV"
 
-      - name: Package Linux
-        if: runner.os == 'Linux'
-        working-directory: project
-        env:
-          PREFIX: ${{ env.RELEASE_PREFIX }}
-        run: |
-          mkdir -p release-assets
-          (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
-          (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
-          (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
-          cpack --config build/CPackConfig.cmake -C Release -G DEB
-          cpack --config build/CPackConfig.cmake -C Release -G RPM
-          deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
-          rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
-          test -n "$deb" && test -n "$rpm"
-          cp "$deb" "release-assets/${PREFIX}.deb"
-          cp "$rpm" "release-assets/${PREFIX}.rpm"
+        '
+    - name: Package Windows
+      if: runner.os == 'Windows'
+      working-directory: project
+      shell: pwsh
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+        BASE: ${{ steps.package_name.outputs.base }}
+      run: 'New-Item -ItemType Directory -Force release-assets | Out-Null
 
-      - name: Package macOS
-        if: runner.os == 'macOS'
-        working-directory: project
-        env:
-          PREFIX: ${{ env.RELEASE_PREFIX }}
-        run: |
-          mkdir -p release-assets
-          (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
-          (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
-          (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
-          cpack --config build/CPackConfig.cmake -C Release -G DragNDrop
-          dmg=$(find build/package -maxdepth 1 -type f -name '*.dmg' | head -1)
-          test -n "$dmg"
-          cp "$dmg" "release-assets/${PREFIX}.dmg"
+        Compress-Archive -Path instdir\* -DestinationPath "release-assets\$env:PREFIX.zip" -Force
 
-      - name: Upload package artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-${{ matrix.name }}
-          path: project/release-assets/*
-          if-no-files-found: error
+        Push-Location build
 
+        cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
+
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
+
+        Copy-Item "package\$env:BASE.exe" "..\release-assets\$env:PREFIX`_nsis.exe" -Force
+
+        cpack --config CPackConfig.cmake -C Release -G 7Z
+
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
+
+        Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
+
+        cpack --config CPackConfig.cmake -C Release -G WIX
+
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
+
+        Copy-Item "package\$env:BASE.msi" "..\release-assets\$env:PREFIX`_wix.msi" -Force
+
+        Pop-Location
+
+        '
+    - name: Package Linux
+      if: runner.os == 'Linux'
+      working-directory: project
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+      run: 'mkdir -p release-assets
+
+        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
+
+        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
+
+        (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
+
+        cpack --config build/CPackConfig.cmake -C Release -G DEB
+
+        cpack --config build/CPackConfig.cmake -C Release -G RPM
+
+        deb=$(find build/package -maxdepth 1 -type f -name ''*.deb'' | head -1)
+
+        rpm=$(find build/package -maxdepth 1 -type f -name ''*.rpm'' | head -1)
+
+        test -n "$deb" && test -n "$rpm"
+
+        cp "$deb" "release-assets/${PREFIX}.deb"
+
+        cp "$rpm" "release-assets/${PREFIX}.rpm"
+
+        '
+    - name: Package macOS
+      if: runner.os == 'macOS'
+      working-directory: project
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+      run: 'mkdir -p release-assets
+
+        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
+
+        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
+
+        (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
+
+        cpack --config build/CPackConfig.cmake -C Release -G DragNDrop
+
+        dmg=$(find build/package -maxdepth 1 -type f -name ''*.dmg'' | head -1)
+
+        test -n "$dmg"
+
+        cp "$dmg" "release-assets/${PREFIX}.dmg"
+
+        '
+    - name: Upload package artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: release-${{ matrix.name }}
+        path: project/release-assets/*
+        if-no-files-found: error
   package-smoke:
     name: Linux GCC x64 PR packaging smoke
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-release-test')
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          submodules: true
-      - name: Restore compiler cache
-        id: ccache-restore
-        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
-        with:
-          path: .ccache
-          key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
-          restore-keys: |
-            ccache-Linux-Linux-GCC-x64-PR-Release-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build ccache rpm libwxgtk3.2-dev libgtest-dev
-      - name: Configure
-        env:
-          CC: gcc
-          CXX: g++
-          RUNNER_OS: Linux
-          BUILD_TYPE: Release
-          PACKAGE_TOOLCHAIN: gcc
-        run: cmake -P ./.github/scripts/configure.cmake
-      - name: Build
-        env:
-          CXX: g++
-          RUNNER_OS: Linux
-          BUILD_TYPE: Release
-        run: cmake -P ./.github/scripts/build.cmake
-      - name: Save compiler cache
-        if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: .ccache
-          key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
-      - name: Test
-        env:
-          CC: gcc
-          CXX: g++
-          RUNNER_OS: Linux
-          BUILD_TYPE: Release
-        run: cmake -P ./.github/scripts/test.cmake
-      - name: Install
-        run: cmake --install build --prefix instdir --strip
-      - name: Package Linux smoke
-        run: |
-          mkdir -p release-assets
-          (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.zip" --format=zip .)
-          (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.7z" --format=7zip .)
-          (cd instdir && tar -czf "../release-assets/linux-gcc-x64.tar.gz" .)
-          cpack --config build/CPackConfig.cmake -C Release -G DEB
-          cpack --config build/CPackConfig.cmake -C Release -G RPM
-          cp build/package/*.deb release-assets/linux-gcc-x64.deb
-          cp build/package/*.rpm release-assets/linux-gcc-x64.rpm
-          sha256sum release-assets/* > release-assets/SHA256SUMS
-      - name: Upload smoke artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-linux-gcc-x64-pr-smoke
-          path: release-assets/*
-          if-no-files-found: error
+    - name: Checkout
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        submodules: true
+    - name: Restore compiler cache
+      id: ccache-restore
+      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: .ccache
+        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        restore-keys: 'ccache-Linux-Linux-GCC-x64-PR-Release-
 
+          '
+    - name: Install dependencies
+      run: 'sudo apt-get update
+
+        sudo apt-get install -y ninja-build ccache rpm libwxgtk3.2-dev libgtest-dev
+
+        '
+    - name: Configure
+      env:
+        CC: gcc
+        CXX: g++
+        RUNNER_OS: Linux
+        BUILD_TYPE: Release
+        PACKAGE_TOOLCHAIN: gcc
+      run: cmake -P ./.github/scripts/configure.cmake
+    - name: Build
+      env:
+        CXX: g++
+        RUNNER_OS: Linux
+        BUILD_TYPE: Release
+      run: cmake -P ./.github/scripts/build.cmake
+    - name: Save compiler cache
+      if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: .ccache
+        key: ccache-Linux-Linux-GCC-x64-PR-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+    - name: Test
+      env:
+        CC: gcc
+        CXX: g++
+        RUNNER_OS: Linux
+        BUILD_TYPE: Release
+      run: cmake -P ./.github/scripts/test.cmake
+    - name: Install
+      run: cmake --install build --prefix instdir --strip
+    - name: Package Linux smoke
+      run: 'mkdir -p release-assets
+
+        (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.zip" --format=zip .)
+
+        (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.7z" --format=7zip .)
+
+        (cd instdir && tar -czf "../release-assets/linux-gcc-x64.tar.gz" .)
+
+        cpack --config build/CPackConfig.cmake -C Release -G DEB
+
+        cpack --config build/CPackConfig.cmake -C Release -G RPM
+
+        cp build/package/*.deb release-assets/linux-gcc-x64.deb
+
+        cp build/package/*.rpm release-assets/linux-gcc-x64.rpm
+
+        sha256sum release-assets/* > release-assets/SHA256SUMS
+
+        '
+    - name: Upload smoke artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: release-linux-gcc-x64-pr-smoke
+        path: release-assets/*
+        if-no-files-found: error
   source:
     name: Source archives
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-release-test')
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          fetch-depth: 0
-          path: project
-      - name: Resolve version
-        working-directory: project
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags --always --dirty | sed 's/^v//')"; fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-      - name: Create source archives
-        working-directory: project
-        run: |
-          mkdir -p ../source-assets
-          git archive --format=zip --prefix="cpp-project-template_${VERSION}_source/" HEAD > "../source-assets/cpp-project-template_${VERSION}_source.zip"
-          git archive --format=tar.gz --prefix="cpp-project-template_${VERSION}_source/" HEAD > "../source-assets/cpp-project-template_${VERSION}_source.tar.gz"
-      - name: Upload source artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: source-archives
-          path: source-assets/*
-          if-no-files-found: error
+    - name: Checkout
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        fetch-depth: 0
+        path: project
+    - name: Resolve version
+      working-directory: project
+      shell: bash
+      run: 'if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags
+        --always --dirty | sed ''s/^v//'')"; fi
 
+        echo "VERSION=$version" >> "$GITHUB_ENV"
+
+        '
+    - name: Create source archives
+      working-directory: project
+      run: 'mkdir -p ../source-assets
+
+        git archive --format=zip --prefix="cpp-project-template_${VERSION}_source/" HEAD > "../source-assets/cpp-project-template_${VERSION}_source.zip"
+
+        git archive --format=tar.gz --prefix="cpp-project-template_${VERSION}_source/" HEAD > "../source-assets/cpp-project-template_${VERSION}_source.tar.gz"
+
+        '
+    - name: Upload source artifacts
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: source-archives
+        path: source-assets/*
+        if-no-files-found: error
   publish:
     name: Publish release
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs:
-      - package
-      - source
+    - package
+    - expanded-package
+    - android-package
+    - source
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download package artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          path: release-assets
-          pattern: release-*
-          merge-multiple: true
-      - name: Download source artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: source-archives
-          path: release-assets
-      - name: Verify release inventory
-        working-directory: release-assets
-        shell: bash
-        run: |
-          shopt -s nullglob
-          version="${GITHUB_REF_NAME#v}"
-          source_files=("cpp-project-template_${version}_source.zip" "cpp-project-template_${version}_source.tar.gz")
-          for f in "${source_files[@]}"; do
-            test -f "$f" || { echo "Missing source artifact: $f"; exit 1; }
-          done
-          package_files=()
-          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
-            [[ -f "$f" ]] || continue
-            case "$f" in
-              *_source.zip|*_source.tar.gz) continue ;;
-            esac
-            package_files+=("$f")
-          done
-          test "${#package_files[@]}" -eq 38 || {
-            echo "Unexpected package artifact count: ${#package_files[@]}"
-            printf '%s\n' "${package_files[@]}"
-            exit 1
-          }
-          for f in "${package_files[@]}"; do
-            case "$f" in
-              cpp-project-template_${version}_windows-msvc-x86_64.zip|cpp-project-template_${version}_windows-msvc-x86_64.7z|cpp-project-template_${version}_windows-msvc-x86_64_nsis.exe|cpp-project-template_${version}_windows-msvc-x86_64_wix.msi|cpp-project-template_${version}_windows-msvc-i686.zip|cpp-project-template_${version}_windows-msvc-i686.7z|cpp-project-template_${version}_windows-msvc-i686_nsis.exe|cpp-project-template_${version}_windows-msvc-i686_wix.msi|cpp-project-template_${version}_windows-mingw-x86_64.zip|cpp-project-template_${version}_windows-mingw-x86_64.7z|cpp-project-template_${version}_windows-mingw-x86_64_nsis.exe|cpp-project-template_${version}_windows-mingw-x86_64_wix.msi|cpp-project-template_${version}_windows-mingw-i686.zip|cpp-project-template_${version}_windows-mingw-i686.7z|cpp-project-template_${version}_windows-mingw-i686_nsis.exe|cpp-project-template_${version}_windows-mingw-i686_wix.msi|cpp-project-template_${version}_windows-llvm-x86_64.zip|cpp-project-template_${version}_windows-llvm-x86_64.7z|cpp-project-template_${version}_windows-llvm-x86_64_nsis.exe|cpp-project-template_${version}_windows-llvm-x86_64_wix.msi|cpp-project-template_${version}_windows-llvm-i686.zip|cpp-project-template_${version}_windows-llvm-i686.7z|cpp-project-template_${version}_windows-llvm-i686_nsis.exe|cpp-project-template_${version}_windows-llvm-i686_wix.msi|cpp-project-template_${version}_linux-gcc-x86_64.zip|cpp-project-template_${version}_linux-gcc-x86_64.7z|cpp-project-template_${version}_linux-gcc-x86_64.tar.gz|cpp-project-template_${version}_linux-gcc-x86_64.deb|cpp-project-template_${version}_linux-gcc-x86_64.rpm|cpp-project-template_${version}_linux-gcc-arm64.zip|cpp-project-template_${version}_linux-gcc-arm64.7z|cpp-project-template_${version}_linux-gcc-arm64.tar.gz|cpp-project-template_${version}_linux-gcc-arm64.deb|cpp-project-template_${version}_linux-gcc-arm64.rpm|cpp-project-template_${version}_macos-clang-arm64.zip|cpp-project-template_${version}_macos-clang-arm64.7z|cpp-project-template_${version}_macos-clang-arm64.tar.gz|cpp-project-template_${version}_macos-clang-arm64.dmg) ;;
-              *) echo "Unexpected release artifact name: $f"; exit 1 ;;
-            esac
-          done
-      - name: Write global SHA256SUMS
-        working-directory: release-assets
-        run: |
-          rm -f SHA256SUMS
-          sha256sum -- * > SHA256SUMS
-      - name: Verify checksums
-        working-directory: release-assets
-        run: sha256sum -c SHA256SUMS
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          files: release-assets/*
-          generate_release_notes: true
-          body: |
-            This release contains the currently passing package matrix.
-            Windows LLVM packages are included when their build succeeds; failed LLVM matrix legs remain non-blocking.
+    - name: Download package artifacts
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        path: release-assets
+        pattern: release-*
+        merge-multiple: true
+    - name: Download source artifacts
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: source-archives
+        path: release-assets
+    - name: Verify release inventory
+      working-directory: release-assets
+      shell: bash
+      run: 'set -euo pipefail
+
+        version=$(printf ''%s'' "$GITHUB_REF_NAME" | sed ''s/^v//'')
+
+        : > expected.txt
+
+        for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686; do printf
+        ''%s\n'' "cpp-project-template_$version_$compiler_arch.zip" "cpp-project-template_$version_$compiler_arch.7z" "cpp-project-template_$version_$compiler_arch_nsis.exe"
+        "cpp-project-template_$version_$compiler_arch_wix.msi" >> expected.txt; done
+
+        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_$version_$compiler_arch.zip" "cpp-project-template_$version_$compiler_arch.7z"
+        >> expected.txt; done
+
+        for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do printf ''%s\n'' "cpp-project-template_$version_$compiler_arch.zip"
+        "cpp-project-template_$version_$compiler_arch.7z" "cpp-project-template_$version_$compiler_arch.tar.gz" "cpp-project-template_$version_$compiler_arch.deb"
+        "cpp-project-template_$version_$compiler_arch.rpm" >> expected.txt; done
+
+        for compiler_arch in macos-clang-arm64 macos-apple-clang-x86_64 macos-gcc-x86_64 macos-gcc-arm64 macos-llvm-x86_64 macos-llvm-arm64; do printf ''%s\n''
+        "cpp-project-template_$version_$compiler_arch.zip" "cpp-project-template_$version_$compiler_arch.7z" "cpp-project-template_$version_$compiler_arch.tar.gz"
+        "cpp-project-template_$version_$compiler_arch.dmg" >> expected.txt; done
+
+        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' "cpp-project-template_$version_android-ndk-$abi.zip" >> expected.txt; done
+
+        sort -u expected.txt > expected.sorted
+
+        test "$(wc -l < expected.sorted)" -eq 81
+
+        : > actual.txt
+
+        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
+        printf ''%s\n'' "$f" >> actual.txt; done
+
+        sort -u actual.txt > actual.sorted
+
+        test "$(wc -l < actual.sorted)" -eq 81
+
+        cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }'
+    - name: Write global SHA256SUMS
+      working-directory: release-assets
+      run: 'rm -f SHA256SUMS
+
+        sha256sum -- * > SHA256SUMS
+
+        '
+    - name: Verify checksums
+      working-directory: release-assets
+      run: sha256sum -c SHA256SUMS
+    - name: Publish GitHub release
+      uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+      with:
+        files: release-assets/*
+        generate_release_notes: true
+        body: 'This release contains the currently passing package matrix.
+
+          Windows LLVM packages are included when their build succeeds; failed LLVM matrix legs remain non-blocking.
+
+          '
+  expanded-package:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: Windows MSVC ARM64
+          os: windows-11-arm
+          compiler: msvc
+          cc: cl
+          cxx: cl
+          arch: arm64
+          vcpkg_triplet: arm64-windows
+          vcpkg_host_triplet: arm64-windows
+          external_triplets: false
+          environment_script: vcvars-arm64.bat
+          cache_id: windows-msvc-arm64
+        - name: Windows CLANGARM64 MinGW
+          os: windows-11-arm
+          compiler: clangarm64
+          cc: clang
+          cxx: clang++
+          arch: arm64
+          use_vcpkg: false
+          msys2_msystem: CLANGARM64
+          msys2_toolchain: mingw-w64-clang-aarch64-toolchain
+          msys2_packages: wxwidgets3.2-msw:p gtest:p
+          msys2_bin: clangarm64/bin
+          cache_id: windows-clangarm64
+        - name: Linux GCC x86
+          os: ubuntu-24.04
+          compiler: gcc
+          cc: gcc
+          cxx: g++
+          arch: x86
+          linux_multilib: true
+          cache_id: linux-gcc-x86
+        - name: Linux Clang x64
+          os: ubuntu-24.04
+          compiler: clang
+          cc: clang
+          cxx: clang++
+          arch: x64
+          linux_multilib: false
+          cache_id: linux-clang-x64
+        - name: Linux Clang ARM64
+          os: ubuntu-24.04-arm
+          compiler: clang
+          cc: clang
+          cxx: clang++
+          arch: arm64
+          linux_multilib: false
+          cache_id: linux-clang-arm64
+        - name: macOS Apple Clang x64
+          os: macos-15-intel
+          compiler: apple-clang
+          cc: clang
+          cxx: clang++
+          arch: x64
+          cache_id: macos-apple-clang-x64
+        - name: macOS GCC x64
+          os: macos-15-intel
+          compiler: gcc
+          cc: gcc
+          cxx: g++
+          arch: x64
+          build_projectwx: false
+          build_testing: false
+          cache_id: macos-gcc-x64
+        - name: macOS GCC ARM64
+          os: macos-latest
+          compiler: gcc
+          cc: gcc
+          cxx: g++
+          arch: arm64
+          build_projectwx: false
+          build_testing: false
+          cache_id: macos-gcc-arm64
+        - name: macOS LLVM x64
+          os: macos-15-intel
+          compiler: llvm
+          cc: clang
+          cxx: clang++
+          arch: x64
+          cache_id: macos-llvm-x64
+        - name: macOS LLVM ARM64
+          os: macos-latest
+          compiler: llvm
+          cc: clang
+          cxx: clang++
+          arch: arm64
+          cache_id: macos-llvm-arm64
+    steps:
+    - name: Checkout
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        submodules: true
+        path: project
+    - name: Restore compiler cache
+      id: ccache-restore
+      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: .ccache
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+        restore-keys: ccache-${{ runner.os }}-${{ matrix.name }}-Release-
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: "sudo apt-get update\nif [[ \"${{ matrix.linux_multilib }}\" == \"true\" ]]; then\n  sudo dpkg --add-architecture i386\n  sudo apt-get update\n\
+        \  sudo apt-get install -y ninja-build ccache pkg-config rpm rpm gcc-multilib g++-multilib libwxgtk3.2-dev:i386 libgtest-dev:i386\n  echo \"CFLAGS=-m32\"\
+        \ >> \"$GITHUB_ENV\"\n  echo \"CXXFLAGS=-m32\" >> \"$GITHUB_ENV\"\n  echo \"LDFLAGS=-m32\" >> \"$GITHUB_ENV\"\n  echo \"PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig\"\
+        \ >> \"$GITHUB_ENV\"\nelse\n  sudo apt-get install -y ninja-build ccache pkg-config rpm libwxgtk3.2-dev libgtest-dev\nfi\nif [[ \"${{ matrix.compiler\
+        \ }}\" == \"clang\" ]]; then\n  sudo apt-get install -y clang\nfi\n"
+    - name: Install macOS dependencies
+      if: runner.os == 'macOS'
+      shell: bash
+      run: "brew install ninja ccache wxwidgets googletest\nif [[ \"${{ matrix.compiler }}\" == \"gcc\" ]]; then\n  brew install gcc\n  gcc_prefix=\"$(brew\
+        \ --prefix gcc)\"\n  gcc_major=\"$(brew list --versions gcc | awk '{print $2}' | cut -d. -f1)\"\n  echo \"CC=${gcc_prefix}/bin/gcc-${gcc_major}\"\
+        \ >> \"$GITHUB_ENV\"\n  echo \"CXX=${gcc_prefix}/bin/g++-${gcc_major}\" >> \"$GITHUB_ENV\"\nelif [[ \"${{ matrix.compiler }}\" == \"llvm\" ]]; then\n\
+        \  brew install llvm\n  llvm_prefix=\"$(brew --prefix llvm)\"\n  test -x \"$llvm_prefix/bin/clang\"\n  test -x \"$llvm_prefix/bin/clang++\"\n  echo\
+        \ \"CC=${llvm_prefix}/bin/clang\" >> \"$GITHUB_ENV\"\n  echo \"CXX=${llvm_prefix}/bin/clang++\" >> \"$GITHUB_ENV\"\n  echo \"PATH=${llvm_prefix}/bin:$PATH\"\
+        \ >> \"$GITHUB_ENV\"\nfi\n"
+    - name: Install Windows tools
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: choco install ninja ccache -y --no-progress
+    - name: Setup MSYS2 MinGW
+      id: msys2
+      if: runner.os == 'Windows' && matrix.compiler == 'mingw'
+      uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+      with:
+        msystem: ${{ matrix.msys2_msystem }}
+        update: false
+        path-type: minimal
+        install: ${{ matrix.msys2_toolchain }}
+    - name: Setup MSYS2 CLANGARM64
+      id: msys2-arm64
+      if: runner.os == 'Windows' && matrix.compiler == 'clangarm64'
+      uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+      with:
+        msystem: CLANGARM64
+        update: true
+        release: true
+        path-type: minimal
+        install: ${{ matrix.msys2_toolchain }}
+        pacboy: ${{ matrix.msys2_packages }}
+    - name: Add MSYS2 compiler to PATH
+      if: runner.os == 'Windows' && (matrix.compiler == 'mingw' || matrix.compiler == 'clangarm64')
+      shell: pwsh
+      run: "if (\"${{ matrix.compiler }}\" -eq \"clangarm64\") {\n  $msysRoot = \"${{ steps.msys2-arm64.outputs.msys2-location }}\"\n} else {\n  $msysRoot\
+        \ = \"${{ steps.msys2.outputs.msys2-location }}\"\n}\nif (-not $msysRoot) { throw \"MSYS2 location output was empty\" }\n$bin = Join-Path $msysRoot\
+        \ \"${{ matrix.msys2_bin }}\"\nif (-not (Test-Path $bin)) { throw \"MSYS2 compiler directory not found: $bin\" }\n$bin | Out-File -FilePath $env:GITHUB_PATH\
+        \ -Append -Encoding utf8\nif (\"${{ matrix.compiler }}\" -eq \"clangarm64\") {\n  $prefix = Join-Path $msysRoot \"clangarm64\"\n  \"CMAKE_PREFIX_PATH=$prefix\"\
+        \ | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8\n}\n"
+    - name: Locate Visual Studio environment
+      if: runner.os == 'Windows' && (matrix.compiler == 'msvc' || matrix.compiler == 'llvm')
+      shell: pwsh
+      run: "$vswhere = \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe\"\nif (-not (Test-Path $vswhere)) {\n  $vswhere = \"\
+        $env:ProgramFiles\\Microsoft Visual Studio\\Installer\\vswhere.exe\"\n}\nif (-not (Test-Path $vswhere)) { throw \"vswhere.exe not found\" }\nif\
+        \ (\"${{ matrix.arch }}\" -eq \"arm64\") {\n  $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64\
+        \ -property installationPath\n  if (-not $vsRoot) { throw \"Native ARM64 MSVC toolset not found\" }\n  $vsRoot = ($vsRoot | Select-Object -First\
+        \ 1).Trim()\n  $vsDevCmd = Join-Path $vsRoot \"Common7\\Tools\\VsDevCmd.bat\"\n  $wrapper = Join-Path $env:GITHUB_WORKSPACE \"vs-arm64-env.bat\"\
+        \n  Set-Content -Path $wrapper -Value \"@echo off\" -Encoding ascii\n  Add-Content -Path $wrapper -Value ('call \"' + $vsDevCmd + '\" -arch=arm64\
+        \ -host_arch=arm64') -Encoding ascii\n  \"ENVIRONMENT_SCRIPT=$wrapper\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8\n} else {\n\
+        \  $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath\n  if (-not $vsRoot)\
+        \ { throw \"Visual Studio C++ toolset not found\" }\n  $vsRoot = ($vsRoot | Select-Object -First 1).Trim()\n  $script = Join-Path $vsRoot \"VC\\\
+        Auxiliary\\Build\\${{ matrix.environment_script }}\"\n  if (-not (Test-Path $script)) { throw \"Expected environment script not found at $script\"\
+        \ }\n  \"ENVIRONMENT_SCRIPT=$script\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8\n}\n"
+    - name: Get custom Windows vcpkg triplets
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && matrix.external_triplets == true
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        repository: Neumann-A/my-vcpkg-triplets
+        ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
+        path: my-vcpkg-triplets
+        fetch-depth: 1
+    - name: Restore Windows vcpkg binary cache
+      id: vcpkg-cache-restore
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: project/vcpkg_cache
+        key: vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-${{ hashFiles('project/vcpkg.json')
+          }}
+        restore-keys: 'vcpkg-experimental-${{ matrix.cache_id }}-
+
+          '
+    - name: Bootstrap and install vcpkg
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      shell: pwsh
+      run: "$ErrorActionPreference = \"Stop\"\nNew-Item -ItemType Directory -Force -Path project\\vcpkg_cache | Out-Null\nif (Test-Path vcpkg) { Remove-Item\
+        \ -Recurse -Force vcpkg }\ngit init vcpkg\ngit -C vcpkg remote add origin https://github.com/microsoft/vcpkg.git\ngit -C vcpkg fetch --depth 1 --no-tags\
+        \ origin $env:VCPKG_GIT_REF\nif ($LASTEXITCODE -ne 0) { throw \"Failed to fetch vcpkg $env:VCPKG_GIT_REF\" }\ngit -C vcpkg checkout FETCH_HEAD\n\
+        .\\vcpkg\\bootstrap-vcpkg.bat -disableMetrics\n$env:VCPKG_MANIFEST_MODE = \"OFF\"\n$env:VCPKG_DEFAULT_HOST_TRIPLET = \"${{ matrix.vcpkg_host_triplet\
+        \ }}\"\n$env:VCPKG_BINARY_SOURCES = \"clear;files,$env:GITHUB_WORKSPACE\\project\\vcpkg_cache,readwrite\"\nif (\"${{ matrix.external_triplets }}\"\
+        \ -eq \"true\") {\n  .\\vcpkg\\vcpkg.exe install --triplet \"${{ matrix.vcpkg_triplet }}\" --overlay-triplets=\"$env:GITHUB_WORKSPACE\\my-vcpkg-triplets\"\
+        \ wxwidgets gtest\n} else {\n  .\\vcpkg\\vcpkg.exe install --triplet \"${{ matrix.vcpkg_triplet }}\" wxwidgets gtest\n}\nif ($LASTEXITCODE -ne 0)\
+        \ { throw \"vcpkg install failed\" }\n"
+    - name: Save Windows vcpkg binary cache
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: project/vcpkg_cache
+        key: vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-${{ hashFiles('project/vcpkg.json')
+          }}
+    - name: Configure
+      working-directory: project
+      env:
+        CC: ${{ matrix.cc }}
+        CXX: ${{ matrix.cxx }}
+        RUNNER_OS: ${{ runner.os }}
+        ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+        VCPKG_TRIPLET: ${{ matrix.vcpkg_triplet }}
+        VCPKG_HOST_TRIPLET: ${{ matrix.vcpkg_host_triplet }}
+        USE_VCPKG: ${{ matrix.use_vcpkg }}
+        PACKAGE_TOOLCHAIN: ${{ matrix.compiler }}
+        BUILD_TYPE: Release
+        BUILD_PROJECTWX: ${{ matrix.build_projectwx }}
+        BUILD_TESTING: ${{ matrix.build_testing }}
+      run: cmake -P ./.github/scripts/configure.cmake
+    - name: Verify configured compiler
+      working-directory: project
+      shell: bash
+      run: "cxx_bin=\"$(sed -n 's/^CMAKE_CXX_COMPILER:FILEPATH=//p' build/CMakeCache.txt | head -1)\"\ntest -n \"$cxx_bin\"\ntest -x \"$cxx_bin\"\necho\
+        \ \"Configured CXX: $cxx_bin\"\nif [[ \"${{ matrix.compiler }}\" == \"msvc\" ]]; then\n  CXX_BIN=\"$cxx_bin\" powershell -NoProfile -Command '\n\
+        \    & \"$env:CXX_BIN\" /?\n    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n  '\nelse\n  \"$cxx_bin\" --version\nfi\n"
+    - name: Build
+      working-directory: project
+      env:
+        CXX: ${{ matrix.cxx }}
+        RUNNER_OS: ${{ runner.os }}
+        ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+        BUILD_TYPE: Release
+      run: cmake -P ./.github/scripts/build.cmake
+    - name: Save compiler cache
+      if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
+      uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: .ccache
+        key: ccache-${{ runner.os }}-${{ matrix.name }}-Release-${{ hashFiles('project/CMakeLists.txt', 'project/cmake/**', 'project/vcpkg.json') }}
+    - name: Test
+      if: matrix.build_testing != 'OFF'
+      working-directory: project
+      env:
+        CC: ${{ matrix.cc }}
+        CXX: ${{ matrix.cxx }}
+        RUNNER_OS: ${{ runner.os }}
+        BUILD_TYPE: Release
+      run: cmake -P ./.github/scripts/test.cmake
+    - name: Install
+      working-directory: project
+      run: cmake --install build --prefix instdir --strip --config Release
+    - name: Verify binary architecture
+      working-directory: project
+      shell: bash
+      run: "if [[ \"$RUNNER_OS\" == \"Windows\" ]]; then\n  powershell -NoProfile -Command '\n    $exe = Get-ChildItem -Recurse -File build\\bin -Filter\
+        \ projectcli.exe | Select-Object -First 1\n    if (-not $exe) { throw \"projectcli.exe not found\" }\n    $bytes = [IO.File]::ReadAllBytes($exe.FullName)\n\
+        \    if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {\n      throw \"Not a valid PE executable: $($exe.FullName)\"\n  \
+        \  }\n    $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)\n    if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) {\n      throw \"Invalid\
+        \ PE header offset: $peOffset\"\n    }\n    if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or\n        $bytes[$peOffset + 2]\
+        \ -ne 0x00 -or $bytes[$peOffset + 3] -ne 0x00) {\n      throw \"Invalid PE signature\"\n    }\n    $machine = [BitConverter]::ToUInt16($bytes, $peOffset\
+        \ + 4)\n    $expected = switch (\"${{ matrix.arch }}\") {\n      \"arm64\" { [UInt16]0xAA64 }\n      \"x86\"   { [UInt16]0x014C }\n      default\
+        \ { [UInt16]0x8664 }\n    }\n    if ($machine -ne $expected) {\n      throw (\"Expected {0} PE (0x{1:X4}), got 0x{2:X4}\" -f \"${{ matrix.arch }}\"\
+        , $expected, $machine)\n    }\n    \"Verified $($exe.FullName): PE machine 0x{0:X4}\" -f $machine\n  '\nelse\n  target=\"$(find build/bin -maxdepth\
+        \ 1 -type f -perm -111 -print -quit)\"\n  test -n \"$target\"\n  file \"$target\"\n  case \"${{ matrix.arch }}\" in\n    x86) file \"$target\" |\
+        \ grep -Eq '32-bit|Intel 80386' ;;\n    arm64) file \"$target\" | grep -Eiq 'arm aarch64|arm64' ;;\n    x64) file \"$target\" | grep -Eq 'x86-64|x86_64|Mach-O\
+        \ 64-bit executable x86_64' ;;\n    *) exit 1 ;;\n  esac\nfi\n"
+    - name: Determine canonical package name
+      id: package_name
+      working-directory: project
+      shell: bash
+      run: 'base=$(sed -n ''s/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p'' build/CPackConfig.cmake | head -1)
+
+        test -n "$base"
+
+        echo "base=$base" >> "$GITHUB_OUTPUT"
+
+        '
+    - name: Resolve release version and naming
+      working-directory: project
+      shell: bash
+      run: 'if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags
+        --always --dirty | sed ''s/^v//'')"; fi
+
+        case "$RUNNER_OS" in Linux) platform="linux" ;; Windows) platform="windows" ;; macOS) platform="macos" ;; *) exit 1 ;; esac
+
+        case "${{ matrix.arch }}" in x64) package_arch="x86_64" ;; x86) package_arch="i686" ;; arm64) package_arch="arm64" ;; *) exit 1 ;; esac
+
+        echo "VERSION=$version" >> "$GITHUB_ENV"
+
+        echo "RELEASE_PREFIX=cpp-project-template_${version}_${platform}-${{ matrix.compiler }}-${package_arch}" >> "$GITHUB_ENV"
+
+        '
+    - name: Package Windows
+      if: runner.os == 'Windows'
+      working-directory: project
+      shell: pwsh
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+        BASE: ${{ steps.package_name.outputs.base }}
+      run: '$ErrorActionPreference = ''Stop''
+
+        New-Item -ItemType Directory -Force release-assets | Out-Null
+
+        Compress-Archive -Path instdir\* -DestinationPath "release-assets\$env:PREFIX.zip" -Force
+
+        Push-Location instdir
+
+        cmake -E tar cf "../release-assets/$env:PREFIX.7z" --format=7zip .
+
+        if ($LASTEXITCODE -ne 0) { Pop-Location; throw ''7Z archive generation failed'' }
+
+        Pop-Location'
+    - name: Package Linux
+      if: runner.os == 'Linux'
+      working-directory: project
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+      run: 'mkdir -p release-assets
+
+        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
+
+        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
+
+        (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
+
+        cpack --config build/CPackConfig.cmake -C Release -G DEB
+
+        cpack --config build/CPackConfig.cmake -C Release -G RPM
+
+        deb=$(find build/package -maxdepth 1 -type f -name ''*.deb'' | head -1)
+
+        rpm=$(find build/package -maxdepth 1 -type f -name ''*.rpm'' | head -1)
+
+        test -n "$deb" && test -n "$rpm"
+
+        cp "$deb" "release-assets/${PREFIX}.deb"
+
+        cp "$rpm" "release-assets/${PREFIX}.rpm"
+
+        '
+    - name: Package macOS
+      if: runner.os == 'macOS'
+      working-directory: project
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+      run: 'mkdir -p release-assets
+
+        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
+
+        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
+
+        (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
+
+        cpack --config build/CPackConfig.cmake -C Release -G DragNDrop
+
+        dmg=$(find build/package -maxdepth 1 -type f -name ''*.dmg'' | head -1)
+
+        test -n "$dmg"
+
+        cp "$dmg" "release-assets/${PREFIX}.dmg"
+
+        '
+    - name: Upload package artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: release-${{ matrix.name }}
+        path: project/release-assets/*
+        if-no-files-found: error
+  android-package:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: Android arm64-v8a
+          abi: arm64-v8a
+          expected_machine: AArch64
+          cache_id: android-arm64-v8a
+        - name: Android armeabi-v7a
+          abi: armeabi-v7a
+          expected_machine: ARM
+          cache_id: android-armeabi-v7a
+        - name: Android x86_64
+          abi: x86_64
+          expected_machine: Advanced Micro Devices X86-64
+          cache_id: android-x86_64
+        - name: Android x86
+          abi: x86
+          expected_machine: Intel 80386
+          cache_id: android-x86
+    steps:
+    - name: Checkout
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        submodules: true
+        path: project
+    - name: Set up JDK 17
+      uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+      with:
+        java-version: '17'
+        distribution: temurin
+    - name: Set up Android SDK and NDK
+      uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+      with:
+        packages: platform-tools platforms;android-28 ndk;30.0.16248370
+    - name: Configure Android environment
+      shell: bash
+      run: 'set -euo pipefail
+
+        sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+
+        test -n "$sdk_root"
+
+        ndk_home="$sdk_root/ndk/${ANDROID_NDK_VERSION}"
+
+        test -f "$ndk_home/build/cmake/android.toolchain.cmake"
+
+        echo "ANDROID_NDK_HOME=$ndk_home" >> "$GITHUB_ENV"
+
+        echo "ANDROID_NDK_HOME=$ndk_home"
+
+        '
+    - name: Install build tools
+      run: 'sudo apt-get update
+
+        sudo apt-get install -y ninja-build ccache
+
+        '
+    - name: Restore compiler cache
+      id: ccache-restore
+      uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: .ccache
+        key: ccache-experimental-v2-${{ matrix.cache_id }}-Release
+        restore-keys: 'ccache-experimental-v2-${{ matrix.cache_id }}-Release-
+
+          ccache-experimental-${{ matrix.cache_id }}-Release-
+
+          '
+    - name: Configure
+      working-directory: project
+      env:
+        RUNNER_OS: Linux
+        BUILD_TYPE: Release
+        ANDROID_ABI: ${{ matrix.abi }}
+        ANDROID_PLATFORM: ${{ env.ANDROID_PLATFORM }}
+        BUILD_PROJECTWX: false
+        BUILD_TESTING: false
+      run: cmake -P ./.github/scripts/configure.cmake
+    - name: Build
+      working-directory: project
+      env:
+        RUNNER_OS: Linux
+        BUILD_TYPE: Release
+      run: cmake -P ./.github/scripts/build.cmake
+    - name: Save compiler cache
+      if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
+      uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+      with:
+        path: .ccache
+    - name: Verify Android ELF architecture
+      working-directory: project
+      shell: bash
+      run: 'set -euo pipefail
+
+        target="$(find build/bin -maxdepth 1 -type f -name ''projectcli*'' -print -quit)"
+
+        test -n "$target"
+
+        readelf -h "$target"
+
+        readelf -h "$target" | grep -F "Machine:" | grep -F -- "${{ matrix.expected_machine }}"
+
+        '
+    - name: Package Android
+      working-directory: project
+      shell: bash
+      run: 'set -euo pipefail
+
+        if [ "$GITHUB_REF_TYPE" = "tag" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then version=$(printf ''%s'' "$GITHUB_REF_NAME" | sed ''s/^v//''); else version=$(git
+        describe --tags --always --dirty | sed ''s/^v//''); fi
+
+        target=$(find build/bin -maxdepth 1 -type f -name ''projectcli*'' -print -quit)
+
+        test -n "$target"
+
+        mkdir -p android-release/bin release-assets
+
+        cp "$target" android-release/bin/
+
+        printf ''Project: cpp-project-template\nVersion: %s\nAndroid ABI: %s\nNDK: %s\nAPI: %s\n'' "$version" ${{ matrix.abi }} "$ANDROID_NDK_VERSION" "$ANDROID_PLATFORM"
+        > android-release/BUILD-INFO.txt
+
+        (cd android-release && zip -q -r "../release-assets/cpp-project-template_$version_android-ndk-${{ matrix.abi }}.zip" .)'
+    - name: Upload Android package artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: release-${{ matrix.name }}
+        path: project/release-assets/*
+        if-no-files-found: error
+'on':
+  pull_request:
+    branches:
+    - main
+  push:
+    tags:
+    - v*
+  workflow_dispatch: null
