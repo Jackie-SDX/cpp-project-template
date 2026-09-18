@@ -333,7 +333,21 @@ jobs:
 
         (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
 
-        cpack --config build/CPackConfig.cmake -C Release -G DragNDrop
+        cpack_ok=0
+        for attempt in 1 2 3; do
+          if cpack --config build/CPackConfig.cmake -C Release -G DragNDrop; then
+            cpack_ok=1
+            break
+          fi
+          # CPack can transiently leave the temporary DMG mounted when hdiutil
+          # reports a busy-detach failure. Force-detach before retrying.
+          hdiutil detach /Volumes/cpp-project-template -force >/dev/null 2>&1 || true
+          sleep $((attempt * 2))
+        done
+        if [[ "$cpack_ok" != "1" ]]; then
+          echo "CPack DragNDrop failed after 3 attempts" >&2
+          exit 1
+        fi
 
         dmg=$(find build/package -maxdepth 1 -type f -name ''*.dmg'' | head -1)
 
@@ -1071,7 +1085,21 @@ jobs:
 
         (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
 
-        cpack --config build/CPackConfig.cmake -C Release -G DragNDrop
+        cpack_ok=0
+        for attempt in 1 2 3; do
+          if cpack --config build/CPackConfig.cmake -C Release -G DragNDrop; then
+            cpack_ok=1
+            break
+          fi
+          # CPack can transiently leave the temporary DMG mounted when hdiutil
+          # reports a busy-detach failure. Force-detach before retrying.
+          hdiutil detach /Volumes/cpp-project-template -force >/dev/null 2>&1 || true
+          sleep $((attempt * 2))
+        done
+        if [[ "$cpack_ok" != "1" ]]; then
+          echo "CPack DragNDrop failed after 3 attempts" >&2
+          exit 1
+        fi
 
         dmg=$(find build/package -maxdepth 1 -type f -name ''*.dmg'' | head -1)
 
