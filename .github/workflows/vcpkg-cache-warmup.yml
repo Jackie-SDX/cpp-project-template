@@ -75,15 +75,6 @@ jobs:
             vcpkg_triplet: x86-win-llvm
             toolchain: llvm
             arch: x86
-          - name: Windows LLVM ARM64
-            os: windows-11-arm
-            cc: clang-cl
-            cxx: clang-cl
-            environment_script: vcvars-arm64.bat
-            vcpkg_triplet: arm64-windows
-            toolchain: llvm
-            arch: arm64
-            external_triplets: false
           - name: Windows MSVC ARM64
             os: windows-11-arm
             cc: cl
