@@ -910,7 +910,7 @@ jobs:
       shell: pwsh
       env:
         VCPKG_MANIFEST_MODE: OFF
-        VCPKG_BINARY_SOURCES: clear;files:${{ github.workspace }}\project\vcpkg_cache,readwrite
+        VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\project\vcpkg_cache,readwrite
         VCPKG_DEFAULT_HOST_TRIPLET: arm64-windows
       run: |
         & .\vcpkg\vcpkg.exe install --triplet arm64-windows wxwidgets gtest
