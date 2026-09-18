@@ -62,6 +62,7 @@ jobs:
             toolchain: llvm
             arch: x64
           - name: Windows LLVM x86
+            os: windows-latest
             cc: clang-cl
             cxx: clang-cl
             environment_script: vcvars32.bat
