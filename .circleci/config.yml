@@ -1,0 +1,440 @@
+version: 2.1
+
+# ============================================================================
+# This mirrors .gitlab/.gitlab-ci.yml for pre-flight validation on CircleCI
+# before spending GitLab compute minutes. Rewritten from scratch rather than
+# patched -- the previous draft had several breaking errors, listed at the
+# bottom of this file so nothing gets silently lost.
+#
+# Fixes the no-output-timeout problem specifically: CircleCI kills any step
+# that produces literally no output for 10 minutes by default, REGARDLESS of
+# your overall job timeout setting. That's almost certainly what actually cut
+# your run off around 2h even with the job timeout set to 3h -- wxWidgets
+# compiling from source can go quiet for well over 10 minutes at a time. Fixed
+# below with explicit no_output_timeout on the long, quiet steps.
+#
+# Release publishing: deliberately NOT wired into the default workflow here.
+# See the OPTIONAL job + comment near the bottom for why, and how to enable it
+# if you decide you want it anyway.
+# ============================================================================
+
+# Fix applied 2026-09-04: the Windows job was originally invoked via a
+# matrix `include:` block that only declared `build_type` as a real swept
+# parameter, with `arch`/`cmake_arch`/`vcpkg_triplet` only appearing inside
+# `include:` entries. CircleCI's `<< matrix.X >>` name templating only
+# recognizes genuine matrix parameters, not values that only exist inside
+# `include:` -- this produced "Unknown variable(s): matrix.arch". Since
+# arch/cmake_arch/vcpkg_triplet are a correlated unit (not an independent
+# dimension to cross with build_type), the fix is 4 explicit job calls below
+# instead of a matrix -- simpler and avoids this whole bug class.
+# ============================================================================
+
+executors:
+  linux-builder:
+    docker:
+      - image: registry.gitlab.com/xemypandas/cpp-project-template/build_gcc_deb:latest
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+      VCPKG_DISABLE_METRICS: "1"
+  linux-arm-builder:
+    docker:
+      - image: debian:bookworm
+    resource_class: arm.medium
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+  macos-builder:
+    macos:
+      xcode: "15.4.0"
+    resource_class: macos.m1.medium.gen1
+    environment:
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+commands:
+  setup-ccache:
+    steps:
+      - run:
+          name: Install Linux build dependencies
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y ccache ninja-build clang lcov
+            echo 'export PATH="/usr/lib/ccache:$PATH"' >> "$BASH_ENV"
+
+jobs:
+  clang-tidy:
+    executor: linux-builder
+    steps:
+      - checkout
+      - run:
+          name: Run clang-tidy
+          command: |
+            sudo apt-get update && sudo apt-get install -y clang-tidy
+            bash scripts/run_clang_tidy.sh
+
+  build-linux-gcc-debug:
+    executor: linux-builder
+    steps:
+      - checkout
+      - setup-ccache
+      - restore_cache:
+          keys:
+            - linux-gcc-debug-ccache-{{ .Branch }}-{{ .Revision }}
+            - linux-gcc-debug-ccache-{{ .Branch }}-
+            - linux-gcc-debug-ccache-
+      - run:
+          name: Configure, build, test (Linux GCC Debug + coverage)
+          command: |
+            ccache --show-stats || true
+            cmake -S . -B build -G Ninja \
+              -D CMAKE_MAKE_PROGRAM=ninja \
+              -D CMAKE_BUILD_TYPE=Debug \
+              -D CMAKE_C_COMPILER_LAUNCHER=ccache \
+              -D CMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -D CMAKE_C_FLAGS="--coverage" \
+              -D CMAKE_CXX_FLAGS="--coverage" \
+              -D CMAKE_EXE_LINKER_FLAGS="--coverage"
+            cmake --build build
+            cd build && ctest --output-on-failure -C Debug && cd ..
+            bash scripts/generate_coverage.sh
+            ccache --show-stats || true
+      - save_cache:
+          key: linux-gcc-debug-ccache-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ~/.ccache
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build
+            - coverage
+
+  build-linux-matrix:
+    parameters:
+      compiler:
+        type: string
+      build_type:
+        type: string
+    executor: linux-builder
+    steps:
+      - checkout
+      - setup-ccache
+      - restore_cache:
+          keys:
+            - linux-matrix-<< parameters.compiler >>-<< parameters.build_type >>-ccache-{{ .Branch }}-
+            - linux-matrix-<< parameters.compiler >>-<< parameters.build_type >>-ccache-
+      - run:
+          name: Configure, build, test (<< parameters.compiler >> << parameters.build_type >>)
+          command: |
+            if [ "<< parameters.compiler >>" = "clang" ]; then
+              export CC=clang CXX=clang++
+            else
+              export CC=gcc CXX=g++
+            fi
+            ccache --show-stats || true
+            cmake -S . -B build -G Ninja \
+              -D CMAKE_MAKE_PROGRAM=ninja \
+              -D CMAKE_BUILD_TYPE=<< parameters.build_type >> \
+              -D CMAKE_C_COMPILER_LAUNCHER=ccache \
+              -D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+            cmake --build build
+            cd build && ctest -C << parameters.build_type >> --output-on-failure && cd ..
+            ccache --show-stats || true
+      - save_cache:
+          key: linux-matrix-<< parameters.compiler >>-<< parameters.build_type >>-ccache-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ~/.ccache
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build
+
+  build-linux-arm64:
+    executor: linux-arm-builder
+    steps:
+      - checkout
+      - run:
+          name: Install build dependencies (arm64)
+          command: |
+            apt-get update
+            apt-get install -y build-essential cmake ninja-build ccache git pkg-config \
+              libwxgtk3.2-dev libgtest-dev
+      - run:
+          name: Configure, build, test (Linux arm64 Release)
+          command: |
+            export PATH="/usr/lib/ccache:$PATH"
+            cmake -S . -B build -G Ninja \
+              -D CMAKE_MAKE_PROGRAM=ninja \
+              -D CMAKE_BUILD_TYPE=Release \
+              -D CMAKE_C_COMPILER_LAUNCHER=ccache \
+              -D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+            cmake --build build
+            cd build && ctest -C Release --output-on-failure && cd ..
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build
+
+  build-windows-matrix:
+    parameters:
+      arch:
+        type: string
+      cmake_arch:
+        type: string
+      vcpkg_triplet:
+        type: string
+      build_type:
+        type: string
+    machine:
+      image: windows-server-2022-gui:current
+      resource_class: windows.medium
+      shell: powershell.exe -ExecutionPolicy Bypass
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - vcpkg-<< parameters.vcpkg_triplet >>-<< parameters.build_type >>-{{ checksum "vcpkg.json" }}
+            - vcpkg-<< parameters.vcpkg_triplet >>-<< parameters.build_type >>-
+      - run:
+          name: Fetch and bootstrap vcpkg
+          no_output_timeout: 30m
+          command: |
+            $ErrorActionPreference = "Stop"
+            git config --global core.autocrlf false
+            if (-not (Test-Path "vcpkg")) {
+              git clone https://github.com/microsoft/vcpkg.git vcpkg
+            }
+            .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: vcpkg install (<< parameters.vcpkg_triplet >>-<< parameters.build_type >>)
+          no_output_timeout: 45m
+          command: |
+            $ErrorActionPreference = "Stop"
+            New-Item -ItemType Directory -Force -Path "$env:CIRCLE_WORKING_DIRECTORY\vcpkg_cache" | Out-Null
+            $env:VCPKG_BINARY_SOURCES = "clear;files,$env:CIRCLE_WORKING_DIRECTORY\vcpkg_cache,readwrite"
+            $env:VCPKG_MANIFEST_MODE = "ON"
+            $buildTypeLower = "<< parameters.build_type >>".ToLower()
+            $fullTriplet = "<< parameters.vcpkg_triplet >>-$buildTypeLower"
+            .\vcpkg\vcpkg install --triplet $fullTriplet --overlay-triplets=".gitlab\vcpkg-triplets"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: CMake configure and build
+          no_output_timeout: 30m
+          command: |
+            $ErrorActionPreference = "Stop"
+            $buildTypeLower = "<< parameters.build_type >>".ToLower()
+            $fullTriplet = "<< parameters.vcpkg_triplet >>-$buildTypeLower"
+            $env:VCPKG_TOOLCHAIN_FILE = "$env:CIRCLE_WORKING_DIRECTORY\vcpkg\scripts\buildsystems\vcpkg.cmake" -replace '\\','/'
+            cmake -S . -B build -G "Visual Studio 17 2022" -A << parameters.cmake_arch >> `
+              -D CMAKE_BUILD_TYPE=<< parameters.build_type >> `
+              -D VCPKG_TARGET_TRIPLET=$fullTriplet `
+              -D VCPKG_OVERLAY_TRIPLETS="$env:CIRCLE_WORKING_DIRECTORY\.gitlab\vcpkg-triplets" `
+              -D VCPKG_MANIFEST_MODE=ON `
+              -D CMAKE_TOOLCHAIN_FILE="$env:VCPKG_TOOLCHAIN_FILE"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            cmake --build build --config << parameters.build_type >> -- /m
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: Run tests
+          command: |
+            $ErrorActionPreference = "Stop"
+            cd build
+            ctest -C << parameters.build_type >> --output-on-failure
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - save_cache:
+          key: vcpkg-<< parameters.vcpkg_triplet >>-<< parameters.build_type >>-{{ checksum "vcpkg.json" }}
+          paths:
+            - vcpkg_cache
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build
+
+  build-macos-matrix:
+    parameters:
+      build_type:
+        type: string
+    executor: macos-builder
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies via Homebrew
+          no_output_timeout: 30m
+          command: |
+            brew update || true
+            brew install cmake ninja wxwidgets googletest
+      - run:
+          name: Configure, build, test
+          no_output_timeout: 30m
+          command: |
+            cmake -S . -B build -G Ninja \
+              -D CMAKE_MAKE_PROGRAM=ninja \
+              -D CMAKE_BUILD_TYPE=<< parameters.build_type >>
+            cmake --build build --config << parameters.build_type >>
+            cd build && ctest -C << parameters.build_type >> --output-on-failure
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build
+
+  doxygen-docs:
+    executor: linux-builder
+    steps:
+      - checkout
+      - run:
+          name: Build Doxygen HTML
+          command: |
+            sudo apt-get update && sudo apt-get install -y doxygen graphviz
+            cmake -S . -B build-doxygen -G "Unix Makefiles" \
+              -D BUILD_SOURCE=OFF -D DOXYGEN_GENERATE_HTML=YES -D DOXYGEN_GENERATE_LATEX=NO
+            cmake --build build-doxygen --target doxygen
+            mkdir -p doxygen-html
+            cp -a docs/doxygen/build/html/. doxygen-html/
+
+  # ==========================================================================
+  # OPTIONAL -- not wired into the workflow below by default.
+  #
+  # This would let CircleCI publish directly to your GitLab Releases page
+  # using `glab`, so you asked directly whether that's possible: yes, it is.
+  # I'm not recommending it as your primary path, though, for two reasons:
+  #   1. Your own stated plan is "simulate on CircleCI, deploy for real on
+  #      GitLab" -- having CircleCI also be the thing that actually publishes
+  #      releases blurs which system is the source of truth.
+  #   2. It needs a manually-created GitLab Personal Access Token with broad
+  #      `api` scope, sitting in CircleCI's environment variables. The
+  #      GitLab-native release job in .gitlab-ci.yml instead uses
+  #      $CI_JOB_TOKEN, which GitLab auto-issues, auto-scopes to this project
+  #      only, and auto-revokes when the job ends -- no token to create,
+  #      store, or rotate by hand.
+  # If you still want this, uncomment the job below, add it to the workflow
+  # with a `tags: only: /^v.*/` + `branches: ignore: /.*/` filter (note the
+  # correct `.*` -- a bare `.` only matches a single character and would
+  # silently fail to ignore normal branches), and set a GITLAB_ACCESS_TOKEN
+  # env var in CircleCI's project settings first.
+  # ==========================================================================
+  # deploy-release-via-glab:
+  #   executor: linux-builder
+  #   steps:
+  #     - checkout
+  #     - attach_workspace:
+  #         at: .
+  #     - run:
+  #         name: Publish release to GitLab via glab
+  #         command: |
+  #           sudo apt-get update && sudo apt-get install -y glab
+  #           export GITLAB_TOKEN="${GITLAB_ACCESS_TOKEN}"
+  #           glab release create "${CIRCLE_TAG}" \
+  #             --repo "xemypandas/cpp-project-template" \
+  #             --name "Release ${CIRCLE_TAG}" \
+  #             --notes "Built and validated via CircleCI."
+  #           for f in projectcli-*.zip projectcli-*.tar.gz; do
+  #             [ -f "$f" ] && glab release upload "${CIRCLE_TAG}" "$f" --repo "xemypandas/cpp-project-template"
+  #           done
+
+workflows:
+  version: 2
+  pipeline:
+    jobs:
+      - clang-tidy:
+          filters:
+            tags:
+              only: /^v.*/
+
+      - build-linux-gcc-debug:
+          filters:
+            tags:
+              only: /^v.*/
+
+      - build-linux-matrix:
+          name: build-linux-<< matrix.compiler >>-<< matrix.build_type >>
+          matrix:
+            parameters:
+              compiler: ["gcc", "clang"]
+              build_type: ["Debug", "Release"]
+            exclude:
+              - compiler: "gcc"
+                build_type: "Debug"
+          filters:
+            tags:
+              only: /^v.*/
+
+      - build-linux-arm64:
+          filters:
+            tags:
+              only: /^v.*/
+
+      - build-windows-matrix:
+          name: build-windows-x64-Debug
+          arch: "x64"
+          cmake_arch: "x64"
+          vcpkg_triplet: "x64-windows"
+          build_type: "Debug"
+          filters:
+            tags:
+              only: /^v.*/
+      - build-windows-matrix:
+          name: build-windows-x64-Release
+          arch: "x64"
+          cmake_arch: "x64"
+          vcpkg_triplet: "x64-windows"
+          build_type: "Release"
+          filters:
+            tags:
+              only: /^v.*/
+      - build-windows-matrix:
+          name: build-windows-i686-Debug
+          arch: "i686"
+          cmake_arch: "Win32"
+          vcpkg_triplet: "x86-windows"
+          build_type: "Debug"
+          filters:
+            tags:
+              only: /^v.*/
+      - build-windows-matrix:
+          name: build-windows-i686-Release
+          arch: "i686"
+          cmake_arch: "Win32"
+          vcpkg_triplet: "x86-windows"
+          build_type: "Release"
+          filters:
+            tags:
+              only: /^v.*/
+
+      - build-macos-matrix:
+          name: build-macos-<< matrix.build_type >>
+          matrix:
+            parameters:
+              build_type: ["Debug", "Release"]
+          filters:
+            tags:
+              only: /^v.*/
+
+      - doxygen-docs:
+          requires:
+            - build-linux-gcc-debug
+          filters:
+            branches:
+              only: main
+            tags:
+              only: /^v.*/
+
+# ============================================================================
+# What was wrong with the previous draft (so nothing here is a mystery fix):
+#   - `image: $CI_REGISTRY_IMAGE/build_gcc_deb:latest` -- that's a GitLab CI
+#     variable, meaningless inside CircleCI. Replaced with the actual public
+#     GitLab Container Registry path for this project.
+#   - `git clone https://github.com vcpkg` -- missing the repo path entirely;
+#     that clones the GitHub homepage, not a repository. Fixed to
+#     https://github.com/microsoft/vcpkg.git.
+#   - `else CC=gcc CXX=g++; }` -- closed a bash `if` with `}` instead of `fi`.
+#     Would fail immediately on any shell.
+#   - The whole `workflows:` matrix `include:` block, and everything after it,
+#     had no YAML indentation at all -- would fail to parse as YAML at all,
+#     not just misbehave.
+#   - `tags: only: /^v./` and `branches: ignore: /./` -- both use a bare `.`
+#     (matches exactly one arbitrary character) where `.*` (matches anything)
+#     was clearly intended. As written, the tag filter would only match
+#     2-character tags, and the branch-ignore would fail to ignore almost any
+#     real branch name.
+#   - Several `# ====` header comments ran directly into the next line with no
+#     line break, which would have gotten swallowed into the comment and
+#     silently dropped the key that followed.
+# ============================================================================

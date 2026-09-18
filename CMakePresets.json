@@ -1,21 +1,89 @@
 {
-	"version": 3,
-	"configurePresets": [
-		{
-			"name": "tidy",
-			"displayName": "Default clang-tidy",
-			"description": "Default build using clang-tidy",
-			"cacheVariables": {
-				"CMAKE_CXX_CLANG_TIDY": "clang-tidy"
-			}
-		},
-		{
-			"name": "cppcheck",
-			"displayName": "Default cppcheck",
-			"description": "Default build using cppcheck",
-			"cacheVariables": {
-				"CMAKE_CXX_CPPCHECK": "cppcheck;--enable=all;--force;--inline-suppr;--suppressions-list=${sourceDir}/CppCheckSuppressions.txt;--library=wxwidgets"
-			}
-		}
-	]
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "description": "Shared settings. Not selectable directly.",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "default",
+            "inherits": "base",
+            "displayName": "Default (Ninja, Debug)",
+            "description": "Plain Debug build with Ninja.",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "inherits": "base",
+            "displayName": "Release (Ninja)",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "coverage",
+            "inherits": "base",
+            "displayName": "Coverage",
+            "description": "Enables cmake/CodeCoverage.cmake, which requires CMAKE_BUILD_TYPE to be literally 'Coverage'.",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Coverage"
+            }
+        },
+        {
+            "name": "tidy",
+            "inherits": "base",
+            "displayName": "Default clang-tidy",
+            "description": "Debug build with clang-tidy driven by the .clang-tidy file.",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
+            }
+        },
+        {
+            "name": "cppcheck",
+            "inherits": "base",
+            "displayName": "Default cppcheck",
+            "description": "Debug build with cppcheck, using CppCheckSuppressions.txt.",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_CPPCHECK": "cppcheck;--enable=all;--force;--inline-suppr;--suppressions-list=${sourceDir}/CppCheckSuppressions.txt;--library=wxwidgets"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "default",  "configurePreset": "default" },
+        { "name": "release",  "configurePreset": "release" },
+        { "name": "coverage", "configurePreset": "coverage" },
+        { "name": "tidy",     "configurePreset": "tidy" },
+        { "name": "cppcheck", "configurePreset": "cppcheck" }
+    ],
+    "testPresets": [
+        {
+            "name": "default",
+            "configurePreset": "default",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "release",
+            "configurePreset": "release",
+            "output": { "outputOnFailure": true }
+        }
+    ]
 }

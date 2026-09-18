@@ -55,6 +55,15 @@ set(CPACK_SOURCE_PACKAGE_FILE_NAME "${_project_lower}_${PROJECT_VERSION}_source"
 
 message(STATUS "-- CPack package target: ${_sys}-${_toolchain_suffix}-${_arch_display}")
 
+# The GitLab pipeline's packaging jobs read the resolved package base name
+# back from this plain file instead of reverse-parsing it out of CMake's own
+# generated build/CPackConfig.cmake (fragile: that file's exact emitted
+# format isn't guaranteed stable across CMake versions, and reverse-parsing
+# it has failed in practice). Kept even though GitHub's release workflow
+# currently extracts this value its own way -- this file is a pure addition
+# and doesn't change that.
+file(WRITE "${CMAKE_BINARY_DIR}/canonical_package_name.txt" "${CPACK_PACKAGE_FILE_NAME}")
+
 file(READ ${CMAKE_CURRENT_LIST_DIR}/.cpack_ignore _cpack_ignore)
 string(REGEX REPLACE "\n" ";" _cpack_ignore ${_cpack_ignore})
 set(CPACK_SOURCE_IGNORE_FILES "${_cpack_ignore}")
@@ -121,6 +130,7 @@ elseif(APPLE)
     set(MACOSX_BUNDLE_ICON_FILE "${PACKAGING_DIR}/apple/icon.icns")
     set_source_files_properties("${PACKAGING_DIR}/apple/icon.icns" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     set(CPACK_DMG_VOLUME_NAME "${PROJECT_NAME}")
+    set(CPACK_DMG_BACKGROUND_IMAGE "${PACKAGING_DIR}/apple/icon.png")
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(RPMBUILD_PATH rpmbuild)

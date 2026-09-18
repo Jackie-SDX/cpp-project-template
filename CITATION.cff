@@ -7,3 +7,5 @@ authors:
 title: "C++ Project Template"
 version: 0.0.1
 url: "https://github.com/MangaD/cpp-project-template"
+repository-code: "https://github.com/MangaD/cpp-project-template"
+license: MIT

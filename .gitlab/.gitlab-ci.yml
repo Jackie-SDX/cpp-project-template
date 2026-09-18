@@ -1,33 +1,133 @@
 # .gitlab/.gitlab-ci.yml
 #
-# Notes:
-# - This keeps your current working architecture and applies safe, modern fixes.
-# - Windows jobs use manifest-aware vcpkg fetching + binary caching to reduce timeout risk.
+# ============================================================================
+# 2026-09-08 pass. Changes in this revision, all of them rules/script-level --
+# no build job's compiler flags, generator, triplet wiring or artifact scope
+# was touched:
+#
+#   1. TAG PIPELINES ARE NOW SCOPED TO WHAT THE RELEASE ACTUALLY CONSUMES.
+#      Previously a tag re-ran the entire Linux+Windows matrix, contradicting
+#      ADR 005 ("Strict Separation of Release Workflows"). Traced the real
+#      `needs:` graph: nothing downstream consumes the Windows Debug legs, the
+#      clang legs, or build:linux:gcc:debug. On a tag those are now skipped.
+#      This matters more than it sounds: per the triplet note below, the DEBUG
+#      Windows legs are the most expensive jobs in this file, because they
+#      build BOTH vcpkg configs. A tag pipeline now runs 5 fewer jobs,
+#      including the two worst. This is not reduced rigour -- the tagged commit
+#      was already validated by the full default-branch matrix, which is
+#      exactly ADR 005's stated rationale.
+#
+#   2. image/doxygen + image/build_gcc_deb no longer fire on tags. A bare
+#      `rules: changes:` ALWAYS evaluates true when there's no Git push event
+#      (GitLab's documented behaviour for tag/scheduled/manual pipelines), so
+#      every release tag was rebuilding and re-pushing both Docker images.
+#
+#   3. build:linux:arm64 now sets CCACHE_DIR/CCACHE_BASEDIR. It cached
+#      `.ccache/` while ccache wrote to $HOME/.cache/ccache -- the cache was a
+#      no-op on every run. The other two Linux jobs already had this.
+#
+#   4. package_linux_arm64_release: installs cmake+binutils (a bare
+#      debian:bookworm has neither) and no longer hides the failure behind
+#      `2>/dev/null || (...)`. That fallback searched `build -maxdepth 1` for
+#      the binary, but binaries live in build/bin/ -- so a failed install
+#      silently produced an EMPTY arm64 tarball and published it. Now it
+#      installs properly and asserts the tree is non-empty before packing.
+#
+#   5. create_release: duplicate-filename detection (see 6), hard failure if
+#      zero assets were collected, a clear message if a Release already exists
+#      for the tag, and `set -eu` instead of `set -euo pipefail` (pipefail is
+#      not POSIX sh; this runs on an Alpine-based image). Same shell fix in
+#      `pages` (busybox).
+#
+#   6. Release asset names are now unique per platform. cpack_module.cmake used
+#      to emit `${project}_${version}` with NO OS or arch, so x64 and x86
+#      installers had byte-identical filenames and `cp` into a flat directory
+#      silently dropped one. Fixed at the source in cpack_module.cmake; the
+#      collision guard here is belt-and-braces so it can never regress
+#      silently again. Archive names also changed from `projectcli-*` to
+#      `cpp-project-template-*`, because the archive contains the whole install
+#      tree (projectcli + projectwx + images), not just the CLI.
+#
+#   7. Windows packaging: `refreshenv` replaced with an explicit machine/user
+#      PATH re-read (refreshenv is a Chocolatey profile function, not
+#      guaranteed present in a non-interactive shell, and this runs under
+#      $ErrorActionPreference = "Stop"). WiX is best-effort: CPack's WIX
+#      generator uses WiX v3 (candle.exe/light.exe) by default, and
+#      Chocolatey's `wixtoolset` package currently still ships WiX 3.14.1, so
+#      no version pin is needed -- MSI stays best-effort because the
+#      Chocolatey install itself is flaky/slow on hosted runners, not because
+#      of a generator/tool mismatch. NSIS stays fatal -- it's the primary
+#      installer.
+#
+# NOTE ON A STALE-COMMENT CLASS OF BUG (see PROGRESS_BOOK.md, Recurring
+# Patterns): the 2026-09-06 session found this header still naming the old
+# `upload_*_release` jobs days after they were renamed to `package_*_release`.
+# The lesson recorded there -- grep the whole file for old names after a
+# rename, don't just patch the comment next to the code you touched -- was
+# applied to this pass as well.
+#
+# 2026-09-08, VERIFICATION PASS: this file was cross-checked a second time
+# before shipping (three independent reviewers total across this and the
+# preceding session). One real bug was found and fixed in that pass: the
+# duplicate-asset guard in create_release used `find ... | while read ...; do
+# ... exit 1 ...; done` -- a piped while-loop runs in a SUBSHELL, so `exit 1`
+# only exits the subshell and the job would have kept going and published
+# anyway. Rewritten below as a `for` loop with a flag variable, which does not
+# have this problem. `sha256sum * > SHA256SUMS` was also racy about whether
+# the glob picks up the file the redirect is creating -- the checksum file is
+# now written outside the collection directory and moved in afterward.
+# ============================================================================
+#
+# Standing notes (carried forward, still true):
+#
+# - Windows jobs use manifest-aware vcpkg fetching + binary caching to reduce
+#   timeout risk.
 # - build:windows installs with single-config overlay triplets from
 #   .gitlab/vcpkg-triplets/. IMPORTANT ASYMMETRY, confirmed live 2026-08-29:
 #     * -release.cmake triplets DO restrict to VCPKG_BUILD_TYPE release (this is
 #       vcpkg's own documented, safe, well-tested single-config path).
-#     * -debug.cmake triplets deliberately do NOT restrict build type. zlib's real
-#       portfile skips installing headers on the debug-only pass and relies on a
-#       release pass to populate include/ -- which never runs if debug-only is
-#       forced, so it hard-fails on "file failed to open: .../include/zconf.h".
-#       wxWidgets pulls in zlib (and likely other same-pattern ports) transitively,
-#       so debug legs build BOTH configs, same cost as before this optimization.
-#   Net effect: Release legs (x64/i686) get ~50% less compile time. Debug legs
-#   don't -- they need the full timeout headroom below, not the halved estimate.
-# - vcpkg.json now lists gtest alongside wxwidgets: src/projectlib/test/CMakeLists.txt
-#   does a hard find_package(GTest REQUIRED), which nothing on Windows previously
-#   provided (GitHub's ci.yml already installs gtest via vcpkg for its Windows legs;
-#   this brings GitLab's manifest in line with that). Confirmed live: gtest installs
-#   clean on x86-windows-debug (one harmless empty-include-folder warning, not fatal).
-# - Project Settings > CI/CD > General pipelines > Timeout is still separate from this
-#   file and still needs raising above the 60-minute default by hand (GitLab account
-#   setting, not expressible in YAML) -- see the state-sync notes, Blocker 3. This
-#   matters MORE now that debug legs no longer get the single-config time savings.
-# - vcpkg.json still has no "builtin-baseline" pin (Blocker 1) -- floats on vcpkg's
-#   "master" branch via $VCPKG_GIT_REF below. Not the cause of the zconf.h failure
-#   (that's structural in zlib's portfile, not commit-specific) but still worth
-#   pinning for reproducibility: `git ls-remote https://github.com/microsoft/vcpkg master`.
+#     * -debug.cmake triplets deliberately do NOT restrict build type. zlib's
+#       real portfile skips installing headers on the debug-only pass and relies
+#       on a release pass to populate include/ -- which never runs if debug-only
+#       is forced, so it hard-fails on "file failed to open: .../include/zconf.h".
+#       wxWidgets pulls in zlib (and likely other same-pattern ports)
+#       transitively, so debug legs build BOTH configs.
+#   Net effect: Release legs get ~50% less compile time; Debug legs do not.
+#   That is exactly why change (1) above, which drops the Debug legs from tag
+#   pipelines, is the largest compute win available in this file.
+# - vcpkg.json lists gtest alongside wxwidgets: src/projectlib/test/CMakeLists.txt
+#   does a hard find_package(GTest REQUIRED) with no fallback.
+# - Project Settings > CI/CD > General pipelines > Timeout is a GitLab ACCOUNT
+#   setting and is not expressible in YAML. A job-level `timeout:` can only
+#   LOWER a job's ceiling below the project default, never raise it -- verified
+#   against GitLab's own behaviour, which is why there is deliberately no
+#   decorative `timeout: 2h` anywhere in this file. It would look like a fix and
+#   do nothing. Raise the project setting by hand. (Blocker 3.)
+# - vcpkg.json still has no "builtin-baseline" pin (Blocker 1) -- it floats on
+#   vcpkg's "master" via $VCPKG_GIT_REF below. Not the cause of the zconf.h
+#   failure (that's structural in zlib's portfile) but worth pinning. Get the
+#   real value with:  git ls-remote https://github.com/microsoft/vcpkg master
+#   Do not guess or pad a short SHA -- this project's standing rule.
+# - macOS is deliberately NOT a hard dependency of create_release: there is no
+#   GitLab macOS runner entitlement yet (Blocker 2), so build:macos cannot
+#   succeed unattended. It is attempted on tags and allowed to fail, so its
+#   asset starts appearing automatically the moment entitlement lands, with no
+#   YAML change. Combining "auto-run macOS on tag" with "create_release must
+#   hard-depend on every upload" -- as an external audit suggested in Phase 9 --
+#   would make every future release impossible while Blocker 2 is open.
+# - Windows archives bundle the whole Release output folder (exe + all DLLs).
+#   The bare exe does not run standalone; it needs gtest.dll, jpeg62.dll,
+#   wxbase*.dll and friends beside it.
+# - Docker image builder jobs pinned to docker:29-cli / docker:29-dind rather
+#   than :latest, matching ADR 003's principle.
+# - Windows ARM64 deliberately NOT added: GitLab's SaaS Windows runners are
+#   x86_64 only, and cross-targeting the MSVC ARM64 toolset plus vcpkg's
+#   arm64-windows triplet is a separate piece of work, not a bolt-on.
+# - Deliberately NOT done, with reasons: restructuring into a separate
+#   BUILD->PACKAGE->UPLOAD pipeline (real improvement, but edits every build
+#   job's artifact scope); matrix-expression-based upload jobs ($[[ matrix.X ]]
+#   complexity not justified at 5 jobs); migrating `pages:` to `pages: true`
+#   (purely stylistic change to a verified-working job).
 
 stages:
   - docker_images
@@ -35,6 +135,8 @@ stages:
   - build
   - documentation
   - deploy
+  - package
+  - release
   - maintenance
 
 variables:
@@ -44,9 +146,35 @@ variables:
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
   VCPKG_DISABLE_METRICS: "1"
   VCPKG_GIT_REF: "master"
+  # 2026-09-11: single switch for build:windows's dependency source. "vcpkg"
+  # is the proven, currently-tested path -- change ONLY this line to
+  # "conan2" to switch. See cmake/PackageManager.cmake for the matching
+  # CMake-side switch (kept as a separate variable there deliberately: this
+  # one controls what build:windows here PROVISIONS on the CI runner before
+  # cmake ever runs; that one controls what CMakeLists.txt CONSUMES once
+  # it's there. Keep both set to the same value.)
+  PACKAGE_MANAGER: "vcpkg"
   BUILD_GCC_DEB_IMAGE: "$CI_REGISTRY_IMAGE/build_gcc_deb:latest"
   DOXYGEN_IMAGE: "$CI_REGISTRY_IMAGE/doxygen:latest"
   DOCKER_SCRIPTS_PATH: ".gitlab/docker_scripts"
+  # Single source of truth for release archive names. Kept in sync with
+  # cpack_module.cmake's CPACK_PACKAGE_FILE_NAME prefix by hand -- if you
+  # rename the project, change both.
+  RELEASE_ARCHIVE_PREFIX: "cpp-project-template"
+  # 2026-09-14: pinned commit for Neumann-A/my-vcpkg-triplets, the
+  # third-party overlay this project's Windows LLVM/clang-cl legs vendor
+  # their toolchain from (see .gitlab/vcpkg-triplets/x64-win-llvm* below).
+  # Resolved directly against the upstream remote, not guessed or taken from
+  # a search index:
+  #   git ls-remote https://github.com/Neumann-A/my-vcpkg-triplets.git HEAD
+  #   git ls-remote https://github.com/Neumann-A/my-vcpkg-triplets.git refs/heads/master
+  # Both returned the same commit; the repo has no `main` branch (confirmed
+  # empty result for refs/heads/main), so `master` is authoritative. This is
+  # a real commit SHA, not a tree SHA, and it's a leaf-pin only -- it does
+  # NOT by itself vendor the files. See the "LLVM vendoring prerequisite"
+  # comment block above build:windows:llvm below for the exact commands
+  # that actually copy the pinned files into this repo.
+  MY_VCPKG_TRIPLETS_COMMIT: "e5f3f2d06430fa475feccbb34a5d61023807b854"
 
 workflow:
   rules:
@@ -65,31 +193,78 @@ default:
 # ============================================================================
 .image:
   stage: docker_images
-  image: docker:latest
+  image: docker:29-cli
   services:
-    - docker:dind
+    - docker:29-dind
   before_script:
     - echo -n "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
     - TARGET="$(printf '%s\n' "$CI_JOB_NAME" | cut -f 2 -d '/')"
-    - cd "$DOCKER_SCRIPTS_PATH/$TARGET"
-    - docker build --pull -t "$CI_REGISTRY_IMAGE/$TARGET:latest" .
-    - docker push "$CI_REGISTRY_IMAGE/$TARGET:latest"
+    - |
+      # 2026-09-10: this used to always build+push, gated only by whether
+      # docker_scripts changed in THIS commit. On a brand-new GitLab project
+      # (a fork, a mirror to a fresh account) there is no prior successful
+      # run to have already populated the registry, and if the commit that
+      # happened to trigger the pipeline didn't touch docker_scripts, this
+      # job didn't run at all -- Linux/doxygen jobs then failed immediately
+      # pulling an image that was never built anywhere on that registry.
+      # This was fixed once already with a manual "break glass" button; this
+      # is the proper fix -- the job now always runs, but does a cheap
+      # existence check first (`docker manifest inspect`, a registry-only
+      # metadata query, not a full pull) and only pays for the expensive
+      # build+push when the image is actually missing or FORCE_REBUILD says
+      # docker_scripts changed. On every normal run where the image already
+      # exists, this whole job now takes a few seconds instead of being
+      # either skipped or a full rebuild.
+      if [ "$FORCE_REBUILD" != "true" ] && docker manifest inspect "$CI_REGISTRY_IMAGE/$TARGET:latest" >/dev/null 2>&1; then
+        echo "$CI_REGISTRY_IMAGE/$TARGET:latest already exists and docker_scripts/$TARGET unchanged -- skipping rebuild."
+      else
+        cd "$DOCKER_SCRIPTS_PATH/$TARGET"
+        docker build --pull -t "$CI_REGISTRY_IMAGE/$TARGET:latest" .
+        docker push "$CI_REGISTRY_IMAGE/$TARGET:latest"
+      fi
   after_script:
     - docker logout "$CI_REGISTRY" || true
   resource_group: "$CI_JOB_NAME"
 
+# Runs on every pipeline now (branch, MR, and tag alike) instead of being
+# gated behind `changes:` or a manual button -- see the script comment in
+# .image above for why. FORCE_REBUILD is set per-rule below: "true" when
+# docker_scripts/doxygen actually changed (always rebuild), "false"
+# otherwise (cheap existence check, rebuild only if genuinely missing).
 image/doxygen:
   extends: .image
   rules:
-    - changes:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
         - .gitlab/docker_scripts/doxygen/**/*
+      variables:
+        FORCE_REBUILD: "true"
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - .gitlab/docker_scripts/doxygen/**/*
+      variables:
+        FORCE_REBUILD: "true"
+    - if: '$CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_TAG'
+      variables:
+        FORCE_REBUILD: "false"
 
 image/build_gcc_deb:
   extends: .image
   rules:
-    - changes:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
         - .gitlab/docker_scripts/build_gcc_deb/**/*
+      variables:
+        FORCE_REBUILD: "true"
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - .gitlab/docker_scripts/build_gcc_deb/**/*
+      variables:
+        FORCE_REBUILD: "true"
+    - if: '$CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_TAG'
+      variables:
+        FORCE_REBUILD: "false"
 
 # ============================================================================
 # Static analysis
@@ -98,9 +273,12 @@ clang-tidy:
   stage: static_analysis
   image: "$BUILD_GCC_DEB_IMAGE"
   rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
+    - set -euo pipefail
     - apt-get update
     - apt-get install -y clang-tidy
     - bash scripts/run_clang_tidy.sh
@@ -114,7 +292,7 @@ coverity:
   script:
     - echo "Starting manual Coverity scan placeholder."
     - |
-      if [ -z "$COVERITY_SCAN_EMAIL" ] || [ -z "$COVERITY_SCAN_TOKEN" ]; then
+      if [ -z "${COVERITY_SCAN_EMAIL:-}" ] || [ -z "${COVERITY_SCAN_TOKEN:-}" ]; then
         echo "COVERITY_SCAN_EMAIL and COVERITY_SCAN_TOKEN must be configured before running Coverity."
         exit 1
       fi
@@ -133,7 +311,136 @@ coverity:
     expire_in: 1 week
 
 # ============================================================================
-# Linux core job
+# 2026-09-14: version resolution and build-success attestation.
+#
+# Single source of truth for both, referenced (not re-implemented) by every
+# build/package job below -- "do not duplicate tag parsing independently
+# across every job" means the LOGIC lives in exactly these four anchors;
+# every job that needs it calls the anchor, it does not re-derive its own
+# copy of the regex/checks.
+#
+# VERSION: CI_COMMIT_TAG -> validate -> strip a leading 'v' -> the one
+# normalized value every build job passes into CMake as
+# CPP_PROJECT_TEMPLATE_VERSION. A tag that doesn't match X.Y.Z (optionally
+# v-prefixed) is a hard failure, not a guess. Non-tag pipelines keep the
+# project's existing 0.0.1.0 local-dev default untouched.
+#
+# ATTESTATION: "an .exe exists" or "CMakeCache.txt exists" proves a build
+# was attempted, not that it succeeded -- a build that fails after
+# partially writing files leaves exactly the same evidence behind. Real
+# proof is a marker written by the build job ONLY as its last step, after
+# both the compile and the test run have already succeeded, naming the
+# exact commit it was built from. Package jobs check this file's presence
+# AND that its commit matches $CI_COMMIT_SHA -- catching both "the build
+# never finished" and "these are leftover artifacts from a different
+# commit" -- as well-defined proof, layered on top of (not instead of) the
+# existing cheap existence guards, which stay in place as an early,
+# low-cost filter before anything expensive runs.
+.resolve_version_bash: &resolve_version_bash
+  - |
+    # POSIX/busybox-portable deliberately: plain `sed` (no -E) and `expr`
+    # match instead of `grep -E`, since create_release runs in an
+    # Alpine-based image (ash/busybox) where GNU-style -E extended-regex
+    # support in sed/grep isn't guaranteed the way it is on the
+    # Debian/Ubuntu-based Linux package jobs.
+    if [ -n "$CI_COMMIT_TAG" ]; then
+      RESOLVED_VERSION=$(echo "$CI_COMMIT_TAG" | sed 's/^v//')
+      if ! expr "$RESOLVED_VERSION" : '[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$' >/dev/null; then
+        echo "ERROR: tag '$CI_COMMIT_TAG' does not match the expected vX.Y.Z or X.Y.Z pattern -- refusing to guess a version." >&2
+        exit 1
+      fi
+    else
+      RESOLVED_VERSION="0.0.1.0"
+    fi
+    echo "Resolved project version: $RESOLVED_VERSION"
+
+.resolve_version_pwsh: &resolve_version_pwsh
+  - |
+    # Uses $env: (not a plain/$script: variable) deliberately -- this
+    # project's own proven build:windows job already relies on $env: vars
+    # (PROJECT_TOOLCHAIN_FILE, VCPKG_BINARY_SOURCES) set in one script
+    # array item surviving into a later, separate one; matching that
+    # existing, already-working pattern rather than a different mechanism.
+    if ($env:CI_COMMIT_TAG) {
+      $env:RESOLVED_VERSION = $env:CI_COMMIT_TAG -replace '^v',''
+      if ($env:RESOLVED_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        throw "Tag '$env:CI_COMMIT_TAG' does not match the expected vX.Y.Z or X.Y.Z pattern -- refusing to guess a version."
+      }
+    } else {
+      $env:RESOLVED_VERSION = "0.0.1.0"
+    }
+    Write-Host "Resolved project version: $env:RESOLVED_VERSION"
+
+.write_attestation_bash: &write_attestation_bash
+  - |
+    echo "{\"commit\":\"$CI_COMMIT_SHA\",\"pipeline\":\"$CI_PIPELINE_ID\",\"job\":\"$CI_JOB_NAME\"}" > build/.build_attestation.json
+    cat build/.build_attestation.json
+
+.write_attestation_pwsh: &write_attestation_pwsh
+  - |
+    $attestation = @{ commit = "$env:CI_COMMIT_SHA"; pipeline = "$env:CI_PIPELINE_ID"; job = "$env:CI_JOB_NAME" } | ConvertTo-Json -Compress
+    Set-Content -Path build\.build_attestation.json -Value $attestation -NoNewline
+    Get-Content build\.build_attestation.json
+
+.check_attestation_bash: &check_attestation_bash
+  - |
+    # 2026-09-16: exits 1, not 0, deliberately -- every package_* job already
+    # carries allow_failure: true, so this doesn't block anything, but it
+    # means GitLab's UI shows an honest "failed (allowed)" warning icon
+    # instead of a plain green checkmark for a job that produced nothing.
+    # Confirmed necessary from a real run: exit 0 here previously made
+    # "build was cancelled, nothing packaged" look identical to "genuinely
+    # succeeded" in the pipeline view.
+    if [ ! -f build/.build_attestation.json ]; then
+      echo "No build/.build_attestation.json -- the upstream build job did not reach its own final (post-test) step. Nothing genuinely proven to package." >&2
+      exit 1
+    fi
+    ATTESTED_COMMIT=$(grep -o '"commit":"[^"]*"' build/.build_attestation.json | cut -d'"' -f4)
+    if [ "$ATTESTED_COMMIT" != "$CI_COMMIT_SHA" ]; then
+      echo "build/.build_attestation.json is for commit $ATTESTED_COMMIT, this pipeline is building $CI_COMMIT_SHA -- stale/mismatched artifact, refusing to package it." >&2
+      exit 1
+    fi
+    echo "Build attestation verified for commit $CI_COMMIT_SHA."
+
+.check_attestation_pwsh: &check_attestation_pwsh
+  - |
+    $ErrorActionPreference = "Stop"
+    # See check_attestation_bash above for why this is exit 1, not exit 0.
+    if (-not (Test-Path "build\.build_attestation.json")) {
+      Write-Host "No build\.build_attestation.json -- the upstream build job did not reach its own final (post-test) step. Nothing genuinely proven to package."
+      exit 1
+    }
+    $attestation = Get-Content "build\.build_attestation.json" -Raw | ConvertFrom-Json
+    if ($attestation.commit -ne $env:CI_COMMIT_SHA) {
+      throw "build\.build_attestation.json is for commit $($attestation.commit), this pipeline is building $env:CI_COMMIT_SHA -- stale/mismatched artifact, refusing to package it."
+    }
+    Write-Host "Build attestation verified for commit $env:CI_COMMIT_SHA."
+
+.read_canonical_base_bash: &read_canonical_base_bash
+  - |
+    # 2026-09-16 fix: this used to reverse-parse build/CPackConfig.cmake
+    # with sed, on the assumption of a specific SET(...) casing/format that
+    # a real run proved wrong (or at least not what this session assumed --
+    # either way, reverse-parsing CMake's own generated file was the wrong
+    # design). cpack_module.cmake now writes this exact value to a plain,
+    # single-purpose file -- read that instead of guessing at a format.
+    if [ ! -f build/canonical_package_name.txt ]; then
+      echo "build/canonical_package_name.txt not found -- cmake/cpack_module.cmake should have written it during configure. Check that cmake --install/configure actually completed for this leg." >&2
+      exit 1
+    fi
+    CANONICAL_BASE=$(cat build/canonical_package_name.txt)
+    if [ -z "$CANONICAL_BASE" ]; then
+      echo "build/canonical_package_name.txt exists but is empty." >&2
+      exit 1
+    fi
+    echo "Canonical package base name: $CANONICAL_BASE"
+
+# ============================================================================
+# Linux coverage job (gcc, Debug)
+#
+# Excluded from tag pipelines: nothing in the release graph consumes it, and it
+# is a Debug build plus a full lcov capture. Coverage is what the default-branch
+# badge reports and what MR reviewers want, so it still runs there.
 # ============================================================================
 build:linux:gcc:debug:
   extends: .build_template
@@ -144,7 +451,13 @@ build:linux:gcc:debug:
     CCACHE_DIR: "$CI_PROJECT_DIR/.ccache"
     CCACHE_BASEDIR: "$CI_PROJECT_DIR"
   rules:
-    - when: always
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: on_success
+    - when: never
   cache:
     key: "$CI_JOB_NAME_SLUG-ccache"
     paths:
@@ -175,10 +488,16 @@ build:linux:gcc:debug:
       - build/
       - coverage/
     expire_in: 1 week
+  # generate_coverage.sh now emits `lcov --summary`, which prints
+  # "lines......: NN.N% (x of y lines)". The previous script only emitted
+  # `lcov --list`, whose table format ("Total:|NN.N%") never matched this
+  # regex -- so coverage was silently never captured despite the job passing.
   coverage: '/lines.*:\s*\d+\.\d+%/'
 
 # ============================================================================
 # Linux matrix
+#
+# On tags: only gcc/Release, the single leg package_linux_x64_release consumes.
 # ============================================================================
 build:linux:matrix:
   extends: .build_template
@@ -191,15 +510,19 @@ build:linux:matrix:
       - COMPILER: [gcc, clang]
         BUILD_TYPE: [Debug, Release]
   rules:
+    # gcc/Debug is permanently covered by build:linux:gcc:debug above.
     - if: '$COMPILER == "gcc" && $BUILD_TYPE == "Debug"'
+      when: never
+    - if: '$CI_COMMIT_TAG && $COMPILER == "gcc" && $BUILD_TYPE == "Release"'
+      when: on_success
+      allow_failure: true
+    - if: '$CI_COMMIT_TAG'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $COMPILER == "clang" && $BUILD_TYPE == "Release"'
       when: on_success
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       when: never
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      when: on_success
-    - if: '$CI_COMMIT_TAG'
       when: on_success
     - when: never
   cache:
@@ -214,18 +537,77 @@ build:linux:matrix:
     - export PATH="/usr/lib/ccache:$PATH"
     - if [ "$COMPILER" = "clang" ]; then export CC=clang CXX=clang++; else export CC=gcc CXX=g++; fi
     - ccache --show-stats || true
+    - *resolve_version_bash
     - cmake -S . -B build
       -G Ninja
       -D CMAKE_MAKE_PROGRAM=ninja
       -D CMAKE_BUILD_TYPE=$BUILD_TYPE
       -D CMAKE_C_COMPILER_LAUNCHER=ccache
       -D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+      -D CPP_PROJECT_TEMPLATE_VERSION=$RESOLVED_VERSION
     - cmake --build build
     - cd build && ctest -C $BUILD_TYPE --output-on-failure && cd ..
+    - *write_attestation_bash
+    - ccache --show-stats || true
+
+# ============================================================================
+# Linux ARM64 (native runner)
+#
+# Uses a plain debian:bookworm rather than $BUILD_GCC_DEB_IMAGE: that custom
+# image is built on the default (amd64) runner, so it is an amd64 image and
+# will not run natively on arm64 without emulation. Building a proper arm64
+# variant of the custom image is a reasonable future improvement; installing
+# deps inline is the lower-risk choice.
+#
+# CCACHE_DIR/CCACHE_BASEDIR added 2026-09-08: this job cached `.ccache/` while
+# ccache actually wrote to $HOME/.cache/ccache, so the cache never hit.
+# ============================================================================
+build:linux:arm64:
+  extends: .build_template
+  image: debian:bookworm
+  tags:
+    - saas-linux-small-arm64
+  variables:
+    CCACHE_DIR: "$CI_PROJECT_DIR/.ccache"
+    CCACHE_BASEDIR: "$CI_PROJECT_DIR"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: on_success
+    - if: '$CI_COMMIT_TAG'
+      when: on_success
+      allow_failure: true
+    - when: never
+  cache:
+    key: "$CI_JOB_NAME_SLUG-ccache"
+    paths:
+      - .ccache/
+    policy: pull-push
+  script:
+    - set -euo pipefail
+    - apt-get update
+    - apt-get install -y build-essential cmake ninja-build ccache git pkg-config
+      libwxgtk3.2-dev libgtest-dev
+    - export PATH="/usr/lib/ccache:$PATH"
+    - ccache --show-stats || true
+    - *resolve_version_bash
+    - cmake -S . -B build
+      -G Ninja
+      -D CMAKE_MAKE_PROGRAM=ninja
+      -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_C_COMPILER_LAUNCHER=ccache
+      -D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+      -D CPP_PROJECT_TEMPLATE_VERSION=$RESOLVED_VERSION
+    - cmake --build build
+    - cd build && ctest -C Release --output-on-failure && cd ..
+    - *write_attestation_bash
     - ccache --show-stats || true
 
 # ============================================================================
 # Windows matrix
+#
+# On tags: Release legs only. The Debug legs are the two most expensive jobs in
+# this file (debug triplets build BOTH vcpkg configs -- see the zlib note in
+# the header) and nothing in the release graph consumes them.
 # ============================================================================
 build:windows:
   extends: .build_template
@@ -244,13 +626,33 @@ build:windows:
         VCPKG_TARGET_TRIPLET: "x86-windows"
         BUILD_TYPE: ["Debug", "Release"]
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $ARCH == "x64" && $BUILD_TYPE == "Debug"'
+    - if: '$CI_COMMIT_TAG && $BUILD_TYPE == "Release"'
       when: on_success
+      allow_failure: true
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    # 2026-09-11: MR smoke-test leg switched from x64+Debug to x64+Release.
+    # Debug is now manual everywhere (see below) per direct instruction after
+    # a live run showed 4 automatic Windows legs on a single push burning an
+    # entire month's free compute allowance in one go. Release is also the
+    # faster config (no double-build; see the zlib/triplet note in this
+    # file's header), so this is a strict improvement, not just a smaller
+    # version of the same check.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $ARCH == "x64" && $BUILD_TYPE == "Release"'
+      when: on_success
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $BUILD_TYPE == "Debug"'
+      when: manual
+      allow_failure: true
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       when: never
+    # Debug on the default branch: manual instead of automatic. This is the
+    # rule that actually matters -- it's what made every push to main spin
+    # up all 4 Windows legs (2 Debug + 2 Release) at once. Release keeps
+    # running automatically below; Debug now sits as a play button.
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $BUILD_TYPE == "Debug"'
+      when: manual
+      allow_failure: true
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      when: on_success
-    - if: '$CI_COMMIT_TAG'
       when: on_success
     - when: never
   cache:
@@ -258,6 +660,264 @@ build:windows:
         files:
           - vcpkg.json
         prefix: "windows-$VCPKG_GIT_REF-$ARCH-$BUILD_TYPE"
+      fallback_keys:
+        - "windows-$VCPKG_GIT_REF-$ARCH-$BUILD_TYPE"
+      paths:
+        - vcpkg_cache/
+      policy: pull-push
+    # 2026-09-11: matching cache for the Conan 2 path. Harmless when
+    # PACKAGE_MANAGER=vcpkg -- conan2_cache/ just stays empty and this
+    # costs nothing meaningful to cache/restore.
+    - key:
+        files:
+          - conanfile.txt
+        prefix: "windows-conan2-$ARCH-$BUILD_TYPE"
+      fallback_keys:
+        - "windows-conan2-$ARCH-$BUILD_TYPE"
+      paths:
+        - conan2_cache/
+      policy: pull-push
+  artifacts:
+    when: always
+    paths:
+      - build/
+    expire_in: 1 week
+  script:
+    - |
+      $ErrorActionPreference = "Stop"
+      $ProgressPreference = "SilentlyContinue"
+
+      git config --global core.autocrlf false
+      git config --global advice.detachedHead false
+
+      $buildTypeLower = $env:BUILD_TYPE.ToLower()
+    - *resolve_version_pwsh
+    - |
+      $buildTypeLower = $env:BUILD_TYPE.ToLower()
+
+      if ($env:PACKAGE_MANAGER -eq "vcpkg") {
+        # ============================================================
+        # vcpkg path -- EXISTING, PROVEN LOGIC. One addition: an explicit
+        # exit-code check after `vcpkg install` (line below), since
+        # $ErrorActionPreference = "Stop" only catches PowerShell-level
+        # errors, not a non-zero exit code from an external .exe -- a
+        # failed vcpkg install could previously have gone unnoticed until
+        # a much less clear failure at the cmake configure step. Every
+        # other line in this branch is unchanged from what already ran
+        # successfully.
+        # ============================================================
+        New-Item -ItemType Directory -Force -Path "$env:CI_PROJECT_DIR\vcpkg_cache" | Out-Null
+        $env:VCPKG_BINARY_SOURCES = "clear;files,$env:CI_PROJECT_DIR\vcpkg_cache,readwrite"
+        $env:VCPKG_MANIFEST_MODE = "ON"
+
+        $fullTriplet = "$env:VCPKG_TARGET_TRIPLET-$buildTypeLower"
+        $overlayTripletsDir = "$env:CI_PROJECT_DIR\.gitlab\vcpkg-triplets"
+
+        $vcpkgRef = $env:VCPKG_GIT_REF
+        if (Test-Path "$env:CI_PROJECT_DIR\vcpkg.json") {
+          $manifest = Get-Content "$env:CI_PROJECT_DIR\vcpkg.json" -Raw | ConvertFrom-Json
+          if ($manifest.'builtin-baseline') {
+            $vcpkgRef = $manifest.'builtin-baseline'
+          }
+        }
+
+        if (Test-Path "$env:CI_PROJECT_DIR\vcpkg") {
+          Remove-Item -Recurse -Force "$env:CI_PROJECT_DIR\vcpkg"
+        }
+
+        git init vcpkg
+        cd vcpkg
+        git remote add origin https://github.com/microsoft/vcpkg.git
+        git fetch --depth 1 --no-tags origin "$vcpkgRef"
+
+        if ($LASTEXITCODE -eq 0) {
+          git checkout FETCH_HEAD
+        } else {
+          cd $env:CI_PROJECT_DIR
+          Remove-Item -Recurse -Force vcpkg
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          cd vcpkg
+          git checkout "$vcpkgRef"
+        }
+
+        cd $env:CI_PROJECT_DIR
+        .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+        .\vcpkg\vcpkg install --triplet $fullTriplet --overlay-triplets="$overlayTripletsDir"
+        if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed" }
+        $env:PROJECT_TOOLCHAIN_FILE = "$env:CI_PROJECT_DIR\vcpkg\scripts\buildsystems\vcpkg.cmake" -replace '\\','/'
+
+      } elseif ($env:PACKAGE_MANAGER -eq "conan2") {
+        # ============================================================
+        # Conan 2 path -- NEW, ADDED 2026-09-11, NOT YET VERIFIED
+        # AGAINST A REAL PIPELINE RUN. Written against Conan 2's
+        # documented CLI and CMakeToolchain/CMakeDeps generator
+        # behaviour, but this project has no live evidence yet that it
+        # actually completes end-to-end on a GitLab Windows SaaS
+        # runner the way the vcpkg branch above has been proven to.
+        # Treat the first real run of this branch as a genuine test,
+        # not a formality -- same as every vcpkg fix in this project's
+        # history that "looked right" and needed a real run to confirm.
+        # ============================================================
+        New-Item -ItemType Directory -Force -Path "$env:CI_PROJECT_DIR\conan2_cache" | Out-Null
+        $env:CONAN_HOME = "$env:CI_PROJECT_DIR\conan2_cache"
+
+        pip install --upgrade conan
+        if ($LASTEXITCODE -ne 0) { throw "pip install conan failed" }
+
+        if (-not (Test-Path "$env:CONAN_HOME\profiles\default")) {
+          conan profile detect --force
+          if ($LASTEXITCODE -ne 0) { throw "conan profile detect failed" }
+        }
+
+        # Conan's arch names differ from this file's own ARCH values.
+        $conanArch = if ($env:ARCH -eq "x64") { "x86_64" } else { "x86" }
+
+        conan install . `
+          --output-folder="$env:CI_PROJECT_DIR\build" `
+          --build=missing `
+          -s "arch=$conanArch" `
+          -s "build_type=$env:BUILD_TYPE" `
+          -s "compiler=msvc" `
+          -s "compiler.version=193" `
+          -s "compiler.runtime=dynamic"
+        if ($LASTEXITCODE -ne 0) { throw "conan install failed" }
+
+        # Conan's CMakeToolchain generator names this file
+        # `conan_toolchain.cmake` inside the chosen --output-folder as of
+        # Conan 2's current default layout. If a future Conan version
+        # changes this, `conan install`'s own output lists the exact
+        # generated files -- check there first rather than assuming this
+        # path is still correct.
+        $env:PROJECT_TOOLCHAIN_FILE = "$env:CI_PROJECT_DIR\build\conan_toolchain.cmake" -replace '\\','/'
+        if (-not (Test-Path "$env:CI_PROJECT_DIR\build\conan_toolchain.cmake")) {
+          throw "Expected Conan to generate build\conan_toolchain.cmake but it isn't there. Check the `conan install` output above for the actual generated toolchain filename."
+        }
+
+      } else {
+        throw "PACKAGE_MANAGER must be 'vcpkg' or 'conan2', got: '$env:PACKAGE_MANAGER'"
+      }
+    - |
+      if ($env:PACKAGE_MANAGER -eq "vcpkg") {
+        $buildTypeLower = $env:BUILD_TYPE.ToLower()
+        $fullTriplet = "$env:VCPKG_TARGET_TRIPLET-$buildTypeLower"
+        $overlayTripletsDir = "$env:CI_PROJECT_DIR\.gitlab\vcpkg-triplets"
+        cmake -S . -B build `
+          -G "$env:CMAKE_GENERATOR" `
+          -A $env:CMAKE_ARCH `
+          -D CMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+          -D PACKAGE_MANAGER=vcpkg `
+          -D VCPKG_TARGET_TRIPLET=$fullTriplet `
+          -D VCPKG_OVERLAY_TRIPLETS="$overlayTripletsDir" `
+          -D VCPKG_MANIFEST_MODE=ON `
+          -D CMAKE_TOOLCHAIN_FILE="$env:PROJECT_TOOLCHAIN_FILE" `
+          -D CPP_PROJECT_TEMPLATE_VERSION=$env:RESOLVED_VERSION
+      } else {
+        cmake -S . -B build `
+          -G "$env:CMAKE_GENERATOR" `
+          -A $env:CMAKE_ARCH `
+          -D CMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+          -D PACKAGE_MANAGER=conan2 `
+          -D CMAKE_TOOLCHAIN_FILE="$env:PROJECT_TOOLCHAIN_FILE" `
+          -D CPP_PROJECT_TEMPLATE_VERSION=$env:RESOLVED_VERSION
+      }
+      if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+    - cmake --build build --config $env:BUILD_TYPE -- /m
+    - cd build
+    - ctest -C $env:BUILD_TYPE --output-on-failure
+    - cd ..
+    - *write_attestation_pwsh
+
+
+# ============================================================================
+# Windows MinGW matrix -- NEW 2026-09-13, NOT YET VERIFIED AGAINST A REAL
+# PIPELINE RUN. Separate job from build:windows on purpose: build:windows's
+# MSVC path (Visual Studio generator, proven across many real releases) is
+# completely untouched by any of this. MinGW needs a different generator --
+# Visual Studio's generator is MSBuild-specific and cannot drive gcc -- plus
+# its own toolchain install, so it gets its own job rather than a TOOLCHAIN
+# branch bolted onto the one that already works.
+#
+# Uses vcpkg's built-in "community" triplets (x64-mingw-dynamic,
+# x86-mingw-dynamic) -- these ship inside vcpkg itself (triplets/community/),
+# no overlay-triplets file needed, unlike the LLVM leg (see below). Microsoft's
+# own vcpkg docs flag community triplets as "not tested by continuous
+# integration, so many ports do not build" -- treat the first real run of
+# this job as a genuine test of whether wxWidgets/gtest actually build clean
+# under this triplet, the same way every vcpkg fix in this project's history
+# needed a real run to confirm, not just a formality.
+#
+# 2026-09-14: LLVM/clang-cl is now added -- see build:windows:llvm and its
+# package jobs, below build:windows:mingw in this file. It was deliberately
+# NOT added earlier because GitHub's own "Windows LLVM x64" leg depends on a
+# third-party, unpinned overlay triplet (Neumann-A/my-vcpkg-triplets'
+# x64-win-llvm), which -- checked directly, not assumed -- chainloads a
+# 258-line custom toolchain file targeting clang-cl specifically (not plain
+# clang), and that repo's own README documents a real quirk: clang's
+# intrinsic headers need a manual edit for things like AVX to work correctly
+# under this triplet (its one named example is compiling Qt; this project
+# has no Qt dependency, which is a data point in favor, not proof either
+# way). The commit is now pinned (MY_VCPKG_TRIPLETS_COMMIT above, resolved
+# via git ls-remote, not guessed) and the toolchain tree still needs to be
+# vendored into this repo by copying the actual pinned files -- see the
+# comment above build:windows:llvm for the exact commands and why this
+# response does not attempt to hand-reconstruct that file's content itself.
+# ============================================================================
+build:windows:mingw:
+  extends: .build_template
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    CMAKE_GENERATOR: "Ninja"
+  parallel:
+    matrix:
+      - ARCH: "x64"
+        VCPKG_TARGET_TRIPLET: "x64-mingw-dynamic"
+        MINGW_CC: "x86_64-w64-mingw32-gcc.exe"
+        MINGW_CXX: "x86_64-w64-mingw32-g++.exe"
+        BUILD_TYPE: ["Debug", "Release"]
+      - ARCH: "i686"
+        VCPKG_TARGET_TRIPLET: "x86-mingw-dynamic"
+        MINGW_CC: "i686-w64-mingw32-gcc.exe"
+        MINGW_CXX: "i686-w64-mingw32-g++.exe"
+        BUILD_TYPE: ["Debug", "Release"]
+  rules:
+    # 2026-09-16 correction, superseding the 2026-09-13 decision below:
+    # auto-triggering on tag (with manual cancellation as the control
+    # mechanism for legs you didn't want that run) turned out to have a
+    # real, confirmed cost -- cancelling an auto-started build here does
+    # NOT stop its package job from starting too (GitLab runs a needs:
+    # downstream job regardless of an allow_failure:true upstream's outcome,
+    # cancelled included -- this is the exact mechanism that fixes
+    # create_release's own skip bug, one stage further up, so removing
+    # allow_failure isn't the fix either). The package job's guards make
+    # that survivable (exits in seconds, publishes nothing), but "survivable"
+    # isn't the same as "doesn't happen". A job that's never played at all
+    # doesn't have this problem -- confirmed directly: build:windows:arm64's
+    # plain `when: manual` (below) plus `optional: true` on its package
+    # job's needs: (see package_windows_arm64_release) already produces a
+    # clean, complete skip when the build was never triggered, on a real
+    # tag pipeline. This job now matches that same pattern instead of the
+    # auto-trigger one. Promote it back to auto-trigger-on-tag once you've
+    # done a full clean real run you're confident in -- this is a
+    # deliberately conservative default for right now, not a permanent
+    # downgrade.
+    #
+    # MR exclusion kept explicit (not just relying on there being no MR-
+    # specific rule) -- a bare `when: manual` with no rules conditions would
+    # make this appear as a clickable, real-compute-consuming button on
+    # every merge request too, which this project has deliberately kept
+    # unproven legs off of.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - when: manual
+      allow_failure: true
+  cache:
+    - key:
+        files:
+          - vcpkg.json
+        prefix: "windows-mingw-$VCPKG_GIT_REF-$ARCH-$BUILD_TYPE"
+      fallback_keys:
+        - "windows-mingw-$VCPKG_GIT_REF-$ARCH-$BUILD_TYPE"
       paths:
         - vcpkg_cache/
       policy: pull-push
@@ -274,13 +934,35 @@ build:windows:
       git config --global core.autocrlf false
       git config --global advice.detachedHead false
 
+      # MinGW-w64 is NOT on the saas-windows-medium-amd64 image by default --
+      # confirmed against GitLab's own pre-installed-software documentation,
+      # not assumed. This is unlike GitHub's windows-latest runner, which
+      # ships it already and is why ci.yml has no equivalent install step
+      # for this toolchain.
+      choco install mingw -y --no-progress
+      if ($LASTEXITCODE -ne 0) { throw "choco install mingw failed" }
+
+      $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+      $userPath    = [System.Environment]::GetEnvironmentVariable("Path", "User")
+      $env:PATH = "$machinePath;$userPath"
+
+      # Resolve the actual compiler path rather than trusting a hardcoded
+      # location -- choco's mingw package has changed its install layout
+      # across versions historically. Fail loudly and specifically if the
+      # expected prefixed binary isn't findable, instead of silently
+      # falling back to whichever unprefixed "gcc" happens to resolve first
+      # on PATH (ambiguous by architecture, since choco's mingw package
+      # installs BOTH the mingw32 and mingw64 bin dirs onto PATH at once).
+      $ccCmd = Get-Command $env:MINGW_CC -ErrorAction SilentlyContinue
+      if (-not $ccCmd) { throw "Expected $env:MINGW_CC on PATH after installing mingw, but it isn't there. Check choco's actual current install layout for this runner image before assuming this script is wrong." }
+      $cxxCmd = Get-Command $env:MINGW_CXX -ErrorAction SilentlyContinue
+      if (-not $cxxCmd) { throw "Expected $env:MINGW_CXX on PATH after installing mingw, but it isn't there." }
+      $env:CC = $ccCmd.Source
+      $env:CXX = $cxxCmd.Source
+
       New-Item -ItemType Directory -Force -Path "$env:CI_PROJECT_DIR\vcpkg_cache" | Out-Null
       $env:VCPKG_BINARY_SOURCES = "clear;files,$env:CI_PROJECT_DIR\vcpkg_cache,readwrite"
       $env:VCPKG_MANIFEST_MODE = "ON"
-
-      $buildTypeLower = $env:BUILD_TYPE.ToLower()
-      $fullTriplet = "$env:VCPKG_TARGET_TRIPLET-$buildTypeLower"
-      $overlayTripletsDir = "$env:CI_PROJECT_DIR\.gitlab\vcpkg-triplets"
 
       $vcpkgRef = $env:VCPKG_GIT_REF
       if (Test-Path "$env:CI_PROJECT_DIR\vcpkg.json") {
@@ -310,20 +992,756 @@ build:windows:
       }
 
       cd $env:CI_PROJECT_DIR
-    - .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-    - .\vcpkg\vcpkg install --triplet $fullTriplet --overlay-triplets="$overlayTripletsDir"
-    - $env:VCPKG_TOOLCHAIN_FILE = "$env:CI_PROJECT_DIR\vcpkg\scripts\buildsystems\vcpkg.cmake" -replace '\\','/'
-    - cmake -S . -B build
-      -G "$env:CMAKE_GENERATOR"
-      -A $env:CMAKE_ARCH
-      -D CMAKE_BUILD_TYPE=$env:BUILD_TYPE
-      -D VCPKG_TARGET_TRIPLET=$fullTriplet
-      -D VCPKG_OVERLAY_TRIPLETS="$overlayTripletsDir"
-      -D VCPKG_MANIFEST_MODE=ON
-      -D CMAKE_TOOLCHAIN_FILE="$env:VCPKG_TOOLCHAIN_FILE"
-    - cmake --build build --config $env:BUILD_TYPE -- /m
+      .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      # No --host-triplet override: MSVC is still present on this same
+      # runner image (it's what build:windows uses), so vcpkg's default
+      # host-triplet detection resolves to native x64-windows for any
+      # build-time host tools it needs -- vcpkg's own docs say host-triplet
+      # only needs to be forced to mingw when Visual Studio isn't installed
+      # at all, which isn't the case here.
+      .\vcpkg\vcpkg install --triplet $env:VCPKG_TARGET_TRIPLET
+      if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed" }
+      $toolchainFile = "$env:CI_PROJECT_DIR\vcpkg\scripts\buildsystems\vcpkg.cmake" -replace '\\','/'
+    - *resolve_version_pwsh
+    - |
+      # -static-libgcc/-static-libstdc++/-static: statically link MinGW's own
+      # runtime into the produced binaries. Without this, every MinGW
+      # release would dynamically depend on libstdc++-6.dll,
+      # libgcc_s_seh-1.dll, and libwinpthread-1.dll -- fine on this CI
+      # runner (which has them), broken for a user installing the release
+      # without a MinGW toolchain on their own machine.
+      cmake -S . -B build `
+        -G "$env:CMAKE_GENERATOR" `
+        -D CMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+        -D PACKAGE_MANAGER=vcpkg `
+        -D PACKAGE_TOOLCHAIN=mingw `
+        -D VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET `
+        -D VCPKG_MANIFEST_MODE=ON `
+        -D CMAKE_TOOLCHAIN_FILE="$toolchainFile" `
+        -D CMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++ -static" `
+        -D CPP_PROJECT_TEMPLATE_VERSION=$env:RESOLVED_VERSION
+      if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+    - cmake --build build --config $env:BUILD_TYPE
     - cd build
     - ctest -C $env:BUILD_TYPE --output-on-failure
+    - cd ..
+    - *write_attestation_pwsh
+
+
+# ============================================================================
+# Windows LLVM/clang-cl matrix -- NEW 2026-09-14, ZERO REAL RUNS YET.
+#
+# VENDORING PREREQUISITE -- READ BEFORE TRIGGERING build:windows:llvm:
+# ----------------------------------------------------------------------
+# This job needs the upstream Neumann-A/my-vcpkg-triplets overlay physically
+# copied into .gitlab/vcpkg-triplets/ at the pinned commit
+# (MY_VCPKG_TRIPLETS_COMMIT above, resolved via git ls-remote -- not
+# guessed). That tree is NOT included in this change. Two reasons, both
+# deliberate, not an oversight:
+#   1. The chainloaded toolchain file (x64-win-llvm/x64-win-llvm.toolchain.cmake,
+#      258 lines) plus its extra_setup.cmake, port_specialization.cmake, and
+#      three Platform/*.cmake files are load-bearing, third-party CMake code.
+#      Every attempt in this session to retrieve their exact byte-for-byte
+#      content (GitHub blob fetch, search-index snippets) came back partial
+#      or line-number-only -- GitHub's code view is JS-rendered and doesn't
+#      reliably yield full text through those channels. Hand-transcribing a
+#      partial reconstruction of someone else's toolchain file and shipping
+#      it as if verified would be exactly the kind of fabrication this
+#      project's whole verification protocol exists to prevent -- so this
+#      response does not do that. A plain `git clone` has no such problem.
+#   2. This keeps the upstream directory structure and license file
+#      byte-identical to what upstream actually publishes, which is required
+#      anyway (do not flatten/rename the tree -- the toolchain file includes
+#      its parent triplet by relative path: `../${VCPKG_TARGET_TRIPLET}.cmake`).
+#
+# Run once, locally or in any shell with git and network access (this is a
+# one-time vendoring step, not part of CI):
+#
+#   git clone https://github.com/Neumann-A/my-vcpkg-triplets.git /tmp/my-vcpkg-triplets
+#   cd /tmp/my-vcpkg-triplets
+#   git checkout e5f3f2d06430fa475feccbb34a5d61023807b854
+#   cd <this repo>
+#   mkdir -p .gitlab/vcpkg-triplets/x64-win-llvm/Platform
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm.cmake            .gitlab/vcpkg-triplets/
+#   cp /tmp/my-vcpkg-triplets/x86-win-llvm.cmake            .gitlab/vcpkg-triplets/
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm-release.cmake    .gitlab/vcpkg-triplets/
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm/x64-win-llvm.toolchain.cmake .gitlab/vcpkg-triplets/x64-win-llvm/
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm/extra_setup.cmake            .gitlab/vcpkg-triplets/x64-win-llvm/
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm/port_specialization.cmake    .gitlab/vcpkg-triplets/x64-win-llvm/
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm/Notes.md                     .gitlab/vcpkg-triplets/x64-win-llvm/
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm/Platform/Clang-CL-override.cmake .gitlab/vcpkg-triplets/x64-win-llvm/Platform/
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm/Platform/Clang-CL-C.cmake       .gitlab/vcpkg-triplets/x64-win-llvm/Platform/
+#   cp /tmp/my-vcpkg-triplets/x64-win-llvm/Platform/Clang-CL-CXX.cmake     .gitlab/vcpkg-triplets/x64-win-llvm/Platform/
+#   cp /tmp/my-vcpkg-triplets/LICENSE                        .gitlab/vcpkg-triplets/x64-win-llvm/UPSTREAM_LICENSE.txt
+#   git add .gitlab/vcpkg-triplets/x64-win-llvm* .gitlab/vcpkg-triplets/x86-win-llvm.cmake
+#   git commit -m "Vendor Neumann-A/my-vcpkg-triplets LLVM overlay @ e5f3f2d0"
+#
+# There is deliberately no x86-win-llvm-release.cmake in that list -- it
+# does not exist upstream (confirmed by directory listing, not assumed).
+# x86 therefore installs both Debug and Release vcpkg dependency
+# configurations for now, which costs more CI time than necessary. A
+# project-derived x86 release-only triplet would fix that, but per the
+# spec's own instruction ("do not create a release-only triplet by blind
+# textual copying"), that is a follow-up once the plain x86-win-llvm path
+# is actually proven once, not something to author speculatively now.
+#
+# The job below fails fast with a clear message (not a cryptic vcpkg error)
+# if you trigger it before vendoring.
+#
+# DESIGN DECISION -- Option A (LLVM-built dependencies), not Option B:
+# ----------------------------------------------------------------------
+# wxWidgets/GoogleTest/zlib/etc. are built BY clang-cl through this overlay,
+# not consumed as pre-existing MSVC-built binaries with only the project's
+# own code compiled by clang-cl. Reasons: vcpkg's binary-cache ABI hash
+# includes compiler/toolchain identity, so manifest-mode vcpkg would not
+# actually reuse the existing MSVC dependency cache "for free" under
+# Option B without deliberately re-architecting the install step to split
+# dependency-install from project-configure -- meaning B is not simpler
+# than it looks. Option A also matches what the upstream triplet is
+# actually designed for, and produces an artifact whose "LLVM" label is
+# unambiguous rather than "clang-cl app + undocumented MSVC dependency
+# mixture." Cost: a genuinely cold, separate LLVM vcpkg cache namespace,
+# which the cache key below already accounts for.
+#
+# STAGED ROLLOUT: build:windows:llvm below already goes straight to a full
+# Release build (Stage 2 in the audit this was based on). probe:windows:llvm
+# is the cheap Stage-0 gate -- run and confirm it passes BEFORE ever
+# triggering the full build, so a broken runner/toolchain assumption costs
+# a few minutes, not a full cold vcpkg dependency build. Both are manual on
+# purpose: this whole toolchain has zero real-run history.
+# ============================================================================
+probe:windows:llvm:
+  stage: build
+  tags:
+    - saas-windows-medium-amd64
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - when: manual
+      allow_failure: true
+  script:
+    - |
+      $ErrorActionPreference = "Stop"
+      $ProgressPreference = "SilentlyContinue"
+
+      # Cheapest possible falsification test (audit section Y, Stage 0): no
+      # vcpkg, no overlay triplet needed -- just prove this runner can
+      # actually produce a real clang-cl/lld-link MSVC-ABI x64 binary before
+      # anything here pays for a full cold vcpkg dependency build.
+      choco install llvm -y --no-progress
+      if ($LASTEXITCODE -ne 0) { throw "choco install llvm failed" }
+      $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+      $userPath    = [System.Environment]::GetEnvironmentVariable("Path", "User")
+      $env:PATH = "$machinePath;$userPath"
+      $clangCl = Get-Command clang-cl -ErrorAction SilentlyContinue
+      if (-not $clangCl) { throw "clang-cl not found on PATH after installing llvm via Chocolatey. Check this runner image's actual install layout before assuming this script is wrong." }
+      Write-Host "--- clang-cl --version ---"
+      & clang-cl --version
+      Write-Host "--- lld-link --version ---"
+      & lld-link --version
+      if ($LASTEXITCODE -ne 0) { throw "lld-link not found next to clang-cl -- the upstream toolchain requires it explicitly." }
+
+      $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+      if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found -- cannot locate a Visual Studio install." }
+      $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+      if (-not $vsPath) { throw "vswhere could not find a VS install with the VC.Tools.x86.x64 workload -- required even for clang-cl (Windows SDK, rc.exe, mt.exe)." }
+      Write-Host "Visual Studio: $vsPath"
+      $vcvarsAll = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+      if (-not (Test-Path $vcvarsAll)) { throw "vcvarsall.bat not found at: $vcvarsAll" }
+      $envDump = cmd /c "`"$vcvarsAll`" x64 && set"
+      foreach ($line in $envDump) {
+        if ($line -match '^([A-Za-z_][^=]*)=(.*)$') {
+          [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+        }
+      }
+      Write-Host "vcvars loaded for x64."
+      cmake --version
+      ninja --version
+
+      "int main(){return 0;}" | Out-File -Encoding ascii probe.cpp
+      clang-cl /c /EHsc probe.cpp
+      if ($LASTEXITCODE -ne 0) { throw "clang-cl could not compile a trivial translation unit." }
+      lld-link probe.obj /out:probe.exe /subsystem:console /entry:main
+      if ($LASTEXITCODE -ne 0) { throw "lld-link could not link the trivial probe." }
+      $dumpbinOut = & dumpbin /headers probe.exe
+      if ($dumpbinOut -notmatch '8664 machine \(x64\)') {
+        throw "PE architecture check failed -- probe.exe is not x64. dumpbin output: $dumpbinOut"
+      }
+      Write-Host "Stage 0 probe PASSED: clang-cl + lld-link produced a real x64 PE binary via the Visual Studio environment."
+
+build:windows:llvm:
+  extends: .build_template
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    CMAKE_GENERATOR: "Ninja"
+  parallel:
+    matrix:
+      # Release only for now, both architectures -- Debug is deliberately
+      # deferred until Release is proven at least once (audit section R),
+      # same staging discipline already applied to MinGW.
+      - ARCH: "x64"
+        VCPKG_TARGET_TRIPLET: "x64-win-llvm-release"
+        BUILD_TYPE: "Release"
+      - ARCH: "i686"
+        VCPKG_TARGET_TRIPLET: "x86-win-llvm"
+        BUILD_TYPE: "Release"
+  rules:
+    # 2026-09-16: purely manual, everywhere -- this toolchain has zero real
+    # successful runs at all (unlike MinGW, which had at least one). This
+    # used to auto-trigger on tag with allow_failure:true; that's exactly
+    # what produced the confusing "I cancelled the build but the package job
+    # still ran" experience -- see the matching comment and fix on
+    # build:windows:mingw's rules above for the full explanation and the
+    # confirmed mechanism. `when: manual` here plus `optional: true` on
+    # package_windows_llvm_*_release's needs: (below) is what actually
+    # produces a clean, complete skip when this was never triggered.
+    #
+    # MR exclusion kept explicit for the same reason as build:windows:mingw
+    # above -- without it, this becomes a clickable, real-compute-consuming
+    # button on every merge request too.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - when: manual
+      allow_failure: true
+  cache:
+    - key:
+        files:
+          - vcpkg.json
+        prefix: "windows-llvm-$VCPKG_GIT_REF-$MY_VCPKG_TRIPLETS_COMMIT-$ARCH-$BUILD_TYPE"
+      fallback_keys:
+        - "windows-llvm-$VCPKG_GIT_REF-$MY_VCPKG_TRIPLETS_COMMIT-$ARCH-$BUILD_TYPE"
+      paths:
+        - vcpkg_cache/
+      policy: pull-push
+  artifacts:
+    when: always
+    paths:
+      - build/
+    expire_in: 1 week
+  script:
+    - |
+      $ErrorActionPreference = "Stop"
+      $ProgressPreference = "SilentlyContinue"
+      git config --global core.autocrlf false
+      git config --global advice.detachedHead false
+
+      # ---- Vendoring guard: fail fast with an actionable message instead
+      # of a cryptic vcpkg "triplet not found" three steps later. ----------
+      $overlayDir = "$env:CI_PROJECT_DIR\.gitlab\vcpkg-triplets"
+      if (-not (Test-Path "$overlayDir\$($env:VCPKG_TARGET_TRIPLET).cmake")) {
+        throw "Expected $overlayDir\$($env:VCPKG_TARGET_TRIPLET).cmake -- the Neumann-A/my-vcpkg-triplets overlay has not been vendored into this repo yet (pinned commit $env:MY_VCPKG_TRIPLETS_COMMIT). See the comment block above probe:windows:llvm for the exact vendoring commands."
+      }
+      if (-not (Test-Path "$overlayDir\x64-win-llvm\x64-win-llvm.toolchain.cmake")) {
+        throw "Expected $overlayDir\x64-win-llvm\x64-win-llvm.toolchain.cmake -- the chainloaded toolchain subdirectory has not been vendored yet."
+      }
+
+      # ---- LLVM discovery / install --------------------------------------
+      $clangCl = Get-Command clang-cl -ErrorAction SilentlyContinue
+      if (-not $clangCl) {
+        choco install llvm -y --no-progress
+        if ($LASTEXITCODE -ne 0) { throw "choco install llvm failed" }
+        $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+        $userPath    = [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $env:PATH = "$machinePath;$userPath"
+        $clangCl = Get-Command clang-cl -ErrorAction SilentlyContinue
+        if (-not $clangCl) { throw "clang-cl still not found on PATH after installing llvm via Chocolatey." }
+      }
+      $llvmBinDir = Split-Path $clangCl.Source -Parent
+      $env:LLVMInstallDir = Split-Path $llvmBinDir -Parent
+      Write-Host "LLVMInstallDir: $env:LLVMInstallDir"
+      & clang-cl --version
+      & lld-link --version
+      if ($LASTEXITCODE -ne 0) { throw "lld-link not found next to clang-cl." }
+
+      # ---- vcpkg install (Option A -- see design comment above) ----------
+      #
+      # 2026-09-14 fix: this used to load vcvars (see further down) BEFORE
+      # this step. That was the actual, confirmed bug behind "vcpkg install
+      # rejects x64-win-llvm-release ... wxWidgets cannot be found": current
+      # vcpkg-tool documents that Visual Studio's own vcvars sets its OWN
+      # VCPKG_ROOT, pointing at VS's bundled vcpkg copy, not this repo's
+      # freshly cloned one -- vcpkg-tool's own maintainers shipped a fix for
+      # exactly this ("Fix mismatched VCPKG_ROOT warnings when Visual Studio
+      # has vcpkg installed", vcpkg-tool PR #1931, 2026-03-04) precisely
+      # because importing vcvars' environment wholesale injects a competing
+      # VCPKG_ROOT. Loading vcvars AFTER vcpkg install, and explicitly
+      # pinning VCPKG_ROOT to this repo's own clone beforehand, removes the
+      # ambiguity instead of merely suppressing the resulting warning.
+      New-Item -ItemType Directory -Force -Path "$env:CI_PROJECT_DIR\vcpkg_cache" | Out-Null
+      $env:VCPKG_BINARY_SOURCES = "clear;files,$env:CI_PROJECT_DIR\vcpkg_cache,readwrite"
+      $env:VCPKG_MANIFEST_MODE = "ON"
+
+      $vcpkgRef = $env:VCPKG_GIT_REF
+      if (Test-Path "$env:CI_PROJECT_DIR\vcpkg.json") {
+        $manifest = Get-Content "$env:CI_PROJECT_DIR\vcpkg.json" -Raw | ConvertFrom-Json
+        if ($manifest.'builtin-baseline') { $vcpkgRef = $manifest.'builtin-baseline' }
+      }
+      if (Test-Path "$env:CI_PROJECT_DIR\vcpkg") { Remove-Item -Recurse -Force "$env:CI_PROJECT_DIR\vcpkg" }
+      git init vcpkg
+      cd vcpkg
+      git remote add origin https://github.com/microsoft/vcpkg.git
+      git fetch --depth 1 --no-tags origin "$vcpkgRef"
+      if ($LASTEXITCODE -eq 0) {
+        git checkout FETCH_HEAD
+      } else {
+        cd $env:CI_PROJECT_DIR
+        Remove-Item -Recurse -Force vcpkg
+        git clone https://github.com/microsoft/vcpkg.git vcpkg
+        cd vcpkg
+        git checkout "$vcpkgRef"
+      }
+      cd $env:CI_PROJECT_DIR
+      .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      # Single, explicit, repo-local root -- both the env var AND the CLI
+      # switch (the CLI switch is the higher-priority one per vcpkg's own
+      # docs: VCPKG_ROOT "will only be used if ... --vcpkg-root is unused").
+      # Belt and suspenders: whichever mechanism a given code path inside
+      # vcpkg actually reads, both now agree, so there is no root to be
+      # "mismatched" against in the first place.
+      $env:VCPKG_ROOT = "$env:CI_PROJECT_DIR\vcpkg"
+      .\vcpkg\vcpkg install --triplet $env:VCPKG_TARGET_TRIPLET --overlay-triplets="$overlayDir" --vcpkg-root="$env:CI_PROJECT_DIR\vcpkg"
+      if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed (exit code $LASTEXITCODE)" }
+
+      # Don't trust the exit code alone -- verify real installed content
+      # exists before letting CMake anywhere near this. A triplet that
+      # resolved to the wrong/empty root could plausibly still exit 0.
+      $installedDir = "$env:CI_PROJECT_DIR\vcpkg_installed\$env:VCPKG_TARGET_TRIPLET"
+      if (-not (Test-Path $installedDir)) {
+        throw "vcpkg install reported success but $installedDir does not exist. Refusing to configure CMake against a dependency tree that was never actually produced."
+      }
+      if (-not (Get-ChildItem -Recurse -File $installedDir -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+        throw "$installedDir exists but is empty. Refusing to configure CMake against an empty dependency tree."
+      }
+      $toolchainFilePath = "$env:CI_PROJECT_DIR\vcpkg\scripts\buildsystems\vcpkg.cmake"
+      if (-not (Test-Path $toolchainFilePath)) {
+        throw "vcpkg install succeeded but $toolchainFilePath is missing -- this repo-local vcpkg clone is not in the state CMake needs."
+      }
+      Write-Host "vcpkg install verified: $installedDir is populated, toolchain file present."
+      $env:PROJECT_TOOLCHAIN_FILE = $toolchainFilePath -replace '\\','/'
+
+      # ---- Visual Studio environment: needed for the OUTER project build
+      # below (rc.exe/mt.exe/dumpbin and the Windows SDK paths Ninja does not
+      # auto-discover the way the Visual Studio generator does) -- loaded
+      # only now, after vcpkg install, and with VCPKG_ROOT deliberately
+      # excluded from what gets imported so it can't re-contaminate anything
+      # that reads it later in this same job.
+      $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+      if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found." }
+      $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+      if (-not $vsPath) { throw "No VS install with the VC.Tools.x86.x64 workload found." }
+      $vcvarsAll = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+      $vcvarsArg = if ($env:ARCH -eq "x64") { "x64" } else { "x86" }
+      $envDump = cmd /c "`"$vcvarsAll`" $vcvarsArg && set"
+      foreach ($line in $envDump) {
+        if ($line -match '^([A-Za-z_][^=]*)=(.*)$') {
+          if ($matches[1] -eq 'VCPKG_ROOT') { continue }
+          [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+        }
+      }
+      $env:VCPKG_ROOT = "$env:CI_PROJECT_DIR\vcpkg"
+      Write-Host "vcvars loaded for $vcvarsArg (VCPKG_ROOT deliberately kept at $env:VCPKG_ROOT, not vcvars' value)."
+    - *resolve_version_pwsh
+    - |
+      cmake -S . -B build `
+        -G "$env:CMAKE_GENERATOR" `
+        -D CMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+        -D PACKAGE_MANAGER=vcpkg `
+        -D PACKAGE_TOOLCHAIN=llvm `
+        -D VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET `
+        -D "VCPKG_OVERLAY_TRIPLETS=$env:CI_PROJECT_DIR\.gitlab\vcpkg-triplets" `
+        -D VCPKG_MANIFEST_MODE=ON `
+        -D CMAKE_TOOLCHAIN_FILE="$env:PROJECT_TOOLCHAIN_FILE" `
+        -D CPP_PROJECT_TEMPLATE_VERSION=$env:RESOLVED_VERSION
+      # No -D CMAKE_C_COMPILER / CMAKE_CXX_COMPILER here, deliberately: the
+      # vendored x64-win-llvm.toolchain.cmake (chainloaded by vcpkg.cmake
+      # for the outer project configure too, not just per-port builds)
+      # already does its own find_program() for clang-cl and CACHEs
+      # CMAKE_C_COMPILER/CMAKE_CXX_COMPILER itself -- read directly in this
+      # session, not assumed. Forcing the same variables again from the
+      # command line risked a first-cache-wins conflict with what the
+      # toolchain file sets; trusting the toolchain file it is one thing
+      # verified end to end.
+      if ($LASTEXITCODE -ne 0) { throw "cmake configure failed (exit code $LASTEXITCODE)" }
+    - |
+      # ---- Compiler provenance (spec sections 6/9): never let an artifact
+      # be labeled LLVM unless the build actually proves it. ---------------
+      $cache = Get-Content build\CMakeCache.txt -Raw
+      if ($cache -notmatch 'CMAKE_CXX_COMPILER_ID:INTERNAL=Clang') {
+        throw "PROVENANCE FAILURE: CMAKE_CXX_COMPILER_ID is not Clang -- refusing to build/package this as an LLVM artifact."
+      }
+      if ($cache -notmatch 'CMAKE_CXX_COMPILER:FILEPATH=.*clang-cl') {
+        throw "PROVENANCE FAILURE: CMAKE_CXX_COMPILER does not point at clang-cl."
+      }
+      Write-Host "Compiler provenance confirmed: Clang / clang-cl."
+    - cmake --build build --config $env:BUILD_TYPE
+    - cd build
+    - ctest -C $env:BUILD_TYPE --output-on-failure
+    - cd ..
+    - |
+      # ---- Binary architecture provenance (spec section 11): the upstream
+      # toolchain explicitly disables some of vcpkg's own architecture
+      # checks, so CMAKE_SIZEOF_VOID_P alone is not trusted here -- read the
+      # actual PE header with dumpbin (already on PATH from vcvars above). --
+      $builtExe = Get-ChildItem -Recurse -Path build -Filter *.exe | Select-Object -First 1
+      if (-not $builtExe) { throw "No .exe found under build/ to verify PE architecture against." }
+      $expectedMachine = if ($env:ARCH -eq "x64") { "8664 machine \(x64\)" } else { "14C machine \(x86\)" }
+      $dumpbinOut = & dumpbin /headers $builtExe.FullName
+      if ($dumpbinOut -notmatch $expectedMachine) {
+        throw "PROVENANCE FAILURE: expected PE machine matching '$expectedMachine' in $($builtExe.Name); dumpbin did not confirm it. Refusing to continue."
+      }
+      Write-Host "PE architecture confirmed for $($builtExe.Name)."
+    - *write_attestation_pwsh
+
+# ============================================================================
+# Windows ARM64 -- MSVC only, scaffolded but dormant. NEW 2026-09-14.
+#
+# Verified directly, not assumed: GitLab's own current hosted-runner docs
+# (docs.gitlab.com/ci/runners/hosted_runners/windows/) list exactly one
+# Windows machine type, saas-windows-medium-amd64 -- there is no ARM64
+# entry in GitLab's Windows SaaS fleet, unlike Linux (saas-linux-small-arm64
+# genuinely exists and is already in use below for package_linux_arm64_release).
+# GitLab Runner the AGENT does support arm64 (GitLab documents arm64 runner
+# binaries), so this is an infrastructure gap in what GitLab.com currently
+# offers as shared runners, not a fundamental impossibility -- exactly the
+# distinction raised in review. The job below is written to be technically
+# correct for a self-managed Windows ARM64 runner and does nothing until one
+# is registered with a matching tag; it will not consume compute minutes
+# sitting unpicked, and `when: manual` means it never appears as a surprise
+# pending job on ordinary pipelines either.
+#
+# Scope limited to MSVC here, deliberately:
+#   - MSVC ARM64: real, documented path. VS 2022's "MSVC v143 - VS 2022 C++
+#     ARM64 build tools" component plus CMake's `-A ARM64` and vcpkg's
+#     arm64-windows triplet are all genuine, current, and already used by
+#     real projects (verified against current CMake/Microsoft docs, not
+#     assumed) -- so this is worth scaffolding now.
+#   - MinGW ARM64: vcpkg documents arm64-mingw-dynamic as a real community
+#     triplet, but there is no verified, reproducible way from this session
+#     to obtain an aarch64-w64-mingw32 cross-compiler on a Windows runner
+#     (Chocolatey's mingw package does not document an ARM64 target).
+#     Scaffolding a job around an unverified compiler-acquisition step would
+#     be guessing, which the spec explicitly rules out -- flagged as a
+#     genuine prerequisite instead of faked.
+#   - LLVM ARM64: the vendored upstream repo (confirmed by its actual file
+#     listing at the pinned commit) has no arm64-win-llvm.cmake or ARM64
+#     toolchain subdirectory at all -- only x64 and x86. The spec itself
+#     says not to blindly clone the x64 triplet and substitute ARM64. This
+#     would need an ARM64 triplet/toolchain authored from scratch and
+#     independently proven, which is real net-new engineering, not a
+#     packaging config change -- out of scope for this pass, flagged here
+#     rather than silently skipped.
+#
+# WiX/.msi is a known-weaker path for ARM64 specifically: this project pins
+# WiX v3 (Chocolatey's wixtoolset, confirmed 3.14.1 -- see the WiX comment
+# above package_windows_x64_release), and WiX v3's candle.exe/light.exe
+# generation has materially weaker ARM64 support than WiX v4/v5. CMake's
+# current CPack WiX docs do expose a CPACK_WIX_ARCHITECTURE variable
+# accepting "arm64", but that surfaced alongside `wix extension add`
+# syntax that is WiX v4/v5-only -- it is not established that it does
+# anything under this project's pinned v3 toolchain, and this pass does not
+# touch the proven WiX invocation to find out. NSIS does not have this
+# problem: the installer stub itself does not need to be architecture-
+# specific (it can run under x86 emulation on ARM64 Windows while unpacking
+# a native ARM64 payload -- this is a normal, widely-used pattern, not
+# something specific to this project). Below, .msi is therefore left as
+# best-effort exactly like every other leg, and .exe is expected to be the
+# more reliable of the two for this specific architecture.
+# ============================================================================
+build:windows:arm64:
+  extends: .build_template
+  tags:
+    - self-managed-windows-arm64
+  variables:
+    CMAKE_GENERATOR: "Visual Studio 17 2022"
+  parallel:
+    matrix:
+      - ARCH: "arm64"
+        CMAKE_ARCH: "ARM64"
+        VCPKG_TARGET_TRIPLET: "arm64-windows"
+        BUILD_TYPE: "Release"
+  rules:
+    # MR exclusion kept explicit even though this is currently dormant (no
+    # self-managed-windows-arm64 runner registered, so nothing can actually
+    # consume compute here yet) -- consistent with every other manual leg in
+    # this file, and stops being merely cosmetic the moment a runner exists.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - when: manual
+      allow_failure: true
+  cache:
+    - key:
+        files:
+          - vcpkg.json
+        prefix: "windows-arm64-$VCPKG_GIT_REF-$ARCH-$BUILD_TYPE"
+      fallback_keys:
+        - "windows-arm64-$VCPKG_GIT_REF-$ARCH-$BUILD_TYPE"
+      paths:
+        - vcpkg_cache/
+      policy: pull-push
+  artifacts:
+    when: always
+    paths:
+      - build/
+    expire_in: 1 week
+  script:
+    - |
+      $ErrorActionPreference = "Stop"
+      $ProgressPreference = "SilentlyContinue"
+      git config --global core.autocrlf false
+      git config --global advice.detachedHead false
+
+      New-Item -ItemType Directory -Force -Path "$env:CI_PROJECT_DIR\vcpkg_cache" | Out-Null
+      $env:VCPKG_BINARY_SOURCES = "clear;files,$env:CI_PROJECT_DIR\vcpkg_cache,readwrite"
+      $env:VCPKG_MANIFEST_MODE = "ON"
+
+      $vcpkgRef = $env:VCPKG_GIT_REF
+      if (Test-Path "$env:CI_PROJECT_DIR\vcpkg.json") {
+        $manifest = Get-Content "$env:CI_PROJECT_DIR\vcpkg.json" -Raw | ConvertFrom-Json
+        if ($manifest.'builtin-baseline') { $vcpkgRef = $manifest.'builtin-baseline' }
+      }
+      if (Test-Path "$env:CI_PROJECT_DIR\vcpkg") { Remove-Item -Recurse -Force "$env:CI_PROJECT_DIR\vcpkg" }
+      git init vcpkg
+      cd vcpkg
+      git remote add origin https://github.com/microsoft/vcpkg.git
+      git fetch --depth 1 --no-tags origin "$vcpkgRef"
+      if ($LASTEXITCODE -eq 0) {
+        git checkout FETCH_HEAD
+      } else {
+        cd $env:CI_PROJECT_DIR
+        Remove-Item -Recurse -Force vcpkg
+        git clone https://github.com/microsoft/vcpkg.git vcpkg
+        cd vcpkg
+        git checkout "$vcpkgRef"
+      }
+      cd $env:CI_PROJECT_DIR
+      .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      # 2026-09-15 correction: this previously forced --host-triplet
+      # x64-windows on the assumption of cross-compiling arm64-windows FROM
+      # an x64 host. That assumption doesn't match what this job is
+      # actually tagged for: self-managed-windows-arm64 names a genuinely
+      # native ARM64 Windows machine (GitLab documents ARM64 Runner
+      # binaries specifically so the runner agent itself can run ON such a
+      # machine), not an x64 box doing cross-compilation. On a real ARM64
+      # host, vcpkg's own host-triplet auto-detection already resolves
+      # correctly without an override -- forcing x64-windows here would
+      # have been actively wrong on the runner this job is meant for.
+      .\vcpkg\vcpkg install --triplet $env:VCPKG_TARGET_TRIPLET
+      if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed" }
+      $env:PROJECT_TOOLCHAIN_FILE = "$env:CI_PROJECT_DIR\vcpkg\scripts\buildsystems\vcpkg.cmake" -replace '\\','/'
+    - *resolve_version_pwsh
+    - |
+      cmake -S . -B build `
+        -G "$env:CMAKE_GENERATOR" `
+        -A $env:CMAKE_ARCH `
+        -D CMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+        -D PACKAGE_MANAGER=vcpkg `
+        -D VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET `
+        -D VCPKG_MANIFEST_MODE=ON `
+        -D CMAKE_TOOLCHAIN_FILE="$env:PROJECT_TOOLCHAIN_FILE" `
+        -D CPP_PROJECT_TEMPLATE_VERSION=$env:RESOLVED_VERSION
+      if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+    - cmake --build build --config $env:BUILD_TYPE -- /m
+    - cd build
+    - |
+      # 2026-09-15 correction: this used to skip ctest outright on the
+      # (now-corrected) assumption that this job cross-builds from an x64
+      # host that can't execute ARM64 binaries. On the actual
+      # self-managed-windows-arm64 runner this is tagged for, the binaries
+      # this job produces run natively, so tests run for real here exactly
+      # like every other Release leg -- not skipped, not assumed passing.
+      ctest -C $env:BUILD_TYPE --output-on-failure
+    - cd ..
+    - *write_attestation_pwsh
+
+# ============================================================================
+# Windows MinGW ARM64 -- NEW 2026-09-15, dormant, ZERO REAL RUNS.
+#
+# Uses a genuinely different compiler distribution than build:windows:mingw's
+# x64/x86 legs, not the same GCC-based Chocolatey `mingw` package with an
+# ARM64 target bolted on -- Chocolatey's mingw package does not document an
+# ARM64 target at all, and GCC itself has never supported Windows-on-ARM as
+# a target (confirmed directly from the upstream project's own README, not
+# assumed). mstorsjo/llvm-mingw is the real, actively-maintained toolchain
+# this needs: it's LLVM/Clang/LLD-based specifically so it CAN target
+# aarch64 Windows, is listed as an official recommended prebuilt toolchain
+# on mingw-w64.org's own downloads page, and ships a genuine native-Windows
+# aarch64 package (llvm-mingw-<version>-ucrt-aarch64.zip, confirmed against
+# the project's own README naming convention) for exactly the
+# self-managed-windows-arm64 runner this job is tagged for -- not a cross-
+# compiler package, since (as corrected on build:windows:arm64 above) that
+# tag names a native ARM64 machine, not an x64 host cross-building.
+#
+# This IS therefore a genuinely different compiler (Clang, via llvm-mingw)
+# producing MinGW-ABI binaries, not the GCC used by the x64/x86 MinGW legs --
+# documented here plainly, not hidden, since "MinGW" in the release matrix
+# would otherwise silently imply one consistent compiler family across all
+# three architectures when it doesn't.
+#
+# The download step deliberately does not pin a specific llvm-mingw version
+# inline -- resolves GitHub's own "latest release" via its API at job-run
+# time instead of a hardcoded version/URL this session did not independently
+# verify against a live source. Once this job has a real proven run,
+# pinning the exact version it succeeded with is the natural next step
+# (matching how this file already pins the LLVM/vcpkg-triplets commit and
+# leaves the plain `choco install llvm` for x64/x86 LLVM similarly unpinned
+# pending its own first real run).
+#
+# vcpkg's arm64-mingw-dynamic triplet is a real, current, Microsoft-
+# documented community triplet -- "community" status means "not tested by
+# vcpkg's own CI, so treat the first real run here as a genuine test of
+# whether wxWidgets/gtest actually build under it", the same caveat already
+# documented for x64-mingw-dynamic/x86-mingw-dynamic above, not a new
+# concern specific to ARM64.
+build:windows:mingw:arm64:
+  extends: .build_template
+  tags:
+    - self-managed-windows-arm64
+  variables:
+    CMAKE_GENERATOR: "Ninja"
+  parallel:
+    matrix:
+      - ARCH: "arm64"
+        VCPKG_TARGET_TRIPLET: "arm64-mingw-dynamic"
+        MINGW_CC: "aarch64-w64-mingw32-clang.exe"
+        MINGW_CXX: "aarch64-w64-mingw32-clang++.exe"
+        BUILD_TYPE: "Release"
+  rules:
+    # MR exclusion kept explicit -- same reasoning as every other manual
+    # leg in this file (see build:windows:arm64's rules comment).
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - when: manual
+      allow_failure: true
+  cache:
+    - key:
+        files:
+          - vcpkg.json
+        prefix: "windows-mingw-arm64-$VCPKG_GIT_REF-$ARCH-$BUILD_TYPE"
+      fallback_keys:
+        - "windows-mingw-arm64-$VCPKG_GIT_REF-$ARCH-$BUILD_TYPE"
+      paths:
+        - vcpkg_cache/
+      policy: pull-push
+    - key: "llvm-mingw-aarch64-toolchain"
+      paths:
+        - llvm-mingw/
+      policy: pull-push
+      # Separate key/entry deliberately: this doesn't depend on vcpkg.json
+      # at all, and re-downloading a 100+MB toolchain archive on every run
+      # of an already-dormant job just to re-validate the vcpkg dependency
+      # cache key would be wasteful. The script's own Test-Path check
+      # already skips the download entirely when this cache hits, and the
+      # llvm-mingw --version output printed in the log is the actual
+      # evidence of which version is in use on any given run, not the
+      # cache key (this doesn't pin an exact llvm-mingw version -- see the
+      # comment above this job).
+  artifacts:
+    when: always
+    paths:
+      - build/
+    expire_in: 1 week
+  script:
+    - |
+      $ErrorActionPreference = "Stop"
+      $ProgressPreference = "SilentlyContinue"
+      git config --global core.autocrlf false
+      git config --global advice.detachedHead false
+
+      # ---- llvm-mingw discovery / install ---------------------------------
+      $llvmMingwRoot = "$env:CI_PROJECT_DIR\llvm-mingw"
+      # 2026-09-16: extracts a plain path STRING immediately in each branch,
+      # rather than carrying the Get-Command/Get-Item result object across
+      # branches and reading one property name at the end -- Get-Command
+      # returns an ApplicationInfo (reliably has .Source), Get-Item returns
+      # a FileInfo (reliably has .FullName, not .Source); mixing them and
+      # reading only one of those two property names on whichever object
+      # actually came back would silently resolve to $null on one of the
+      # two paths, setting $env:CC empty rather than throwing anything.
+      $ccPath = $null
+      $existingCC = Get-Command $env:MINGW_CC -ErrorAction SilentlyContinue
+      if ($existingCC) { $ccPath = $existingCC.Source }
+      if (-not $ccPath -and (Test-Path "$llvmMingwRoot\bin\$env:MINGW_CC")) {
+        $ccPath = (Get-Item "$llvmMingwRoot\bin\$env:MINGW_CC").FullName
+      }
+      if (-not $ccPath) {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest"
+        # Matches any Windows-hosted (.zip) aarch64 asset rather than
+        # assuming a specific CRT variant (ucrt vs msvcrt) -- the README
+        # confirms the <name>-<version>-<crt>-<arch>.zip pattern and aarch64
+        # as a supported arch value, but this session did not independently
+        # confirm which CRT variant ships as the aarch64 native default, so
+        # matching broadly here is safer than a guess that could zero-match
+        # on the actual current release.
+        $asset = $release.assets | Where-Object { $_.name -match 'aarch64\.zip$' } | Select-Object -First 1
+        if (-not $asset) { throw "No llvm-mingw release asset matching '*aarch64.zip' found on the latest GitHub release ($($release.tag_name)). Check https://github.com/mstorsjo/llvm-mingw/releases for the current naming -- this probe is exactly what Stage 0 is for." }
+        Write-Host "Downloading $($asset.name) ($($release.tag_name))"
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "$env:CI_PROJECT_DIR\llvm-mingw.zip"
+        Expand-Archive -Path "$env:CI_PROJECT_DIR\llvm-mingw.zip" -DestinationPath "$env:CI_PROJECT_DIR\llvm-mingw-extracted" -Force
+        $innerDir = Get-ChildItem "$env:CI_PROJECT_DIR\llvm-mingw-extracted" -Directory | Select-Object -First 1
+        if (-not $innerDir) { throw "llvm-mingw archive did not extract to the expected single top-level directory." }
+        Move-Item $innerDir.FullName $llvmMingwRoot -Force
+        $ccItem = Get-Item "$llvmMingwRoot\bin\$env:MINGW_CC" -ErrorAction SilentlyContinue
+        if (-not $ccItem) { throw "Expected $llvmMingwRoot\bin\$env:MINGW_CC after extracting llvm-mingw, but it isn't there. Check the actual extracted layout before assuming this script is wrong." }
+        $ccPath = $ccItem.FullName
+      }
+      $env:PATH = "$llvmMingwRoot\bin;$env:PATH"
+      $cxxItem = Get-Item "$llvmMingwRoot\bin\$env:MINGW_CXX" -ErrorAction SilentlyContinue
+      if (-not $cxxItem) { throw "Expected $env:MINGW_CXX next to $env:MINGW_CC under $llvmMingwRoot\bin but it isn't there." }
+      $env:CC = $ccPath
+      $env:CXX = $cxxItem.FullName
+      & $env:CC --version
+
+      New-Item -ItemType Directory -Force -Path "$env:CI_PROJECT_DIR\vcpkg_cache" | Out-Null
+      $env:VCPKG_BINARY_SOURCES = "clear;files,$env:CI_PROJECT_DIR\vcpkg_cache,readwrite"
+      $env:VCPKG_MANIFEST_MODE = "ON"
+
+      $vcpkgRef = $env:VCPKG_GIT_REF
+      if (Test-Path "$env:CI_PROJECT_DIR\vcpkg.json") {
+        $manifest = Get-Content "$env:CI_PROJECT_DIR\vcpkg.json" -Raw | ConvertFrom-Json
+        if ($manifest.'builtin-baseline') { $vcpkgRef = $manifest.'builtin-baseline' }
+      }
+      if (Test-Path "$env:CI_PROJECT_DIR\vcpkg") { Remove-Item -Recurse -Force "$env:CI_PROJECT_DIR\vcpkg" }
+      git init vcpkg
+      cd vcpkg
+      git remote add origin https://github.com/microsoft/vcpkg.git
+      git fetch --depth 1 --no-tags origin "$vcpkgRef"
+      if ($LASTEXITCODE -eq 0) {
+        git checkout FETCH_HEAD
+      } else {
+        cd $env:CI_PROJECT_DIR
+        Remove-Item -Recurse -Force vcpkg
+        git clone https://github.com/microsoft/vcpkg.git vcpkg
+        cd vcpkg
+        git checkout "$vcpkgRef"
+      }
+      cd $env:CI_PROJECT_DIR
+      .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      .\vcpkg\vcpkg install --triplet $env:VCPKG_TARGET_TRIPLET
+      if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed" }
+      $toolchainFile = "$env:CI_PROJECT_DIR\vcpkg\scripts\buildsystems\vcpkg.cmake" -replace '\\','/'
+    - *resolve_version_pwsh
+    - |
+      cmake -S . -B build `
+        -G "$env:CMAKE_GENERATOR" `
+        -D CMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+        -D PACKAGE_MANAGER=vcpkg `
+        -D PACKAGE_TOOLCHAIN=mingw `
+        -D VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET `
+        -D VCPKG_MANIFEST_MODE=ON `
+        -D CMAKE_TOOLCHAIN_FILE="$toolchainFile" `
+        -D CMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++ -static" `
+        -D CPP_PROJECT_TEMPLATE_VERSION=$env:RESOLVED_VERSION
+      if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+    - cmake --build build --config $env:BUILD_TYPE
+    - cd build
+    - |
+      # Native self-managed-windows-arm64 runner -- tests run for real here,
+      # same as build:windows:arm64, not skipped.
+      ctest -C $env:BUILD_TYPE --output-on-failure
+    - cd ..
+    - *write_attestation_pwsh
 
 # ============================================================================
 # macOS manual matrix
@@ -332,22 +1750,43 @@ build:macos:
   extends: .build_template
   tags:
     - saas-macos-medium-m1
+  image: macos-15-xcode-16
   parallel:
     matrix:
       - BUILD_TYPE: ["Debug", "Release"]
   rules:
+    # Blocker 2 is still open (no GitLab macOS runner entitlement) -- Release is
+    # attempted automatically on a tag so a release asset appears the moment
+    # entitlement lands, but stays allow_failure so a missing runner cannot
+    # break the tag pipeline or block create_release. Debug is not consumed by
+    # anything on a tag, so it is skipped there.
+    - if: '$CI_COMMIT_TAG && $BUILD_TYPE == "Release"'
+      when: on_success
+      allow_failure: true
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    # 2026-09-16: MR exclusion added to the manual fallback below, for
+    # consistency with every other manual Windows/ARM64 leg in this file.
+    # Zero observable effect right now (Blocker 2 means no runner picks
+    # this up regardless), but stops being merely cosmetic the moment
+    # entitlement is granted.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
     - when: manual
       allow_failure: true
   script:
     - set -euo pipefail
     - brew update || true
-    - brew install cmake ninja wxwidgets googletest || true
+    - brew install cmake ninja wxwidgets googletest
+    - *resolve_version_bash
     - cmake -S . -B build
       -G Ninja
       -D CMAKE_MAKE_PROGRAM=ninja
       -D CMAKE_BUILD_TYPE=$BUILD_TYPE
+      -D CPP_PROJECT_TEMPLATE_VERSION=$RESOLVED_VERSION
     - cmake --build build --config $BUILD_TYPE
-    - cd build && ctest -C $BUILD_TYPE --output-on-failure
+    - cd build && ctest -C $BUILD_TYPE --output-on-failure && cd ..
+    - *write_attestation_bash
 
 # ============================================================================
 # Doxygen documentation
@@ -382,6 +1821,9 @@ doxygen_html:
 
 # ============================================================================
 # GitLab Pages
+#
+# `set -eu` not `set -euo pipefail`: this runs on busybox, where `pipefail` is
+# a non-POSIX builtin with version-dependent support.
 # ============================================================================
 pages:
   stage: deploy
@@ -395,7 +1837,7 @@ pages:
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
-    - set -euo pipefail
+    - set -eu
     - test -f doxygen-html/index.html
     - rm -rf public && mkdir -p public
     - cp -a doxygen-html/. public/
@@ -418,5 +1860,747 @@ clear_cache:
       allow_failure: true
   script:
     - echo "Clearing GitLab caches for project $CI_PROJECT_ID..."
-    - 'curl --request DELETE --header "PRIVATE-TOKEN: ${CACHE_CLEAR_TOKEN}" "https://gitlab.com/api/v4/projects/${CI_PROJECT_ID}/cache"'
+    - 'curl --fail --silent --show-error --request DELETE --header "PRIVATE-TOKEN: ${CACHE_CLEAR_TOKEN}" "https://gitlab.com/api/v4/projects/${CI_PROJECT_ID}/cache"'
     - echo "Cache cleared. Ensure CACHE_CLEAR_TOKEN is a masked project/group CI variable with api scope."
+
+# ============================================================================
+# Release packaging (tag-triggered only)
+#
+# Design note (2026-09-05): an earlier draft uploaded each file to the Generic
+# Package Registry via curl, then hardcoded the resulting download URLs into
+# the static `release:` keyword. That breaks the moment CPack's own installer
+# file names don't match a guess -- and CPack's naming depends on
+# CMAKE_PROJECT_VERSION, which may not match the git tag. `glab release create
+# <tag> <files>` uploads local files directly under their real names, and
+# GLAB_ENABLE_CI_AUTOLOGIN=true authenticates with the pipeline's own
+# $CI_JOB_TOKEN -- no manual token, no guessed URLs. Packaging jobs produce
+# files as artifacts; one final job collects whatever is actually there.
+#
+# 2026-09-08: uniqueness is now enforced at both ends. cpack_module.cmake emits
+# ${project}-${version}-${system}-${arch}, and create_release refuses to
+# overwrite a name it has already seen. Before this, x64 and x86 installers had
+# identical filenames and one silently replaced the other during collection.
+#
+# WARNING for whoever pushes the first real tag: do NOT type release notes into
+# the GitLab web UI when creating the tag. Doing so creates the Release
+# immediately, and create_release below will then fail because a Release
+# already exists for that tag. Push a plain annotated tag and let the pipeline
+# write the notes:
+#     git tag -a v0.0.2 -m "release v0.0.2" && git push origin v0.0.2
+# ============================================================================
+.release_package:
+  stage: package
+  rules:
+    - if: '$CI_COMMIT_TAG'
+
+.windows_package_prep: &windows_package_prep
+  - |
+    $ErrorActionPreference = "Stop"
+    $ProgressPreference = "SilentlyContinue"
+
+    # NSIS is the primary Windows installer and is required.
+    choco install nsis -y --no-progress
+    if ($LASTEXITCODE -ne 0) { throw "NSIS install failed" }
+
+    # WiX / MSI is best-effort.
+    #
+    # CORRECTION (2026-09-08, verification pass): an earlier revision of this
+    # file claimed Chocolatey's `wixtoolset` now installs WiX 4/5 (wix.exe
+    # only) and pinned --version=3.11.2 to work around it. That was WRONG --
+    # checked directly against the Chocolatey package feed: the latest
+    # published wixtoolset is 3.14.1.20250415, still WiX v3, still shipping
+    # candle.exe/light.exe, which is exactly what CPack's WIX generator
+    # expects by default (CPACK_WIX_VERSION defaults to 3). The bogus pin
+    # would have silently downgraded WiX for no reason. Removed.
+    #
+    # MSI generation stays best-effort for a real, separate reason: `choco
+    # install wixtoolset` is a known-flaky/slow install on hosted CI runners.
+    # A flaky optional .msi must never take down a release. NSIS above stays
+    # fatal because it is the installer users actually get.
+    #
+    # FYI for later: CMake >= 3.30 also supports WiX 4 via
+    # CPACK_WIX_VERSION=4 (uses `wix build`, a dotnet tool, instead of
+    # candle/light). Not needed while Chocolatey ships v3.
+    #
+    # 2026-09-11 hardening: a live run reported WiX packaging failing with
+    # "Could not find the WiX candle executable" despite choco reporting a
+    # successful install -- this can happen (PATH not yet visible to the
+    # current process, or a partial install that still exits 0). $wixOk was
+    # only ever checking choco's own exit code, not whether candle.exe is
+    # actually reachable afterward. It's now confirmed with Get-Command,
+    # AFTER the PATH refresh below, not just assumed from the install step.
+    choco install wixtoolset -y --no-progress
+    $wixInstallExit = $LASTEXITCODE
+    if ($wixInstallExit -ne 0) {
+      Write-Host "wixtoolset install failed (exit $wixInstallExit); continuing without the .msi."
+    }
+
+    # Explicit PATH refresh instead of `refreshenv`. refreshenv is a Chocolatey
+    # PROFILE FUNCTION and is not guaranteed to be defined in a
+    # non-interactive shell -- under $ErrorActionPreference = "Stop" that is a
+    # hard failure, not a warning.
+    $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath    = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $env:PATH = "$machinePath;$userPath"
+
+    # 2026-09-12 fix: WiX v3's own installer sets a WIX env var pointing at its
+    # install root, but does not reliably add %WIX%\bin to PATH. CMake's own
+    # CPack WIX docs confirm CPack itself falls back to %WIX% / %WIX%\bin when
+    # the WIX env var is set -- so checking PATH alone (as before) was stricter
+    # than what CPack actually needs, and produced a false "not available".
+    # Re-read WIX from the registry the same way as PATH, since it too was just
+    # written by a different process.
+    $machineWix = [System.Environment]::GetEnvironmentVariable("WIX", "Machine")
+    $userWix    = [System.Environment]::GetEnvironmentVariable("WIX", "User")
+    $env:WIX = if ($machineWix) { $machineWix } elseif ($userWix) { $userWix } else { $null }
+
+    $wixOk = $false
+    if ($wixInstallExit -eq 0) {
+      if (Get-Command candle.exe -ErrorAction SilentlyContinue) {
+        $wixOk = $true
+      } elseif ($env:WIX -and (Test-Path (Join-Path $env:WIX "bin\candle.exe"))) {
+        $wixOk = $true
+        Write-Host "candle.exe not on PATH, but WIX env var ($env:WIX) points to a valid install -- CPack can use this directly."
+      } else {
+        Write-Host "wixtoolset reported a successful install, but candle.exe is not reachable via PATH or the WIX env var; continuing without the .msi."
+      }
+    }
+    $global:WixAvailable = $wixOk
+
+# 2026-09-14: added after a real tag pipeline showed this exact problem --
+# cancelling build:windows's x86 leg did NOT skip package_windows_x86_release;
+# it started anyway and would have run the full NSIS/WiX Chocolatey install
+# above (several real minutes) before eventually failing trying to install
+# from a build/ that was never finished. Root cause, confirmed rather than
+# assumed: build:windows (and build:windows:mingw, build:linux:*) carry
+# `allow_failure: true` on their tag+Release rule, deliberately, so one
+# platform's genuine build failure doesn't turn the whole tag pipeline red
+# (see the comment above build:windows). GitLab's needs: mechanism runs a
+# downstream job regardless of whether an allow_failure:true upstream
+# succeeded, failed, or was cancelled -- that is the exact same mechanism
+# that fixed create_release's original skip bug, one stage further down the
+# DAG, not a separate bug. Removing allow_failure from the build jobs would
+# trade this problem for the original one (a single platform failing turns
+# the whole tag pipeline red again). The fix instead: check for a REAL
+# compiled binary before spending any time on NSIS/WiX setup, so an
+# incomplete upstream build fails in seconds, not minutes.
+.windows_package_build_check: &windows_package_build_check
+  - |
+    # Cheap, early guard ONLY -- catches the common/fast cases (upstream
+    # build cancelled, never ran) before spending any time on NSIS/WiX
+    # setup. This does NOT prove the build actually succeeded -- an
+    # executable can exist on disk from a build that later failed partway
+    # through, or from a stale cache. *check_attestation_pwsh, run
+    # immediately after this and still before *windows_package_prep, is the
+    # real proof gate.
+    #
+    # 2026-09-16: exits 1, not 0 -- see check_attestation_bash's comment for
+    # why (confirmed from a real run: exit 0 here made "build was cancelled,
+    # nothing to package" look identical to "succeeded" in the pipeline UI).
+    $ErrorActionPreference = "Stop"
+    $builtBinary = Get-ChildItem -Recurse -Path build -Include *.exe -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -notmatch '\\vcpkg\\|\\vcpkg_installed\\|CMakeFiles\\' } |
+      Select-Object -First 1
+    if (-not $builtBinary) {
+      Write-Host "No build output found under build/ for this leg -- the upstream build job did not finish (cancelled, failed, or never ran). Nothing to package."
+      exit 1
+    }
+    Write-Host "Confirmed build output present (cheap guard only): $($builtBinary.FullName)"
+
+# 2026-09-15: canonical release-asset naming + packaging, shared by every
+# Windows toolchain/architecture leg (previously six near-duplicate copies
+# of this same tail, one per package_windows_* job -- now one anchor,
+# referenced identically everywhere, matching "do not duplicate ... logic
+# across every job").
+#
+# ZIP is still built with Compress-Archive, not `cpack -G ZIP` -- unchanged
+# from before, just given the canonical filename now instead of the old
+# fixed "$RELEASE_ARCHIVE_PREFIX-windows-<arch>.zip" pattern that had no
+# version or toolchain in it at all.
+#
+# The canonical base name is read from build\canonical_package_name.txt, a
+# plain file cpack_module.cmake writes during the build job's own cmake
+# configure (already carrying the real resolved version) -- not re-derived
+# independently here. This guarantees the manually-built ZIP's name is
+# byte-for-byte the same base CPack itself uses for the .7z/.exe/.msi it
+# generates a few lines below, instead of two separate naming computations
+# that could drift apart.
+.package_windows_outputs: &package_windows_outputs
+  - |
+    $ErrorActionPreference = "Stop"
+    # 2026-09-16 fix: this used to reverse-parse build\CPackConfig.cmake
+    # with a regex assuming a specific SET(...) casing/format -- that
+    # failed on a real run. cpack_module.cmake now writes this exact value
+    # to a plain, single-purpose file instead; read that, not CMake's own
+    # generated config file whose precise emitted format this session never
+    # independently confirmed.
+    if (-not (Test-Path "build\canonical_package_name.txt")) {
+      throw "build\canonical_package_name.txt not found -- cmake/cpack_module.cmake should have written it during configure. Check that cmake --install/configure actually completed for this leg."
+    }
+    $canonicalBase = (Get-Content "build\canonical_package_name.txt" -Raw).Trim()
+    if ([string]::IsNullOrWhiteSpace($canonicalBase)) {
+      throw "build\canonical_package_name.txt exists but is empty."
+    }
+    Write-Host "Canonical package base name: $canonicalBase"
+
+    if (-not (Get-ChildItem -Recurse -File instdir | Select-Object -First 1)) {
+      throw "cmake --install produced an empty instdir -- refusing to publish an empty archive."
+    }
+    Compress-Archive -Path instdir\* -DestinationPath "$canonicalBase.zip" -Force
+
+    Push-Location build
+    cpack -C Release -G $env:NSIS_GENERATOR
+    if ($LASTEXITCODE -ne 0) { Write-Host "NSIS packaging failed. Shipping without the .exe." }
+    if ($global:WixAvailable) {
+      cpack -C Release -G WIX
+      if ($LASTEXITCODE -ne 0) { Write-Host "WIX packaging failed. Shipping without the .msi." }
+    } else {
+      Write-Host "WiX not available; shipping without the .msi."
+    }
+    cpack -C Release -G 7Z
+    if ($LASTEXITCODE -ne 0) { Write-Host "7Z packaging failed. Shipping without the .7z." }
+    Pop-Location
+
+    # NSIS and WiX have no "output file name" override variable -- checked
+    # directly against CMake's own generator docs for this exact gap, not
+    # assumed (see cpack_module.cmake). CPack always writes
+    # "$canonicalBase.exe" / "$canonicalBase.msi"; the "_nsis"/"_wix"
+    # segment the canonical naming scheme wants is added by renaming
+    # CPack's own output here, once, for every toolchain/architecture.
+    if (Test-Path "build\package\$canonicalBase.exe") {
+      Rename-Item "build\package\$canonicalBase.exe" "${canonicalBase}_nsis.exe"
+    }
+    if (Test-Path "build\package\$canonicalBase.msi") {
+      Rename-Item "build\package\$canonicalBase.msi" "${canonicalBase}_wix.msi"
+    }
+
+    New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+    Copy-Item "$canonicalBase.zip" release-assets\
+    Get-ChildItem build\package\*_nsis.exe, build\package\*_wix.msi, build\package\*.7z -ErrorAction SilentlyContinue | Copy-Item -Destination release-assets\
+    Get-ChildItem release-assets
+
+package_windows_x64_release:
+  extends: .release_package
+  allow_failure: true
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    NSIS_GENERATOR: "NSIS64"
+  needs:
+    - job: build:windows
+      parallel:
+        matrix:
+          - ARCH: "x64"
+            CMAKE_ARCH: "x64"
+            VCPKG_TARGET_TRIPLET: "x64-windows"
+            BUILD_TYPE: "Release"
+      artifacts: true
+  script:
+    - *windows_package_build_check
+    - *check_attestation_pwsh
+    - *windows_package_prep
+    - cmake --install build --prefix instdir --strip --config Release
+    - *package_windows_outputs
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_windows_x86_release:
+  extends: .release_package
+  allow_failure: true
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    NSIS_GENERATOR: "NSIS"
+  needs:
+    - job: build:windows
+      parallel:
+        matrix:
+          - ARCH: "i686"
+            CMAKE_ARCH: "Win32"
+            VCPKG_TARGET_TRIPLET: "x86-windows"
+            BUILD_TYPE: "Release"
+      artifacts: true
+  script:
+    - *windows_package_build_check
+    - *check_attestation_pwsh
+    - *windows_package_prep
+    - cmake --install build --prefix instdir --strip --config Release
+    - *package_windows_outputs
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+# 2026-09-13, alongside build:windows:mingw -- same NSIS/WiX/7Z/ZIP
+# packaging as the MSVC jobs above via the shared *package_windows_outputs
+# anchor (CPack's generators don't care what compiler produced the binaries
+# being packaged); sourced from build:windows:mingw instead of
+# build:windows. The canonical filename's "-mingw-" segment (from
+# PACKAGE_TOOLCHAIN, baked in at build-configure time) is what keeps this
+# from colliding with the MSVC x64/x86 assets in the same shared
+# release-assets directory -- see the matching PACKAGE_TOOLCHAIN naming in
+# cmake/cpack_module.cmake for what that protects against.
+package_windows_mingw_x64_release:
+  extends: .release_package
+  allow_failure: true
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    NSIS_GENERATOR: "NSIS64"
+  needs:
+    - job: build:windows:mingw
+      parallel:
+        matrix:
+          - ARCH: "x64"
+            VCPKG_TARGET_TRIPLET: "x64-mingw-dynamic"
+            MINGW_CC: "x86_64-w64-mingw32-gcc.exe"
+            MINGW_CXX: "x86_64-w64-mingw32-g++.exe"
+            BUILD_TYPE: "Release"
+      artifacts: true
+      # 2026-09-16: added now that build:windows:mingw is manual-only (see
+      # its rules comment) -- without this, a tag pipeline where that build
+      # was never played would still let this job attempt to run (same
+      # mechanism as the LLVM/MSVC-ARM64 jobs below). *windows_package_build_check
+      # / *check_attestation_pwsh still catch the case either way, but
+      # optional:true here means it's skipped entirely instead of run-and-
+      # exit -- confirmed correct for a never-played manual job via
+      # package_windows_arm64_release's real-run behavior.
+      optional: true
+  script:
+    - *windows_package_build_check
+    - *check_attestation_pwsh
+    - *windows_package_prep
+    - cmake --install build --prefix instdir --strip --config Release
+    - *package_windows_outputs
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_windows_mingw_x86_release:
+  extends: .release_package
+  allow_failure: true
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    NSIS_GENERATOR: "NSIS"
+  needs:
+    - job: build:windows:mingw
+      parallel:
+        matrix:
+          - ARCH: "i686"
+            VCPKG_TARGET_TRIPLET: "x86-mingw-dynamic"
+            MINGW_CC: "i686-w64-mingw32-gcc.exe"
+            MINGW_CXX: "i686-w64-mingw32-g++.exe"
+            BUILD_TYPE: "Release"
+      artifacts: true
+      optional: true
+  script:
+    - *windows_package_build_check
+    - *check_attestation_pwsh
+    - *windows_package_prep
+    - cmake --install build --prefix instdir --strip --config Release
+    - *package_windows_outputs
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_windows_mingw_arm64_release:
+  extends: .release_package
+  allow_failure: true
+  tags:
+    - self-managed-windows-arm64
+  variables:
+    NSIS_GENERATOR: "NSIS64"
+  needs:
+    - job: build:windows:mingw:arm64
+      parallel:
+        matrix:
+          - ARCH: "arm64"
+            VCPKG_TARGET_TRIPLET: "arm64-mingw-dynamic"
+            MINGW_CC: "aarch64-w64-mingw32-clang.exe"
+            MINGW_CXX: "aarch64-w64-mingw32-clang++.exe"
+            BUILD_TYPE: "Release"
+      artifacts: true
+      optional: true
+  script:
+    - *windows_package_build_check
+    - *check_attestation_pwsh
+    - *windows_package_prep
+    - cmake --install build --prefix instdir --strip --config Release
+    - *package_windows_outputs
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_windows_llvm_x64_release:
+  extends: .release_package
+  allow_failure: true
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    NSIS_GENERATOR: "NSIS64"
+  needs:
+    - job: build:windows:llvm
+      parallel:
+        matrix:
+          - ARCH: "x64"
+            VCPKG_TARGET_TRIPLET: "x64-win-llvm-release"
+            BUILD_TYPE: "Release"
+      artifacts: true
+      # 2026-09-16: added now that build:windows:llvm is manual-only -- see
+      # the matching comment on package_windows_mingw_x64_release's needs.
+      optional: true
+  script:
+    - *windows_package_build_check
+    - *check_attestation_pwsh
+    - *windows_package_prep
+    - cmake --install build --prefix instdir --strip --config Release
+    - *package_windows_outputs
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_windows_llvm_x86_release:
+  extends: .release_package
+  allow_failure: true
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    NSIS_GENERATOR: "NSIS"
+  needs:
+    - job: build:windows:llvm
+      parallel:
+        matrix:
+          - ARCH: "i686"
+            VCPKG_TARGET_TRIPLET: "x86-win-llvm"
+            BUILD_TYPE: "Release"
+      artifacts: true
+      optional: true
+  script:
+    - *windows_package_build_check
+    - *check_attestation_pwsh
+    - *windows_package_prep
+    - cmake --install build --prefix instdir --strip --config Release
+    - *package_windows_outputs
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_windows_arm64_release:
+  extends: .release_package
+  allow_failure: true
+  tags:
+    - self-managed-windows-arm64
+  variables:
+    NSIS_GENERATOR: "NSIS64"
+  needs:
+    - job: build:windows:arm64
+      parallel:
+        matrix:
+          - ARCH: "arm64"
+            CMAKE_ARCH: "ARM64"
+            VCPKG_TARGET_TRIPLET: "arm64-windows"
+            BUILD_TYPE: "Release"
+      artifacts: true
+      optional: true
+  script:
+    - *windows_package_build_check
+    - *check_attestation_pwsh
+    - *windows_package_prep
+    - cmake --install build --prefix instdir --strip --config Release
+    - *package_windows_outputs
+    # WiX/.msi is a known-weaker path specifically for ARM64 under this
+    # project's pinned WiX v3 -- see the comment above build:windows:arm64.
+    # *package_windows_outputs already treats a missing .msi as best-effort
+    # for every leg; this just documents why that's especially likely here.
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_linux_x64_release:
+  extends: .release_package
+  allow_failure: true
+  image: "$BUILD_GCC_DEB_IMAGE"
+  needs:
+    - job: build:linux:matrix
+      parallel:
+        matrix:
+          - COMPILER: "gcc"
+            BUILD_TYPE: "Release"
+      artifacts: true
+  script:
+    - set -euo pipefail
+    # 2026-09-14: same class of fix as the Windows package jobs below --
+    # build:linux:matrix carries allow_failure: true on its tag+Release rule,
+    # so GitLab's needs: mechanism runs this job regardless of whether that
+    # build succeeded, failed, or was cancelled. Check for real build output
+    # before spending time on apt-get/cmake --install against a build/ that
+    # was never finished. This is a cheap early guard, not proof -- proof is
+    # *check_attestation_bash below.
+    #
+    # 2026-09-16: exits 1, not 0 -- allow_failure: true on this job already
+    # absorbs it, but exit 1 shows an honest "failed (allowed)" warning
+    # instead of a plain green pass for a job that packaged nothing
+    # (confirmed necessary from a real run on the equivalent Windows guard).
+    - |
+      if [ ! -f build/CMakeCache.txt ]; then
+        echo "No build/CMakeCache.txt found -- the upstream build job did not finish (cancelled, failed, or never ran). Nothing to package."
+        exit 1
+      fi
+    - *check_attestation_bash
+    - apt-get update
+    - apt-get install -y rpm binutils
+    - cmake --install build --prefix instdir --strip
+    - test -n "$(find instdir -type f -print -quit)"
+    - mkdir -p release-assets
+    - *read_canonical_base_bash
+    - tar -C instdir -czf "release-assets/${CANONICAL_BASE}.tar.gz" .
+    - cd build
+    # 2026-09-13 fix: these were previously chained with && under
+    # set -euo pipefail -- a DEB failure would short-circuit RPM entirely
+    # AND abort the whole job before the already-built tar.gz above ever got
+    # uploaded (artifacts only upload on success by default). Each format is
+    # now independent: a failure here is logged, not fatal.
+    - cpack -C Release -G DEB || echo "DEB packaging failed."
+    - cpack -C Release -G RPM || echo "RPM packaging failed."
+    - cpack -C Release -G ZIP || echo "ZIP packaging failed."
+    - cpack -C Release -G 7Z || echo "7Z packaging failed."
+    - cd ..
+    - cp build/package/*.deb build/package/*.rpm build/package/*.zip build/package/*.7z release-assets/ 2>/dev/null || true
+    - ls -la release-assets
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_linux_arm64_release:
+  extends: .release_package
+  allow_failure: true
+  image: debian:bookworm
+  tags:
+    - saas-linux-small-arm64
+  needs:
+    - job: build:linux:arm64
+      artifacts: true
+  script:
+    # 2026-09-08: this job previously ran `cmake --install ... 2>/dev/null ||
+    # (fallback)` in a bare debian:bookworm that has no cmake. The failure was
+    # swallowed, the fallback searched `build -maxdepth 1` for a binary that
+    # actually lives in build/bin/, and the job then published an EMPTY tarball
+    # with a green checkmark. cmake and binutils are now installed, the
+    # fallback is gone, and the tree is asserted non-empty before packing.
+    - set -euo pipefail
+    # 2026-09-16: exits 1, not 0 -- see the matching comment on
+    # package_linux_x64_release's guard; allow_failure:true already absorbs
+    # it, this just makes the status honest instead of a plain green pass.
+    - |
+      if [ ! -f build/CMakeCache.txt ]; then
+        echo "No build/CMakeCache.txt found -- the upstream build job did not finish (cancelled, failed, or never ran). Nothing to package."
+        exit 1
+      fi
+    - *check_attestation_bash
+    - apt-get update
+    - apt-get install -y cmake binutils rpm
+    - cmake --install build --prefix instdir --strip
+    - test -n "$(find instdir -type f -print -quit)"
+    - mkdir -p release-assets
+    - *read_canonical_base_bash
+    - tar -C instdir -czf "release-assets/${CANONICAL_BASE}.tar.gz" .
+    - cd build
+    # 2026-09-13: DEB/RPM/ZIP/7Z are new for this leg (previously tar.gz only).
+    # Same as x64: each format is independent, a failure here is logged, not
+    # fatal. This is the first real run of DEB/RPM on this arm64 image --
+    # treat it as unproven until confirmed, same as build:windows:mingw was.
+    - cpack -C Release -G DEB || echo "DEB packaging failed."
+    - cpack -C Release -G RPM || echo "RPM packaging failed."
+    - cpack -C Release -G ZIP || echo "ZIP packaging failed."
+    - cpack -C Release -G 7Z || echo "7Z packaging failed."
+    - cd ..
+    - cp build/package/*.deb build/package/*.rpm build/package/*.zip build/package/*.7z release-assets/ 2>/dev/null || true
+    - ls -la release-assets
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+package_macos_release:
+  extends: .release_package
+  tags:
+    - saas-macos-medium-m1
+  allow_failure: true
+  needs:
+    - job: build:macos
+      parallel:
+        matrix:
+          - BUILD_TYPE: "Release"
+      artifacts: true
+      optional: true
+  script:
+    - set -euo pipefail
+    - mkdir -p release-assets
+    - |
+      # Covers two distinct cases with one check: build/ never existing at all
+      # (expected while GitLab macOS runner entitlement is still pending --
+      # Blocker 2) and build/ existing but incomplete because build:macos
+      # itself was cancelled or failed after starting (build:macos carries
+      # allow_failure: true on its tag+Release rule, so this job still runs
+      # either way -- same fix applied to the other package_* jobs, 2026-09-14).
+      #
+      # 2026-09-16: exits 1, not 0 -- this job already carries
+      # allow_failure: true, so the overall release still succeeds either
+      # way; exit 1 just means THIS job shows an honest "failed (allowed)"
+      # warning instead of a plain green pass for producing nothing.
+      if [ ! -f build/CMakeCache.txt ]; then
+        echo "No build/CMakeCache.txt found (expected while GitLab macOS runner entitlement is pending -- Blocker 2 -- or if build:macos was cancelled/failed). No macOS release asset this run; the overall release still succeeds."
+        exit 1
+      fi
+    - *check_attestation_bash
+    - cmake --install build --prefix instdir --strip
+    - test -n "$(find instdir -type f -print -quit)"
+    - *read_canonical_base_bash
+    - tar -C instdir -czf "release-assets/${CANONICAL_BASE}.tar.gz" .
+    - cd build
+    # 2026-09-13 fix: this was `cd build && cpack ... && cd .. || echo ...`.
+    # If cpack failed, the whole chain short-circuited *before* `cd ..` ran,
+    # leaving the script stranded inside build/ for every command after --
+    # the .dmg copy and (now) ZIP/7Z below would have silently resolved
+    # against the wrong directory. Each format now runs independently and
+    # `cd ..` always runs regardless of any single format's outcome.
+    - cpack -C Release -G DragNDrop || echo "DragNDrop packaging failed -- shipping without the .dmg for this platform."
+    - cpack -C Release -G ZIP || echo "ZIP packaging failed."
+    - cpack -C Release -G 7Z || echo "7Z packaging failed."
+    - cd ..
+    - cp build/package/*.dmg build/package/*.zip build/package/*.7z release-assets/ 2>/dev/null || true
+    - ls -la release-assets
+  artifacts:
+    when: always
+    paths:
+      - release-assets/
+    expire_in: 1 week
+
+create_release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  rules:
+    - if: '$CI_COMMIT_TAG'
+  # 2026-09-14: replaced needs: with dependencies:, and moved this job to its
+  # own `release` stage strictly after the new `package` stage. This was the
+  # actual bug: needs:optional only ignores a dependency that's absent from
+  # the pipeline via rules -- it does NOT ignore one that exists but was
+  # skipped/canceled/never played. Confirmed via GitLab's own current docs:
+  # "If the earlier job does not generate artifacts, or is a manual job that
+  # didn't run, the dependent job still runs and does not generate an error."
+  # dependencies: is pure artifact selection with no execution-order opinion,
+  # so ordinary stage sequencing is what actually lets this job start even
+  # when some package_* jobs above were skipped or canceled. One caveat from
+  # the same docs, not yet hit but worth knowing: if a listed job's artifacts
+  # expire before this runs, THAT specifically does cause a hard failure --
+  # unlike "never ran", which is silently tolerated.
+  dependencies:
+    - package_windows_x64_release
+    - package_windows_x86_release
+    - package_windows_mingw_x64_release
+    - package_windows_mingw_x86_release
+    # 2026-09-14: LLVM and ARM64 added here even though neither has ever
+    # produced a real artifact yet. dependencies: does not error on a job
+    # that never ran or produced nothing (same tolerant behavior that fixed
+    # this job's original skip bug) -- so listing them now costs nothing and
+    # means the moment either one is actually proven, its output is picked
+    # up automatically with no further edit needed here.
+    - package_windows_llvm_x64_release
+    - package_windows_llvm_x86_release
+    - package_windows_arm64_release
+    - package_windows_mingw_arm64_release
+    - package_linux_x64_release
+    - package_linux_arm64_release
+    - package_macos_release
+  variables:
+    GLAB_ENABLE_CI_AUTOLOGIN: "true"
+  script:
+    # `set -eu`, not `set -euo pipefail`: Alpine-based image, ash, where
+    # pipefail is non-POSIX with version-dependent support.
+    - set -eu
+    - apk add --no-cache findutils coreutils git >/dev/null 2>&1 || true
+    - |
+      if glab release view "$CI_COMMIT_TAG" >/dev/null 2>&1; then
+        echo "ERROR: a Release already exists for tag $CI_COMMIT_TAG."
+        echo "This almost always means release notes were typed into the GitLab"
+        echo "web UI while creating the tag, which creates the Release at once."
+        echo "Delete that Release (the tag can stay) and re-run this job."
+        exit 1
+      fi
+    - mkdir -p all-assets
+    - *resolve_version_bash
+    # 2026-09-13: source archives, generated straight from git (no extra
+    # tooling beyond git itself) rather than relying on any single platform
+    # job. Non-fatal on purpose: a missing git binary or a shallow-clone edge
+    # case shouldn't take down an otherwise-good release of the actual
+    # binaries -- log it and move on, matching the same principle applied to
+    # every optional package format elsewhere in this file.
+    #
+    # 2026-09-15: filename switched to the same canonical
+    # <project>_<version>_source scheme as every binary asset -- previously
+    # "$RELEASE_ARCHIVE_PREFIX-src.zip" with no version in it at all.
+    - git archive --format=zip --output="all-assets/${RELEASE_ARCHIVE_PREFIX}_${RESOLVED_VERSION}_source.zip" HEAD || echo "Source .zip generation failed."
+    - git archive --format=tar.gz --output="all-assets/${RELEASE_ARCHIVE_PREFIX}_${RESOLVED_VERSION}_source.tar.gz" HEAD || echo "Source .tar.gz generation failed."
+    - |
+      # Collect every packaging job's artifacts into one flat directory and
+      # refuse to let two platforms overwrite each other.
+      #
+      # IMPORTANT: this deliberately does NOT use `find ... | while read`.
+      # A piped while-loop runs in a SUBSHELL, so an `exit 1` inside it exits
+      # only the subshell and the job carries on and publishes anyway. That
+      # exact mistake was present in an earlier draft of this guard.
+      dup=0
+      for f in $(find . -mindepth 2 -path "*/release-assets/*" -type f | sort); do
+        base=$(basename "$f")
+        if [ -e "all-assets/$base" ]; then
+          echo "ERROR: duplicate release asset filename: $base"
+          dup=1
+        else
+          cp "$f" "all-assets/$base"
+        fi
+      done
+      if [ "$dup" -ne 0 ]; then
+        echo ""
+        echo "Two packaging jobs produced the same filename. Check"
+        echo "CPACK_PACKAGE_FILE_NAME in cmake/cpack_module.cmake -- it must"
+        echo "include both the system name and the architecture."
+        exit 1
+      fi
+      count=$(find all-assets -type f | wc -l | tr -d ' ')
+      if [ "$count" -eq 0 ]; then
+        echo "ERROR: no release assets collected. Refusing to create an empty Release."
+        exit 1
+      fi
+      echo "Collected $count release asset(s)."
+    - (cd all-assets && sha256sum * > SHA256SUMS)
+    - ls -la all-assets
+    - cat all-assets/SHA256SUMS
+    - |
+      glab release create "$CI_COMMIT_TAG" \
+        --name "Release $CI_COMMIT_TAG" \
+        --notes "ProjectCLI $CI_COMMIT_TAG, built from commit $CI_COMMIT_SHORT_SHA. Includes Windows MSVC (x64/x86, automatic); MinGW, LLVM/clang-cl, and ARM64 (all toolchains) are manually-triggered per release while unproven and only present if triggered. Also Linux (x86_64/arm64), and macOS (arm64, best-effort while GitLab macOS runner entitlement is pending) archives and installers where available, plus source archives and SHA256SUMS. Not every format is guaranteed for every target -- see SHA256SUMS for exactly what was published this release. Asset filenames carry their target system, architecture, and toolchain." \
+        ./all-assets/*
+  artifacts:
+    paths:
+      - all-assets/SHA256SUMS
+    expire_in: 1 week

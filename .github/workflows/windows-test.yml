@@ -1,5 +1,11 @@
 name: Windows CI Test
 
+# Pre-merge, this workflow cross-validated the GitHub copy's
+# .gitlab/vcpkg-triplets against the GitLab copy's full source tree by
+# cloning the GitLab repo separately and overlaying the triplets into it.
+# Now that both live in one repository, it just builds and tests this repo
+# directly with that same triplet -- no separate clone needed.
+
 on:
   workflow_dispatch:
 
@@ -8,34 +14,13 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - name: Checkout GitHub repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Checkout GitLab main
+      - name: Verify vcpkg triplet is present
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          if (Test-Path gitlab-source) {
-            Remove-Item -Recurse -Force gitlab-source
-          }
-
-          git clone --depth 1 --branch main `
-            https://gitlab.com/AuroraXEMY/cpp-project-template.git `
-            gitlab-source
-
-      - name: Prepare GitLab source
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Copy-Item `
-            ".gitlab\vcpkg-triplets" `
-            "gitlab-source\.gitlab\vcpkg-triplets" `
-            -Recurse `
-            -Force
-
-          Set-Location gitlab-source
 
           if (!(Test-Path ".gitlab\vcpkg-triplets\x64-windows-debug.cmake")) {
             Write-Error "x64-windows-debug.cmake is missing"
@@ -46,7 +31,6 @@ jobs:
 
       - name: Prepare vcpkg
         shell: pwsh
-        working-directory: gitlab-source
         run: |
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"
@@ -77,7 +61,6 @@ jobs:
 
       - name: Install vcpkg dependencies
         shell: pwsh
-        working-directory: gitlab-source
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -87,17 +70,16 @@ jobs:
             -Path "vcpkg_cache" | Out-Null
 
           $env:VCPKG_BINARY_SOURCES =
-            "clear;files,$env:GITHUB_WORKSPACE\gitlab-source\vcpkg_cache,readwrite"
+            "clear;files,$env:GITHUB_WORKSPACE\vcpkg_cache,readwrite"
 
           $env:VCPKG_MANIFEST_MODE = "ON"
 
           .\vcpkg\vcpkg.exe install `
             --triplet x64-windows-debug `
-            --overlay-triplets="$env:GITHUB_WORKSPACE\gitlab-source\.gitlab\vcpkg-triplets"
+            --overlay-triplets="$env:GITHUB_WORKSPACE\.gitlab\vcpkg-triplets"
 
       - name: Configure CMake
         shell: pwsh
-        working-directory: gitlab-source
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -106,19 +88,17 @@ jobs:
             -A x64 `
             -D CMAKE_BUILD_TYPE=Debug `
             -D VCPKG_TARGET_TRIPLET=x64-windows-debug `
-            -D VCPKG_OVERLAY_TRIPLETS="$env:GITHUB_WORKSPACE\gitlab-source\.gitlab\vcpkg-triplets" `
+            -D VCPKG_OVERLAY_TRIPLETS="$env:GITHUB_WORKSPACE\.gitlab\vcpkg-triplets" `
             -D VCPKG_MANIFEST_MODE=ON `
-            -D CMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\gitlab-source\vcpkg\scripts\buildsystems\vcpkg.cmake"
+            -D CMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake"
 
       - name: Build Debug
         shell: pwsh
-        working-directory: gitlab-source
         run: |
           cmake --build build --config Debug -- /m
 
       - name: Test Debug
         shell: pwsh
-        working-directory: gitlab-source
         run: |
           cd build
           ctest -C Debug --output-on-failure
