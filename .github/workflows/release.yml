@@ -624,16 +624,29 @@ jobs:
     - name: Verify checksums
       working-directory: release-assets
       run: sha256sum -c SHA256SUMS
+    - name: Preflight release upload
+      working-directory: release-assets
+      shell: bash
+      run: 'set -euo pipefail
+        package_count=$(for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
+          [ -f "$f" ] || continue
+          case "$f" in *_source.zip|*_source.tar.gz) continue ;; esac
+          printf "."
+        done | wc -c)
+        test "$package_count" -eq 81
+        test -s SHA256SUMS
+        test "$(wc -l < SHA256SUMS)" -eq 84
+        sha256sum -c SHA256SUMS'
+
     - name: Publish GitHub release
-      uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+      uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
       with:
         files: release-assets/*
+        fail_on_unmatched_files: true
+        overwrite_files: true
+        token: ${{ github.token }}
         generate_release_notes: true
-        body: 'This release contains the currently passing package matrix.
-
-          Windows LLVM packages are included when their build succeeds; failed LLVM matrix legs remain non-blocking.
-
-          '
+        body: 'This release contains the validated cross-platform package matrix and source archives.'
   expanded-package:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
