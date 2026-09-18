@@ -193,11 +193,33 @@ jobs:
           ref: ${{ env.VCPKG_GIT_REF }}
           path: vcpkg
 
+      - name: Restore ARM64 vcpkg tool cache
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && matrix.config.arch == 'arm64'
+        id: arm64-vcpkg-tool-cache-restore
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+        with:
+          path: vcpkg/vcpkg.exe
+          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+          restore-keys: |
+            vcpkg-tool-windows-arm64-
       - name: Bootstrap vcpkg
-        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && !(matrix.config.arch == 'arm64' && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit == 'true')
         shell: pwsh
         run: .\vcpkg\bootstrap-vcpkg.bat
 
+      - name: Verify ARM64 vcpkg tool cache
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && matrix.config.arch == 'arm64'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'ARM64 vcpkg.exe is missing' }
+          & .\vcpkg\vcpkg.exe version
+
+      - name: Save ARM64 vcpkg tool cache
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && matrix.config.arch == 'arm64' && success() && steps.arm64-vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+        with:
+          path: vcpkg/vcpkg.exe
+          key: vcpkg-tool-windows-arm64-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
       - name: vcpkg
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
         shell: pwsh
