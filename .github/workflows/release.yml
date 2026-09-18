@@ -1,5 +1,15 @@
 name: Release
-concurrency:
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+oncurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 permissions:
