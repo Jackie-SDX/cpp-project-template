@@ -943,6 +943,16 @@ jobs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: choco install ninja ccache nsis 7zip wixtoolset -y --no-progress
+    - name: Refresh Windows environment
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          refreshenv
+        }
+        7z | Select-Object -First 1
+        candle.exe -?
     - name: Setup MSYS2 MinGW
       id: msys2
       if: runner.os == 'Windows' && matrix.compiler == 'mingw'
