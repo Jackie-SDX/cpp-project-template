@@ -102,7 +102,7 @@ jobs:
       if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
       uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
       with:
-        path: .ccache-experimental-v2-${{ matrix.cache_id }}-Release
+        path: .ccache
     - name: Verify Android ELF architecture
       working-directory: project
       shell: bash
