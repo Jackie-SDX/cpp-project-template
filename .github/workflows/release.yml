@@ -325,7 +325,7 @@ jobs:
       working-directory: project
       env:
         PREFIX: ${{ env.RELEASE_PREFIX }}
-      run: 'mkdir -p release-assets
+      run: |
 
         (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
 
@@ -355,7 +355,6 @@ jobs:
 
         cp "$dmg" "release-assets/${PREFIX}.dmg"
 
-        '
     - name: Upload package artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
@@ -1077,7 +1076,7 @@ jobs:
       working-directory: project
       env:
         PREFIX: ${{ env.RELEASE_PREFIX }}
-      run: 'mkdir -p release-assets
+      run: |
 
         (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
 
@@ -1107,7 +1106,6 @@ jobs:
 
         cp "$dmg" "release-assets/${PREFIX}.dmg"
 
-        '
     - name: Upload package artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
