@@ -3,6 +3,12 @@ name: Release vcpkg cache warmup
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'vcpkg.json'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/vcpkg-cache-warmup.yml'
+      - '.gitlab/vcpkg-triplets/**'
   schedule:
     - cron: '15 3 * * 0'
   workflow_dispatch:
@@ -11,18 +17,20 @@ permissions:
   contents: read
 
 env:
-  VCPKG_GIT_REF: master
+  VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+  VCPKG_CACHE_NAMESPACE: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
 
 jobs:
   warmup:
     name: ${{ matrix.name }}
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Windows MSVC x64
+            os: windows-latest
             cc: cl
             cxx: cl
             environment_script: vcvars64.bat
@@ -30,6 +38,7 @@ jobs:
             toolchain: msvc
             arch: x64
           - name: Windows MSVC x86
+            os: windows-latest
             cc: cl
             cxx: cl
             environment_script: vcvars32.bat
@@ -37,18 +46,21 @@ jobs:
             toolchain: msvc
             arch: x86
           - name: Windows MinGW x64
+            os: windows-latest
             cc: gcc
             cxx: g++
             vcpkg_triplet: x64-mingw-dynamic
             toolchain: mingw
             arch: x64
           - name: Windows MinGW x86
+            os: windows-latest
             cc: gcc
             cxx: g++
             vcpkg_triplet: x86-mingw-dynamic
             toolchain: mingw
             arch: x86
           - name: Windows LLVM x64
+            os: windows-latest
             cc: clang-cl
             cxx: clang-cl
             environment_script: vcvars64.bat
@@ -56,16 +68,26 @@ jobs:
             toolchain: llvm
             arch: x64
           - name: Windows LLVM x86
+            os: windows-latest
             cc: clang-cl
             cxx: clang-cl
             environment_script: vcvars32.bat
             vcpkg_triplet: x86-win-llvm
             toolchain: llvm
             arch: x86
+          - name: Windows MSVC ARM64
+            os: windows-11-arm
+            cc: cl
+            cxx: cl
+            environment_script: vcvars-arm64.bat
+            vcpkg_triplet: arm64-windows
+            toolchain: msvc
+            arch: arm64
+            external_triplets: false
 
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           path: project
@@ -75,12 +97,24 @@ jobs:
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
-          $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.environment_script }}"
-          if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
-          "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
+          if (-not (Test-Path $vswhere)) { $vswhere = "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" }
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          if ("${{ matrix.arch }}" -eq "arm64") {
+            $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
+            if (-not $vsRoot) { throw "Native ARM64 MSVC toolset not found" }
+            $vsRoot = ($vsRoot | Select-Object -First 1).Trim()
+            $script = Join-Path $vsRoot "Common7\Tools\VsDevCmd.bat"
+            $wrapper = Join-Path $env:GITHUB_WORKSPACE "vs-arm64-env.bat"
+            Set-Content -Path $wrapper -Value "@echo off" -Encoding ascii
+            Add-Content -Path $wrapper -Value ('call "' + $script + '" -arch=arm64 -host_arch=arm64') -Encoding ascii
+            "ENVIRONMENT_SCRIPT=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } else {
+            $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            if (-not $vsRoot) { throw "No Visual Studio installation with the C++ toolset was found." }
+            $script = Join-Path $vsRoot "VC\Auxiliary\Build\${{ matrix.environment_script }}"
+            if (-not (Test-Path $script)) { throw "Expected vcvars script not found at $script" }
+            "ENVIRONMENT_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
       - name: Install cache tooling
         shell: bash
         run: choco install 7zip -y --no-progress
@@ -95,7 +129,8 @@ jobs:
           7z | Select-Object -First 1
 
       - name: Get Windows vcpkg triplets
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        if: matrix.external_triplets != false
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Neumann-A/my-vcpkg-triplets
           ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
@@ -107,13 +142,13 @@ jobs:
         run: |
           case "${{ matrix.toolchain }}" in
             msvc)
-              cache_prefix="windows-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release"
+              cache_prefix="windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release"
               ;;
             mingw)
-              cache_prefix="windows-mingw-${VCPKG_GIT_REF}-${{ matrix.arch }}-Release"
+              cache_prefix="windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release"
               ;;
             llvm)
-              cache_prefix="windows-llvm-${VCPKG_GIT_REF}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release"
+              cache_prefix="windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release"
               ;;
             *)
               echo "Unsupported Windows cache toolchain: ${{ matrix.toolchain }}" >&2
@@ -122,9 +157,43 @@ jobs:
           esac
           echo "VCPKG_CACHE_PREFIX=${cache_prefix}" >> "$GITHUB_ENV"
 
+      - name: Checkout Windows vcpkg
+        if: runner.os == 'Windows'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_GIT_REF }}
+          path: vcpkg
+          fetch-depth: 1
+      - name: Restore Windows vcpkg tool cache
+        if: runner.os == 'Windows'
+        id: vcpkg-tool-cache
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: vcpkg/vcpkg.exe
+          key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+          restore-keys: |
+            vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
+      - name: Bootstrap Windows vcpkg
+        if: runner.os == 'Windows' && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        working-directory: vcpkg
+        run: .\bootstrap-vcpkg.bat -disableMetrics
+      - name: Verify Windows vcpkg tool
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe was not restored or bootstrapped' }
+          & .\vcpkg\vcpkg.exe version
+      - name: Save Windows vcpkg tool cache
+        if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: vcpkg/vcpkg.exe
+          key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
       - name: Restore release vcpkg binary cache
         id: vcpkg-binary-cache-restore
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: project/vcpkg_cache
           key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
@@ -133,22 +202,57 @@ jobs:
 
       - name: vcpkg
         if: steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-        uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
+        shell: pwsh
         env:
           VCPKG_MANIFEST_MODE: OFF
-          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/project/vcpkg_cache,readwrite
-        with:
-          pkgs: wxwidgets gtest
-          triplet: ${{ matrix.vcpkg_triplet }}
-          extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
-          cache-key: release-${{ matrix.name }}
-          disable-cache: true
-          revision: master
-          token: ${{ github.token }}
-
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\project\vcpkg_cache,readwrite
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.arch == 'arm64' && 'arm64-windows' || 'x64-windows' }}
+        run: |
+          if ("${{ matrix.external_triplets }}" -eq "true") {
+            & .\vcpkg\vcpkg.exe install --triplet "${{ matrix.vcpkg_triplet }}" --overlay-triplets="${{ github.workspace }}\my-vcpkg-triplets" wxwidgets gtest
+          } else {
+            & .\vcpkg\vcpkg.exe install --triplet "${{ matrix.vcpkg_triplet }}" wxwidgets gtest
+          }
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed with exit code $LASTEXITCODE" }
+      - name: vcpkg ARM64
+        if: matrix.arch == 'arm64' && matrix.toolchain == 'msvc' && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          VCPKG_MANIFEST_MODE: OFF
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\project\vcpkg_cache,readwrite
+          VCPKG_DEFAULT_HOST_TRIPLET: arm64-windows
+        run: |
+          & .\vcpkg\vcpkg.exe install --triplet arm64-windows wxwidgets gtest
+          if ($LASTEXITCODE -ne 0) { throw "ARM64 vcpkg install failed with exit code $LASTEXITCODE" }
       - name: Save release vcpkg binary cache
         if: success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: project/vcpkg_cache
           key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+  msys2-clangarm64:
+    name: Windows CLANGARM64 MSYS2 cache
+    runs-on: windows-11-arm
+    steps:
+      - name: Setup MSYS2 CLANGARM64
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        with:
+          msystem: CLANGARM64
+          update: false
+          release: false
+          cache: true
+          path-type: minimal
+          install: mingw-w64-clang-aarch64-toolchain
+          pacboy: wxwidgets3.2-msw:p gtest:p
+      - name: Verify CLANGARM64 toolchain
+        shell: pwsh
+        run: |
+          $root = "${{ steps.msys2.outputs.msys2-location }}"
+          if (-not $root) { throw "MSYS2 location output is empty" }
+          $clang = Join-Path $root "clangarm64\bin\clang.exe"
+          $clangxx = Join-Path $root "clangarm64\bin\clang++.exe"
+          if (-not (Test-Path $clang)) { throw "CLANGARM64 clang.exe not found" }
+          if (-not (Test-Path $clangxx)) { throw "CLANGARM64 clang++.exe not found" }
+          & $clang --version
+          & $clangxx --version

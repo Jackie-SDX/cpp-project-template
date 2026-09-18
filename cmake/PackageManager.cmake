@@ -29,7 +29,7 @@ set(PACKAGE_MANAGER_DEFAULT "vcpkg") # change to "conan2" once CI provisions it 
 
 set(PACKAGE_MANAGER "${PACKAGE_MANAGER_DEFAULT}" CACHE STRING
     "Which package manager provides third-party dependencies: vcpkg or conan2")
-set_property(CACHE PACKAGE_MANAGER PROPERTY STRINGS vcpkg conan2)
+set_property(CACHE PACKAGE_MANAGER PROPERTY STRINGS vcpkg conan2 system)
 
 string(TOLOWER "${PACKAGE_MANAGER}" _pm)
 
@@ -44,6 +44,11 @@ if(_pm STREQUAL "vcpkg")
             "find_package() calls elsewhere in this project will fail "
             "without it.")
     endif()
+
+elseif(_pm STREQUAL "system")
+    # Use dependencies already provided by the host environment (for example
+    # distro packages on Linux or MSYS2/Homebrew prefixes on other platforms).
+    # No toolchain file is required; ordinary find_package() resolution is used.
 
 elseif(_pm STREQUAL "conan2")
     # Conan's generated toolchain file has to be produced and passed in
@@ -65,7 +70,7 @@ elseif(_pm STREQUAL "conan2")
 
 else()
     message(FATAL_ERROR
-        "PACKAGE_MANAGER must be 'vcpkg' or 'conan2', got: '${PACKAGE_MANAGER}'. "
+        "PACKAGE_MANAGER must be 'vcpkg', 'conan2', or 'system', got: '${PACKAGE_MANAGER}'. "
         "Set it with -D PACKAGE_MANAGER=vcpkg or -D PACKAGE_MANAGER=conan2.")
 endif()
 
