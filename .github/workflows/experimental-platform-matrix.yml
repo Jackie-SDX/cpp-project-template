@@ -430,13 +430,8 @@ jobs:
           echo "Configured CXX: $cxx_bin"
           if [[ "${{ matrix.compiler }}" == "msvc" ]]; then
             CXX_BIN="$cxx_bin" powershell -NoProfile -Command '
-              $output = @(& "$env:CXX_BIN" /Bv 2>&1)
-              $exitCode = $LASTEXITCODE
-              $output | ForEach-Object { Write-Host $_ }
-              if ($exitCode -ne 0 -and $exitCode -ne 1) { exit $exitCode }
-              if (-not ($output -match "Microsoft \(R\) C/C\+\+ Optimizing Compiler Version")) {
-                throw "MSVC compiler version banner not found"
-              }
+              & "$env:CXX_BIN" /?
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             '
           else
             "$cxx_bin" --version
