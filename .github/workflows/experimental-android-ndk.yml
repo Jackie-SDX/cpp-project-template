@@ -98,8 +98,6 @@ jobs:
           ANDROID_PLATFORM: ${{ env.ANDROID_PLATFORM }}
           BUILD_PROJECTWX: OFF
           BUILD_TESTING: OFF
-          CC: clang
-          CXX: clang++
         run: cmake -P ./.github/scripts/configure.cmake
 
       - name: Build
@@ -107,7 +105,6 @@ jobs:
         env:
           RUNNER_OS: Linux
           BUILD_TYPE: Release
-          CXX: clang++
         run: cmake -P ./.github/scripts/build.cmake
 
       - name: Verify Android ELF architecture
