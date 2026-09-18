@@ -44,9 +44,26 @@ EOF
 
 javac -source 17 -target 17 -cp "$android_jar" -d "$work/classes"   "$work/src/com/naylacruz/cppprojecttemplate/MainActivity.java"
 
-"$d8" --min-api 28 --lib "$android_jar" --output "$work/dex"   "$work/classes/com/naylacruz/cppprojecttemplate/MainActivity.class"
+"$d8" --min-api 28 --lib "$android_jar" --output "$work/dex" \
+  "$work/classes/com/naylacruz/cppprojecttemplate/MainActivity.class"
 
-"$aapt2" link   --manifest "$manifest"   --min-sdk-version 28   --target-sdk-version 28   --version-code 1   --version-name "$version"   -A "$work/assets"   -o "$work/app-unaligned.apk"
+base_version="${version%%-*}"
+IFS=. read -r major minor patch extra <<< "$base_version"
+major="${major:-0}"
+minor="${minor:-0}"
+patch="${patch:-0}"
+version_code="$((major * 1000000 + minor * 1000 + patch))"
+test "$version_code" -gt 0
+
+"$aapt2" link \
+  --manifest "$manifest" \
+  -I "$android_jar" \
+  --min-sdk-version 28 \
+  --target-sdk-version 28 \
+  --version-code "$version_code" \
+  --version-name "$version" \
+  -A "$work/assets" \
+  -o "$work/app-unaligned.apk"
 
 (cd "$work/dex" && zip -q -0 "$work/app-unaligned.apk" classes.dex)
 "$zipalign" -f 4 "$work/app-unaligned.apk" "$work/app-aligned.apk"
