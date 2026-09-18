@@ -1279,11 +1279,3 @@ jobs:
         name: release-${{ matrix.name }}
         path: project/release-assets/*
         if-no-files-found: error
-'on':
-  pull_request:
-    branches:
-    - main
-  push:
-    tags:
-    - v*
-  workflow_dispatch: null
