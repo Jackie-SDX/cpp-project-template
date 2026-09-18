@@ -66,7 +66,7 @@ jobs:
           restore-keys: |
             vcpkg-tool-windows-${{ matrix.tool_arch }}-${{ env.VCPKG_GIT_REF }}-
       - name: Enforce upstream release cache contract
-        if: github.event_name == 'push' && github.ref_type == 'tag' && github.repository == 'NaylaCruz/cpp-project-template' && (steps.package-cache.outputs.cache-hit != 'true' || steps.vcpkg-tool-cache.outputs.cache-hit != 'true')
+        if: github.repository == 'NaylaCruz/cpp-project-template' && (steps.package-cache.outputs.cache-hit != 'true' || steps.vcpkg-tool-cache.outputs.cache-hit != 'true')
         shell: pwsh
         run: throw "Release cache gate failed for ${{ matrix.name }}. Package cache hit=${{ steps.package-cache.outputs.cache-hit }}, vcpkg tool cache hit=${{ steps.vcpkg-tool-cache.outputs.cache-hit }}. Seed main with vcpkg-cache-warmup before tagging."
   package:
