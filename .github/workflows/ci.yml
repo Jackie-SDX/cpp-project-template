@@ -41,6 +41,8 @@ jobs:
           - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64 }
           - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain, msys2_bin: mingw64\bin }
           - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain, msys2_bin: mingw32\bin }
+          - { name: "Windows CLANGARM64 MinGW", os: windows-11-arm, cc: "clang", cxx: "clang++", vcpkg_triplet: none, use_vcpkg: "OFF", msys2_msystem: CLANGARM64, msys2_toolchain: mingw-w64-clang-aarch64-toolchain, msys2_bin: clangarm64\bin }
+          - { name: "Linux Clang ARM64", os: ubuntu-24.04-arm, cc: "clang", cxx: "clang++", vcpkg_triplet: none, use_vcpkg: "OFF" }
 
     defaults:
       run:
@@ -64,7 +66,7 @@ jobs:
             ccache-${{ runner.os }}-${{ matrix.config.name }}-${{ matrix.build_type }}-
 
       - name: Locate MSVC environment script
-        if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC')
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && contains(matrix.config.name, 'MSVC')
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -131,7 +133,7 @@ jobs:
           & $clangClCommand.Source --version
 
       - name: Get LLVM vcpkg triplets
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: 'Neumann-A/my-vcpkg-triplets'
@@ -139,7 +141,7 @@ jobs:
           path: './my-vcpkg-triplets'
 
       - name: Determine Windows compiler fingerprint
-        if: runner.os == 'Windows' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
         id: compiler-fingerprint
         shell: bash
         run: |
@@ -178,12 +180,12 @@ jobs:
             ${{ matrix.config.vcpkg_cache_prefix }}-
 
       - name: Initialize vcpkg binary cache directory
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
         shell: bash
         run: mkdir -p project/vcpkg_cache
 
       - name: Checkout vcpkg
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: microsoft/vcpkg
@@ -191,12 +193,12 @@ jobs:
           path: vcpkg
 
       - name: Bootstrap vcpkg
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
         shell: pwsh
         run: .\vcpkg\bootstrap-vcpkg.bat
 
       - name: vcpkg
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
         shell: pwsh
         env:
           VCPKG_MANIFEST_MODE: OFF
@@ -206,14 +208,14 @@ jobs:
         run: .\vcpkg\vcpkg.exe install --triplet ${{ matrix.config.vcpkg_triplet }} --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets wxwidgets gtest
 
       - name: Save MSVC vcpkg binary cache
-        if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC') && success() && steps.msvc-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && contains(matrix.config.name, 'MSVC') && success() && steps.msvc-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
           key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
 
       - name: Save MinGW and LLVM vcpkg binary cache
-        if: runner.os == 'Windows' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM')) && success() && steps.toolchain-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM')) && success() && steps.toolchain-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
@@ -225,6 +227,7 @@ jobs:
           RUNNER_OS: ${{ runner.os }}
           VCPKG_TRIPLET: ${{ matrix.config.vcpkg_triplet }}
           BUILD_TYPE: ${{ matrix.build_type }}
+          USE_VCPKG: ${{ matrix.config.use_vcpkg }}
         working-directory: project
         run: cmake -P ./.github/scripts/configure.cmake
 
