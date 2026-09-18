@@ -264,7 +264,10 @@ jobs:
             echo "CC=${gcc_prefix}/bin/gcc-${gcc_major}" >> "$GITHUB_ENV"
             echo "CXX=${gcc_prefix}/bin/g++-${gcc_major}" >> "$GITHUB_ENV"
           elif [[ "${{ matrix.compiler }}" == "llvm" ]]; then
+            brew install llvm
             llvm_prefix="$(brew --prefix llvm)"
+            test -x "$llvm_prefix/bin/clang"
+            test -x "$llvm_prefix/bin/clang++"
             echo "CC=${llvm_prefix}/bin/clang" >> "$GITHUB_ENV"
             echo "CXX=${llvm_prefix}/bin/clang++" >> "$GITHUB_ENV"
             echo "PATH=${llvm_prefix}/bin:$PATH" >> "$GITHUB_ENV"
