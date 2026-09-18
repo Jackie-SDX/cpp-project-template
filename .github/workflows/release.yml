@@ -45,11 +45,13 @@ jobs:
             tool_arch: ARM64
           - name: Windows LLVM x64
             os: windows-latest
-            cache_prefix: windows-llvm-master-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-x64-Release
+            compiler: llvm
+            arch: x64
             tool_arch: X64
           - name: Windows LLVM x86
             os: windows-latest
-            cache_prefix: windows-llvm-master-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-x86-Release
+            compiler: llvm
+            arch: x86
             tool_arch: X64
           - name: Windows MinGW x64
             os: windows-latest
@@ -63,14 +65,22 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { path: project }
+      - name: Resolve cache prefix
+        shell: bash
+        run: |
+          case "${{ matrix.compiler }}" in
+            msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+            mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+            llvm) echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+            *) echo "Unsupported cache compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
+          esac
       - name: Restore release package cache
-        id: package-cache
-        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        id: package-cache        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: project/vcpkg_cache
-          key: ${{ matrix.cache_prefix }}-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
           restore-keys: |
-            ${{ matrix.cache_prefix }}-
+            ${{ env.VCPKG_CACHE_PREFIX }}-
       - name: Checkout vcpkg
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
