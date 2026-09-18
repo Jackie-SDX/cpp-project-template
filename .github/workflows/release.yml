@@ -404,13 +404,13 @@ jobs:
         Push-Location build
         cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
-        Copy-Item "package\$env:BASE.exe" "..\release-assets\$env:PREFIX`_nsis.exe" -Force
+        Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:PREFIX}_nsis.exe" -Force
         cpack --config CPackConfig.cmake -C Release -G 7Z
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
         Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
         cpack --config CPackConfig.cmake -C Release -G WIX
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
-        Copy-Item "package\$env:BASE.msi" "..\release-assets\$env:PREFIX`_wix.msi" -Force
+        Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:PREFIX}_wix.msi" -Force
         Pop-Location
     - name: Package Linux
       if: runner.os == 'Linux'
