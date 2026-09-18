@@ -451,6 +451,7 @@ jobs:
           key: ccache-experimental-v2-${{ matrix.cache_id }}-Release
 
       - name: Test
+        if: matrix.build_testing != 'OFF'
         working-directory: project
         env:
           CC: ${{ matrix.cc }}

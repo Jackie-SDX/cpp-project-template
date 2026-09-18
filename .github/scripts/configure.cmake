@@ -83,6 +83,8 @@ if ("$ENV{RUNNER_OS}" STREQUAL "macOS")
 	endif()
 endif()
 
+set(android_configured OFF)
+
 if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND NOT "$ENV{ANDROID_ABI}" STREQUAL "")
 	file(TO_CMAKE_PATH "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" android_toolchain_file)
 	if (NOT EXISTS "${android_toolchain_file}")
@@ -105,6 +107,7 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND NOT "$ENV{ANDROID_ABI}" STREQUAL "")
 			--fresh
 		RESULT_VARIABLE result
 	)
+	set(android_configured ON)
 elseif ("$ENV{RUNNER_OS}" STREQUAL "macOS" AND "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "llvm")
 	set(llvm_archive_tool_args
 		-D CMAKE_AR=/usr/bin/ar
@@ -113,6 +116,8 @@ elseif ("$ENV{RUNNER_OS}" STREQUAL "macOS" AND "$ENV{PACKAGE_TOOLCHAIN}" STREQUA
 else()
 	set(llvm_archive_tool_args)
 endif()
+
+if (NOT android_configured)
 
 if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
@@ -165,6 +170,7 @@ else()
 			--fresh
 		RESULT_VARIABLE result
 	)
+endif()
 endif()
 
 if (NOT result EQUAL 0)
