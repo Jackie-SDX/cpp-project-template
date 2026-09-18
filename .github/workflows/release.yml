@@ -157,7 +157,7 @@ jobs:
       if: runner.os == 'Windows'
       shell: bash
       run: "case \"${{ matrix.toolchain }}\" in\n  msvc) cache_prefix=\"windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  mingw) cache_prefix=\"\
-        windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  llvm) cache_prefix=\"windows-llvm-${VCPKG_GIT_REF}-${MY_VCPKG_TRIPLETS_COMMIT}-${{\
+        windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  llvm) cache_prefix=\"windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{\
         \ matrix.arch }}-Release\" ;;\n  *) echo \"Unsupported Windows cache toolchain: ${{ matrix.toolchain }}\" >&2; exit 1 ;;\nesac\necho \"VCPKG_CACHE_PREFIX=${cache_prefix}\"\
         \ >> \"$GITHUB_ENV\"\n"
     - name: Restore GitLab-style vcpkg binary cache
