@@ -81,7 +81,7 @@ jobs:
           case "${{ matrix.compiler }}" in
             msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
             mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-            llvm) echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+            llvm) if [ "${{ matrix.arch }}" = "arm64" ]; then echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-arm64-Release" >> "$GITHUB_ENV"; else echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV"; fi ;;
             *) echo "Unsupported cache compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
           esac
       - name: Restore release package cache
@@ -1013,7 +1013,7 @@ jobs:
         case "${{ matrix.compiler }}" in
           msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
           mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-          llvm) echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+          llvm) if [ "${{ matrix.arch }}" = "arm64" ]; then echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-arm64-Release" >> "$GITHUB_ENV"; else echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV"; fi ;;
           *) echo "Unsupported Windows vcpkg compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
         esac
     - name: Restore Windows vcpkg binary cache
