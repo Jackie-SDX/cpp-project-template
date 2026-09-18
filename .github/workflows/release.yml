@@ -952,7 +952,16 @@ jobs:
           refreshenv
         }
         7z | Select-Object -First 1
-        candle.exe -?
+        $candle = Get-ChildItem -Path "${env:ProgramFiles(x86)}\WiX Toolset*\bin\candle.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $candle) {
+          $candle = Get-ChildItem -Path "$env:ProgramFiles\WiX Toolset*\bin\candle.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if (-not $candle) {
+          $candle = Get-ChildItem -Path "$env:ChocolateyInstall\lib\wixtoolset" -Filter candle.exe -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if (-not $candle) { throw "WiX candle.exe not found after wixtoolset installation" }
+        $candle.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        & $candle.FullName -?
     - name: Setup MSYS2 MinGW
       id: msys2
       if: runner.os == 'Windows' && matrix.compiler == 'mingw'
