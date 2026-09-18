@@ -136,9 +136,12 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 # https://clang.llvm.org/docs/HowToSetupToolingForLLVM.html
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# We add a flag to llvm-rc because of the following issue:
-# https://github.com/llvm/llvm-project/issues/57367
-if(WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+# Keep the llvm-rc UTF-8 workaround scoped to LLVM's resource compiler.
+# Clang-cl builds in the release matrix use the Windows SDK rc.exe. Passing
+# llvm-rc's "/C 65001" workaround through CMake's Windows dependency wrapper
+# makes clang-cl treat "65001" as a source file and fails the .rc compile.
+if(WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"
+	AND CMAKE_RC_COMPILER MATCHES "[/\\\\]llvm-rc(\\.exe)?$")
 	set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} /C 65001")
 endif()
 
