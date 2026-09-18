@@ -326,6 +326,7 @@ jobs:
       env:
         PREFIX: ${{ env.RELEASE_PREFIX }}
       run: |
+        mkdir -p release-assets
 
         (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
 
@@ -1077,6 +1078,7 @@ jobs:
       env:
         PREFIX: ${{ env.RELEASE_PREFIX }}
       run: |
+        mkdir -p release-assets
 
         (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
 
