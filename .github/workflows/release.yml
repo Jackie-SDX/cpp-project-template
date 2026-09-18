@@ -32,14 +32,17 @@ jobs:
       matrix:
         include:
           - name: Windows MSVC x64
+            compiler: msvc
             os: windows-latest
             cache_prefix: windows-master-x64-Release
             tool_arch: X64
           - name: Windows MSVC x86
+            compiler: msvc
             os: windows-latest
             cache_prefix: windows-master-x86-Release
             tool_arch: X64
           - name: Windows MSVC ARM64
+            compiler: msvc
             os: windows-11-arm
             cache_prefix: windows-master-arm64-Release
             tool_arch: ARM64
@@ -54,10 +57,12 @@ jobs:
             arch: x86
             tool_arch: X64
           - name: Windows MinGW x64
+            compiler: mingw
             os: windows-latest
             cache_prefix: windows-mingw-master-x64-Release
             tool_arch: X64
           - name: Windows MinGW x86
+            compiler: mingw
             os: windows-latest
             cache_prefix: windows-mingw-master-x86-Release
             tool_arch: X64
