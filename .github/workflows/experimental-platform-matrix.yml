@@ -304,8 +304,9 @@ jobs:
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         with:
           msystem: CLANGARM64
-          update: true
+          update: false
           release: true
+          cache: true
           path-type: minimal
           install: ${{ matrix.msys2_toolchain }}
           pacboy: ${{ matrix.msys2_packages }}
