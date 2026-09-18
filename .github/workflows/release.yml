@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 permissions:
   contents: read
@@ -34,17 +34,20 @@ jobs:
           - name: Windows MSVC x64
             compiler: msvc
             os: windows-latest
-            cache_prefix: windows-master-x64-Release
+            compiler: msvc
+            arch: x64
             tool_arch: X64
           - name: Windows MSVC x86
             compiler: msvc
             os: windows-latest
-            cache_prefix: windows-master-x86-Release
+            compiler: msvc
+            arch: x86
             tool_arch: X64
           - name: Windows MSVC ARM64
             compiler: msvc
             os: windows-11-arm
-            cache_prefix: windows-master-arm64-Release
+            compiler: msvc
+            arch: arm64
             tool_arch: ARM64
           - name: Windows LLVM x64
             os: windows-latest
@@ -56,15 +59,22 @@ jobs:
             compiler: llvm
             arch: x86
             tool_arch: X64
+          - name: Windows LLVM ARM64
+            os: windows-11-arm
+            compiler: llvm
+            arch: arm64
+            tool_arch: ARM64
           - name: Windows MinGW x64
             compiler: mingw
             os: windows-latest
-            cache_prefix: windows-mingw-master-x64-Release
+            compiler: mingw
+            arch: x64
             tool_arch: X64
           - name: Windows MinGW x86
             compiler: mingw
             os: windows-latest
-            cache_prefix: windows-mingw-master-x86-Release
+            compiler: mingw
+            arch: x86
             tool_arch: X64
     steps:
       - name: Checkout project
@@ -76,7 +86,7 @@ jobs:
           case "${{ matrix.compiler }}" in
             msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
             mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-            llvm) echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+            llvm) if [ "${{ matrix.arch }}" = "arm64" ]; then echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-arm64-Release" >> "$GITHUB_ENV"; else echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV"; fi ;;
             *) echo "Unsupported cache compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
           esac
       - name: Restore release package cache
@@ -87,6 +97,7 @@ jobs:
           key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
           restore-keys: |
             ${{ env.VCPKG_CACHE_PREFIX }}-
+          lookup-only: true
       - name: Checkout vcpkg
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -102,10 +113,11 @@ jobs:
           key: vcpkg-tool-windows-${{ matrix.tool_arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
           restore-keys: |
             vcpkg-tool-windows-${{ matrix.tool_arch }}-${{ env.VCPKG_GIT_REF }}-
+          lookup-only: true
       - name: Enforce upstream release cache contract
         if: github.repository == 'NaylaCruz/cpp-project-template' && (steps.package-cache.outputs.cache-hit != 'true' || steps.vcpkg-tool-cache.outputs.cache-hit != 'true')
         shell: pwsh
-        run: throw "Release cache gate failed for ${{ matrix.name }}. Package cache hit=${{ steps.package-cache.outputs.cache-hit }}, vcpkg tool cache hit=${{ steps.vcpkg-tool-cache.outputs.cache-hit }}. Seed main with vcpkg-cache-warmup before tagging."
+        run: throw "Release cache gate failed for ${{ matrix.name }}. Package cache hit=${{ steps.package-cache.outputs.cache-hit }}, vcpkg tool cache hit=${{ steps.vcpkg-tool-cache.outputs.cache-hit }}. Seed the release vcpkg caches with vcpkg-cache-warmup before tagging."
   package:
     needs: cache-gate
     name: ${{ matrix.name }}
@@ -338,7 +350,7 @@ jobs:
         BUILD_TYPE: Release
       run: cmake -P ./.github/scripts/build.cmake
     - name: Save compiler cache
-      if: success() && steps.ccache-restore.outputs.cache-hit != 'true'
+      if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .ccache
@@ -390,33 +402,21 @@ jobs:
       env:
         PREFIX: ${{ env.RELEASE_PREFIX }}
         BASE: ${{ steps.package_name.outputs.base }}
-      run: 'New-Item -ItemType Directory -Force release-assets | Out-Null
-
+      run: |
+        $ErrorActionPreference = 'Stop'
+        New-Item -ItemType Directory -Force release-assets | Out-Null
         Compress-Archive -Path instdir\* -DestinationPath "release-assets\$env:PREFIX.zip" -Force
-
         Push-Location build
-
         cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
-
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
-
-        Copy-Item "package\$env:BASE.exe" "..\release-assets\$env:PREFIX`_nsis.exe" -Force
-
+        Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:PREFIX}_nsis.exe" -Force
         cpack --config CPackConfig.cmake -C Release -G 7Z
-
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
-
         Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
-
         cpack --config CPackConfig.cmake -C Release -G WIX
-
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
-
-        Copy-Item "package\$env:BASE.msi" "..\release-assets\$env:PREFIX`_wix.msi" -Force
-
+        Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:PREFIX}_wix.msi" -Force
         Pop-Location
-
-        '
     - name: Package Linux
       if: runner.os == 'Linux'
       working-directory: project
@@ -636,7 +636,7 @@ jobs:
           test -s "cpp-project-template_"$version"_source.tar.gz"
 
           : > expected.txt
-          for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686; do
+          for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686 windows-llvm-arm64; do
             printf '%s\n' \
               "cpp-project-template_"$version"_"$compiler_arch".zip" \
               "cpp-project-template_"$version"_"$compiler_arch".7z" \
@@ -646,7 +646,9 @@ jobs:
           for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do
             printf '%s\n' \
               "cpp-project-template_"$version"_"$compiler_arch".zip" \
-              "cpp-project-template_"$version"_"$compiler_arch".7z" >> expected.txt
+              "cpp-project-template_"$version"_"$compiler_arch".7z" \
+               "cpp-project-template_"$version"_"$compiler_arch"_nsis.exe" \
+               "cpp-project-template_"$version"_"$compiler_arch"_wix.msi" >> expected.txt
           done
           for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do
             printf '%s\n' \
@@ -670,7 +672,7 @@ jobs:
           done
 
           sort -u expected.txt > expected.sorted
-          test "$(wc -l < expected.sorted)" -eq 85
+          test "$(wc -l < expected.sorted)" -eq 93
 
           : > actual.txt
           for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
@@ -679,7 +681,7 @@ jobs:
             printf '%s\n' "$f" >> actual.txt
           done
           sort -u actual.txt > actual.sorted
-          test "$(wc -l < actual.sorted)" -eq 85
+          test "$(wc -l < actual.sorted)" -eq 93
 
           cmp -s expected.sorted actual.sorted || { echo 'Release inventory mismatch:'; comm -3 expected.sorted actual.sorted; exit 1; }
           while IFS= read -r f; do
@@ -688,10 +690,15 @@ jobs:
 
       - name: Write global SHA256SUMS
         working-directory: release-assets
+        shell: bash
         run: |
           set -euo pipefail
           rm -f SHA256SUMS
-          sha256sum -- * > SHA256SUMS
+          files=()
+          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
+            [ -f "$f" ] && files+=("$f")
+          done
+          printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
 
       - name: Verify checksums
         working-directory: release-assets
@@ -726,11 +733,11 @@ jobs:
 
         : > expected.txt
 
-        for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686; do printf
+        for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686 windows-llvm-arm64; do printf
         ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe"
         "cpp-project-template_${version}_${compiler_arch}_wix.msi" >> expected.txt; done
 
-        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z"
+        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe" "cpp-project-template_${version}_${compiler_arch}_wix.msi"
         >> expected.txt; done
 
         for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip"
@@ -745,7 +752,7 @@ jobs:
 
         sort -u expected.txt > expected.sorted
 
-        test "$(wc -l < expected.sorted)" -eq 85
+        test "$(wc -l < expected.sorted)" -eq 93
 
         : > actual.txt
 
@@ -754,16 +761,20 @@ jobs:
 
         sort -u actual.txt > actual.sorted
 
-        test "$(wc -l < actual.sorted)" -eq 85
+        test "$(wc -l < actual.sorted)" -eq 93
 
         cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }'
     - name: Write global SHA256SUMS
       working-directory: release-assets
-      run: 'rm -f SHA256SUMS
-
-        sha256sum -- * > SHA256SUMS
-
-        '
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -f SHA256SUMS
+        files=()
+        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
+          [ -f "$f" ] && files+=("$f")
+        done
+        printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
     - name: Verify checksums
       working-directory: release-assets
       run: sha256sum -c SHA256SUMS
@@ -780,9 +791,9 @@ jobs:
           esac
           package_count=$((package_count + 1))
         done
-        test "$package_count" -eq 85
+        test "$package_count" -eq 93
         test -s SHA256SUMS
-        test "$(wc -l < SHA256SUMS)" -eq 87
+        test "$(wc -l < SHA256SUMS)" -eq 95
         sha256sum -c SHA256SUMS
 
     - name: Publish GitHub release
@@ -813,6 +824,7 @@ jobs:
           external_triplets: false
           environment_script: vcvars-arm64.bat
           cache_id: windows-msvc-arm64
+          windows_installers: true
         - name: Windows CLANGARM64 MinGW
           os: windows-11-arm
           compiler: clangarm64
@@ -825,6 +837,18 @@ jobs:
           msys2_packages: wxwidgets3.2-msw:p gtest:p
           msys2_bin: clangarm64/bin
           cache_id: windows-clangarm64
+          windows_installers: true
+        - name: Windows LLVM ARM64
+          os: windows-11-arm
+          compiler: llvm
+          cc: clang-cl
+          cxx: clang-cl
+          arch: arm64
+          vcpkg_triplet: arm64-windows
+          vcpkg_host_triplet: arm64-windows
+          external_triplets: false
+          environment_script: vcvars-arm64.bat
+          cache_id: windows-llvm-arm64
         - name: Linux GCC x86
           os: ubuntu-24.04
           compiler: gcc
@@ -892,9 +916,10 @@ jobs:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        fetch-depth: 0
-        submodules: true
+        fetch-depth: 1
+        submodules: false
         path: project
+        show-progress: false
     - name: Restore compiler cache
       id: ccache-restore
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -922,7 +947,26 @@ jobs:
     - name: Install Windows tools
       if: runner.os == 'Windows'
       shell: pwsh
-      run: choco install ninja ccache -y --no-progress
+      run: choco install ninja ccache nsis 7zip wixtoolset -y --no-progress
+    - name: Refresh Windows environment
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          refreshenv
+        }
+        7z | Select-Object -First 1
+        $candle = Get-ChildItem -Path "${env:ProgramFiles(x86)}\WiX Toolset*\bin\candle.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $candle) {
+          $candle = Get-ChildItem -Path "$env:ProgramFiles\WiX Toolset*\bin\candle.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if (-not $candle) {
+          $candle = Get-ChildItem -Path "$env:ChocolateyInstall\lib\wixtoolset" -Filter candle.exe -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if (-not $candle) { throw "WiX candle.exe not found after wixtoolset installation" }
+        $candle.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        & $candle.FullName -?
     - name: Setup MSYS2 MinGW
       id: msys2
       if: runner.os == 'Windows' && matrix.compiler == 'mingw'
@@ -981,7 +1025,7 @@ jobs:
         case "${{ matrix.compiler }}" in
           msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
           mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-          llvm) echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
+          llvm) if [ "${{ matrix.arch }}" = "arm64" ]; then echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-arm64-Release" >> "$GITHUB_ENV"; else echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV"; fi ;;
           *) echo "Unsupported Windows vcpkg compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
         esac
     - name: Restore Windows vcpkg binary cache
@@ -1043,6 +1087,12 @@ jobs:
       with:
         path: vcpkg/vcpkg.exe
         key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+    - name: Save Windows vcpkg binary cache
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: project/vcpkg_cache
+        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
     - name: Configure
       working-directory: project
       env:
@@ -1138,7 +1188,7 @@ jobs:
       env:
         PREFIX: ${{ env.RELEASE_PREFIX }}
         BASE: ${{ steps.package_name.outputs.base }}
-      run: '$ErrorActionPreference = ''Stop''
+      run: |
 
         New-Item -ItemType Directory -Force release-assets | Out-Null
 
@@ -1148,9 +1198,19 @@ jobs:
 
         cmake -E tar cf "../release-assets/$env:PREFIX.7z" --format=7zip .
 
-        if ($LASTEXITCODE -ne 0) { Pop-Location; throw ''7Z archive generation failed'' }
+        if ($LASTEXITCODE -ne 0) { Pop-Location; throw '7Z archive generation failed' }
 
-        Pop-Location'
+        Pop-Location
+
+        Push-Location build
+        cpack --config CPackConfig.cmake -C Release -G NSIS64
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw 'NSIS64 package generation failed' }
+        Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:PREFIX}_nsis.exe" -Force
+
+        cpack --config CPackConfig.cmake -C Release -G WIX
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw 'MSI package generation failed' }
+        Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:PREFIX}_wix.msi" -Force
+        Pop-Location
     - name: Package Linux
       if: runner.os == 'Linux'
       working-directory: project
