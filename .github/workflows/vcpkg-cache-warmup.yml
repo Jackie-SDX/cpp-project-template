@@ -180,3 +180,29 @@ jobs:
         with:
           path: project/vcpkg_cache
           key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+  msys2-clangarm64:
+    name: Windows CLANGARM64 MSYS2 cache
+    runs-on: windows-11-arm
+    steps:
+      - name: Setup MSYS2 CLANGARM64
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        with:
+          msystem: CLANGARM64
+          update: false
+          release: true
+          cache: true
+          path-type: minimal
+          install: mingw-w64-clang-aarch64-toolchain
+          pacboy: wxwidgets3.2-msw:p gtest:p
+      - name: Verify CLANGARM64 toolchain
+        shell: pwsh
+        run: |
+          $root = "${{ steps.msys2.outputs.msys2-location }}"
+          if (-not $root) { throw "MSYS2 location output is empty" }
+          $clang = Join-Path $root "clangarm64\bin\clang.exe"
+          $clangxx = Join-Path $root "clangarm64\bin\clang++.exe"
+          if (-not (Test-Path $clang)) { throw "CLANGARM64 clang.exe not found" }
+          if (-not (Test-Path $clangxx)) { throw "CLANGARM64 clang++.exe not found" }
+          & $clang --version
+          & $clangxx --version
