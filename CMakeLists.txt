@@ -123,7 +123,7 @@ string(REGEX REPLACE "  +" " " LICENSE "${LICENSE}") # remove excess spaces
 configure_file("${SOURCE_DIR}/config.h.in" config.h)
 
 # Why cache: https://cliutils.gitlab.io/modern-cmake/chapters/features/cpp11.html
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard to use")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard to use")
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
