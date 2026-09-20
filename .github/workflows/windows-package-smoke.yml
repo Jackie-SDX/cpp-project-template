@@ -1,3 +1,23 @@
+# =============================================================================
+# Windows Package Smoke
+# =============================================================================
+# Purpose
+# --------
+# Pull-request-time packaging smoke for one representative Windows config
+# (MinGW x64): builds, installs, packages zip/7z/exe/msi and verifies artifacts
+# + checksums, so packaging regressions surface before the full release matrix.
+#
+# Trigger rules
+# -------------
+#   * pull requests to main that carry the ``windows-package-smoke`` label.
+#
+# References
+# ----------
+#   * Label-gated runs:    https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request
+#   * Artifacts:           https://docs.github.com/en/actions/using-workflows/storing-workflow-data-as-artifacts
+#   * MSYS2/MinGW:         https://www.msys2.org
+# =============================================================================
+
 name: Windows Package Smoke
 
 on:

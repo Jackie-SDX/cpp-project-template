@@ -173,14 +173,7 @@ if(${BUILD_SOURCE})
 	add_subdirectory(${PROJECT_CLI_DIR})
 
 	set(PROJECT_WX_NAME projectwx)
-	if(ANDROID)
-		# Android experiment currently validates the portable core/CLI only.
-		# Force the GUI and test toggles off because projectwx depends on desktop wxWidgets.
-		set(BUILD_PROJECTWX OFF CACHE BOOL "Build ${PROJECT_WX_NAME}" FORCE)
-		set(BUILD_TESTING OFF CACHE BOOL "Build tests" FORCE)
-	else()
-		option(BUILD_PROJECTWX "Build ${PROJECT_WX_NAME}" ON)
-	endif()
+	option(BUILD_PROJECTWX "Build ${PROJECT_WX_NAME}" ON)
 	set(PROJECT_WX_DIR ${SOURCE_DIR}/${PROJECT_WX_NAME})
 	if(BUILD_PROJECTWX)
 		add_subdirectory(${PROJECT_WX_DIR}/src)

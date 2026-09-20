@@ -1,3 +1,24 @@
+# =============================================================================
+# Experimental All Platforms - extra toolchain/architecture matrix
+# =============================================================================
+# Purpose
+# --------
+# Experimental staging matrix for configurations not yet promoted to ci.yml or
+# release.yml (e.g. additional Windows CLANGARM64/MinGW and macOS toolchains).
+# Kept separate so experimental failures never block the main gates.
+#
+# Trigger rules
+# -------------
+#   * push to the branch ``experimental/all-platforms-architectures-v2``
+#     and manual dispatch only.
+#
+# References
+# ----------
+#   * Workflow syntax:     https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+#   * Strategies/matrices: https://docs.github.com/en/actions/using-jobs/using-a-build-matrix-for-your-jobs
+#   * msys2/setup-msys2:   https://github.com/msys2/setup-msys2
+# =============================================================================
+
 name: Experimental All Platforms
 
 on:

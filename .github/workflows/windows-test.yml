@@ -1,3 +1,24 @@
+# =============================================================================
+# Windows CI Test
+# =============================================================================
+# Purpose
+# --------
+# Manual Windows Debug build + CTest run using the GitLab-style
+# x64-windows-debug vcpkg triplet from .gitlab/vcpkg-triplets. Historically it
+# also re-checked parity between the GitLab and GitHub copies of the repository;
+# that overlay step is now redundant because both live in this repository.
+#
+# Trigger rules
+# -------------
+#   * workflow_dispatch only (deliberate; regular Windows testing runs in ci.yml).
+#
+# References
+# ----------
+#   * vcpkg:               https://vcpkg.io
+#   * ilammy/msvc-dev-cmd: https://github.com/ilammy/msvc-dev-cmd
+#   * CTest:               https://cmake.org/cmake/help/latest/module/CTest.html
+# =============================================================================
+
 name: Windows CI Test
 
 # Pre-merge, this workflow cross-validated the GitHub copy's

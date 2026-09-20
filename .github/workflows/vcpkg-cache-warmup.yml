@@ -1,3 +1,25 @@
+# =============================================================================
+# Release vcpkg cache warmup
+# =============================================================================
+# Purpose
+# --------
+# Pre-builds the Windows vcpkg dependency caches used by release.yml so tag-push
+# release runs can restore pre-built wxWidgets/GoogleTest binaries instead of
+# compiling them from scratch on public runners. Runs on a schedule (weekly) and
+# whenever dependency or workflow files change.
+#
+# Trigger rules
+# -------------
+#   * push to main when vcpkg.json / the release-related workflows / the GitLab
+#     triplet overlay change, a weekly cron, and manual dispatch.
+#
+# References
+# ----------
+#   * Scheduled workflows: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule
+#   * vcpkg:              https://vcpkg.io
+#   * actions/cache:      https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows
+# =============================================================================
+
 name: Release vcpkg cache warmup
 
 on:

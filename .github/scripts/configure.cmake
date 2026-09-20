@@ -86,32 +86,7 @@ if ("$ENV{RUNNER_OS}" STREQUAL "macOS")
 	endif()
 endif()
 
-set(android_configured OFF)
-
-if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND NOT "$ENV{ANDROID_ABI}" STREQUAL "")
-	file(TO_CMAKE_PATH "$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" android_toolchain_file)
-	if (NOT EXISTS "${android_toolchain_file}")
-		message(FATAL_ERROR "Android NDK CMake toolchain not found: ${android_toolchain_file}")
-	endif()
-	execute_process(
-		COMMAND cmake
-			-S .
-			-B build
-			-D CMAKE_BUILD_TYPE=${actual_build_type}
-			-G "Ninja"
-			-D CMAKE_MAKE_PROGRAM=ninja
-			-D CMAKE_C_COMPILER_LAUNCHER=ccache
-			-D CMAKE_CXX_COMPILER_LAUNCHER=ccache
-			-D CMAKE_TOOLCHAIN_FILE=${android_toolchain_file}
-			-D ANDROID_ABI=$ENV{ANDROID_ABI}
-			-D ANDROID_PLATFORM=$ENV{ANDROID_PLATFORM}
-			${extra_config_args}
-			-D PACKAGE_TOOLCHAIN=android
-			--fresh
-		RESULT_VARIABLE result
-	)
-	set(android_configured ON)
-elseif ("$ENV{RUNNER_OS}" STREQUAL "macOS" AND "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "llvm")
+if ("$ENV{RUNNER_OS}" STREQUAL "macOS" AND "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "llvm")
 	set(llvm_archive_tool_args
 		-D CMAKE_AR=/usr/bin/ar
 		-D CMAKE_RANLIB=/usr/bin/ranlib
@@ -120,7 +95,6 @@ else()
 	set(llvm_archive_tool_args)
 endif()
 
-if (NOT android_configured)
 
 if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
@@ -173,7 +147,6 @@ else()
 			--fresh
 		RESULT_VARIABLE result
 	)
-endif()
 endif()
 
 if (NOT result EQUAL 0)

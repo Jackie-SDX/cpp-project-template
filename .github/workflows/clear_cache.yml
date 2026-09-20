@@ -1,3 +1,21 @@
+# =============================================================================
+# Clear all GitHub Actions caches
+# =============================================================================
+# Purpose
+# --------
+# Manual helper that wipes every Actions cache for the repository. Needed when
+# a poisoned/stale cache (e.g. a bad vcpkg binary cache entry) keeps CI failing.
+#
+# Trigger rules
+# -------------
+#   * workflow_dispatch only - never runs automatically.
+#
+# References
+# ----------
+#   * Manual workflow runs: https://docs.github.com/en/actions/using-workflows/manually-running-a-workflow
+#   * Caching dependencies: https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows
+# =============================================================================
+
 name: Clear all Github actions caches
 
 on:
