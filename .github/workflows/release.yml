@@ -758,6 +758,12 @@ jobs:
           while IFS= read -r f; do
             test -s "$f" || { echo "Empty artifact: $f"; exit 1; }
           done < actual.sorted
+          # Remove the temporary inventory manifests from the staged asset
+          # directory. Keeping release-assets/* clean guarantees the publish
+          # upload can never leak expected.txt/actual.txt/expected.sorted/
+          # actual.sorted as stray release assets (a bug that affected v0.0.2
+          # and v0.0.3).
+          rm -f expected.txt expected.sorted actual.txt actual.sorted
 
       # Write one SHA256SUMS file covering every package artifact so
       # consumers can verify download integrity from a single file.
@@ -839,7 +845,9 @@ jobs:
 
         test "$(wc -l < actual.sorted)" -eq 85
 
-        cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }'
+        cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }
+
+        rm -f expected.txt expected.sorted actual.txt actual.sorted'
     - name: Write global SHA256SUMS
       working-directory: release-assets
       shell: bash
