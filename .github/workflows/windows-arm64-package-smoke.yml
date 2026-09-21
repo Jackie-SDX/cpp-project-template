@@ -1,3 +1,25 @@
+# =============================================================================
+# Windows ARM64 Package Smoke
+# =============================================================================
+# Purpose
+# --------
+# Verifies native Windows ARM64 packaging on a windows-11-arm runner: builds
+# with the native ARM64 MSVC toolset, installs, and produces the standard
+# zip/7z/nsis/wix artifacts, then checks the PE machine header is ARM64 (0xAA64).
+#
+# Trigger rules
+# -------------
+#   * pulls targeting main only when the head branch is
+#     ``reconcile/gitlab-github-parity``, that branch's own pushes, and manual
+#     dispatch. On every other PR it is skipped.
+#
+# References
+# ----------
+#   * ARM64 runners:       https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners
+#   * actions/checkout:   https://docs.github.com/en/actions/using-workflows/actions/checkout
+#   * CPack:              https://cmake.org/cmake/help/latest/module/CPack.html
+# =============================================================================
+
 name: Windows ARM64 Package Smoke
 
 on:

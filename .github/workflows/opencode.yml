@@ -1,3 +1,24 @@
+# =============================================================================
+# opencode - repository-local /oc bot responder
+# =============================================================================
+# Purpose
+# --------
+# Responds to issue/PR review comments that begin with ``/oc`` or ``/opencode``
+# and runs the opencode agent against this repository on GitHub's hosted
+# runners. It is intentionally minimal (checkout + single agent action); heavy
+# pipeline policy lives in the controller repository, not here.
+#
+# Security note
+# -------------
+#   * The condition matches any comment containing ``/oc``; keep the secret
+#     scope here to only what this agent action needs.
+#
+# References
+# ----------
+#   * opencode GitHub Action: https://opencode.ai/docs
+#   * Events that trigger:   https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows
+# =============================================================================
+
 name: opencode
 on:
   issue_comment:

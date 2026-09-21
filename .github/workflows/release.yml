@@ -1,3 +1,42 @@
+# =============================================================================
+# Release - production cross-platform package matrix + GitHub release publish
+# =============================================================================
+# Purpose
+# --------
+# Builds the full desktop artifact matrix (Windows MSVC/MinGW/LLVM, Linux
+# GCC/Clang, macOS Clang/GCC/LLVM; 85 artifacts after Android support was
+# retired), validates the complete expected inventory, and publishes a GitHub
+# release with generated checksums when a ``v*`` tag is pushed.
+#
+# Android / NDK support was removed from this pipeline in this revision; see
+#   - .github/scripts/configure.cmake    (NDK toolchain branch deleted)
+#   - .github/workflows/experimental-android-ndk.yml  (workflow removed)
+#   - .github/scripts/package_android_apk.sh          (APK packager removed)
+#   - packaging/android/               (APK manifest + activity removed)
+# and the release inventory counts below are now 85 packages + 2 source
+# archives instead of 93 + 2.
+#
+# Trigger rules
+# -------------
+#   * ``v*`` tag pushes (production release), pull requests against ``main``
+#     (smoke gates only), and manual dispatch.
+#
+# Job dependency graph
+# --------------------
+#   cache-gate -> package/source/expanded-package -> validate-release -> publish
+#   package-smoke runs on PRs without the ``full-release-test`` label.
+#   A PR must carry the ``full-release-test`` label to run the full matrix.
+#
+# References
+# ----------
+#   * Workflow syntax:      https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+#   * Strategies/matrices:  https://docs.github.com/en/actions/using-jobs/using-a-build-matrix-for-your-jobs
+#   * Releasing:            https://docs.github.com/en/actions/how-to/automating-releases
+#   * Artifacts:            https://docs.github.com/en/actions/using-workflows/storing-workflow-data-as-artifacts
+#   * softprops/action-gh-release: https://github.com/softprops/action-gh-release
+#   * Caching:              https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows
+# =============================================================================
+
 name: Release
 
 # Workflow-definition refresh: tag pushes (v*) are the production release trigger.
@@ -21,10 +60,12 @@ env:
   VCPKG_CACHE_NAMESPACE: master
   MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
   CCACHE_DIR: ${{ github.workspace }}/.ccache
-  ANDROID_NDK_VERSION: 30.0.16248370
-  ANDROID_PLATFORM: android-28
   CCACHE_COMPILERCHECK: content
 jobs:
+  # cache-gate: warms/proves the vcpkg + compiler caches used by every
+  # downstream package job and fails fast on tag runs when the upstream
+  # release cache contract is not satisfiable.
+
   cache-gate:
     name: Windows release cache gate (${{ matrix.name }})
     if: github.event_name == 'push' && github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-release-test'))
@@ -115,6 +156,9 @@ jobs:
         if: github.repository == 'NaylaCruz/cpp-project-template' && (steps.package-cache.outputs.cache-hit != 'true' || steps.vcpkg-tool-cache.outputs.cache-hit != 'true')
         shell: pwsh
         run: throw "Release cache gate failed for ${{ matrix.name }}. Package cache hit=${{ steps.package-cache.outputs.cache-hit }}, vcpkg tool cache hit=${{ steps.vcpkg-tool-cache.outputs.cache-hit }}. Seed the release vcpkg caches with vcpkg-cache-warmup before tagging."
+  # package: core 10-config desktop matrix (Windows MSVC/MinGW/LLVM, Linux GCC,
+  # macOS Clang). Skipped on plain PRs unless the full-release-test label is set.
+
   package:
     needs: cache-gate
     name: ${{ matrix.name }}
@@ -510,6 +554,9 @@ jobs:
         name: release-${{ matrix.name }}
         path: project/release-assets/*
         if-no-files-found: error
+  # package-smoke: cheap Linux GCC x64 packaging smoke that runs on every PR
+  # (unless the full-release-test label opts in to the real matrix).
+
   package-smoke:
     name: Linux GCC x64 PR packaging smoke
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-release-test')
@@ -589,6 +636,9 @@ jobs:
         name: release-linux-gcc-x64-pr-smoke
         path: release-assets/*
         if-no-files-found: error
+  # source: builds the release source archives (zip + tar.gz) used to derive
+  # the canonical version string and to seed the artifact inventory.
+
   source:
     needs: cache-gate
     name: Source archives
@@ -624,13 +674,15 @@ jobs:
         name: source-archives
         path: source-assets/*
         if-no-files-found: error
+  # validate-release: downloads every package + source artifact and asserts the
+  # expected 85-package inventory (see header) plus matching SHA256SUMS.
+
   validate-release:
     name: Validate release inventory
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-release-test'))
     needs:
       - package
       - expanded-package
-      - android-package
       - source
     runs-on: ubuntu-24.04
     permissions:
@@ -647,6 +699,8 @@ jobs:
         with:
           name: source-archives
           path: release-assets
+      # Expected inventory: 85 platform packages + source archives.
+
       - name: Verify release inventory
         working-directory: release-assets
         shell: bash
@@ -688,28 +742,25 @@ jobs:
               "cpp-project-template_"$version"_"$compiler_arch".tar.gz" \
               "cpp-project-template_"$version"_"$compiler_arch".dmg" >> expected.txt
           done
-          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-            printf '%s\n' \
-              "cpp-project-template_"$version"_android-ndk-"$abi".apk" \
-              "cpp-project-template_"$version"_android-ndk-"$abi".zip" >> expected.txt
-          done
-
           sort -u expected.txt > expected.sorted
-          test "$(wc -l < expected.sorted)" -eq 93
+          test "$(wc -l < expected.sorted)" -eq 85
 
           : > actual.txt
-          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
+          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
             [ -f "$f" ] || continue
             case "$f" in *_source.zip|*_source.tar.gz) continue ;; esac
             printf '%s\n' "$f" >> actual.txt
           done
           sort -u actual.txt > actual.sorted
-          test "$(wc -l < actual.sorted)" -eq 93
+          test "$(wc -l < actual.sorted)" -eq 85
 
           cmp -s expected.sorted actual.sorted || { echo 'Release inventory mismatch:'; comm -3 expected.sorted actual.sorted; exit 1; }
           while IFS= read -r f; do
             test -s "$f" || { echo "Empty artifact: $f"; exit 1; }
           done < actual.sorted
+
+      # Write one SHA256SUMS file covering every package artifact so
+      # consumers can verify download integrity from a single file.
 
       - name: Write global SHA256SUMS
         working-directory: release-assets
@@ -718,7 +769,7 @@ jobs:
           set -euo pipefail
           rm -f SHA256SUMS
           files=()
-          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
+          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
             [ -f "$f" ] && files+=("$f")
           done
           printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
@@ -726,6 +777,9 @@ jobs:
       - name: Verify checksums
         working-directory: release-assets
         run: sha256sum -c SHA256SUMS
+
+  # publish: runs only on tag pushes; re-validates the inventory, writes a
+  # global SHA256SUMS and publishes the GitHub release via softprops/action-gh-release.
 
   publish:
     name: Publish release
@@ -771,20 +825,19 @@ jobs:
         "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz"
         "cpp-project-template_${version}_${compiler_arch}.dmg" >> expected.txt; done
 
-        for abi in arm64-v8a armeabi-v7a x86 x86_64; do printf ''%s\n'' "cpp-project-template_${version}_android-ndk-${abi}.apk" "cpp-project-template_${version}_android-ndk-${abi}.zip" >> expected.txt; done
 
         sort -u expected.txt > expected.sorted
 
-        test "$(wc -l < expected.sorted)" -eq 93
+        test "$(wc -l < expected.sorted)" -eq 85
 
         : > actual.txt
 
-        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
+        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
         printf ''%s\n'' "$f" >> actual.txt; done
 
         sort -u actual.txt > actual.sorted
 
-        test "$(wc -l < actual.sorted)" -eq 93
+        test "$(wc -l < actual.sorted)" -eq 85
 
         cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }'
     - name: Write global SHA256SUMS
@@ -794,7 +847,7 @@ jobs:
         set -euo pipefail
         rm -f SHA256SUMS
         files=()
-        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
+        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
           [ -f "$f" ] && files+=("$f")
         done
         printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
@@ -807,16 +860,16 @@ jobs:
       run: |
         set -euo pipefail
         package_count=0
-        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg *.apk; do
+        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
           [ -f "$f" ] || continue
           case "$f" in
             *_source.zip|*_source.tar.gz) continue ;;
           esac
           package_count=$((package_count + 1))
         done
-        test "$package_count" -eq 93
+        test "$package_count" -eq 85
         test -s SHA256SUMS
-        test "$(wc -l < SHA256SUMS)" -eq 95
+        test "$(wc -l < SHA256SUMS)" -eq 87
         sha256sum -c SHA256SUMS
 
     - name: Publish GitHub release
@@ -828,6 +881,9 @@ jobs:
         token: ${{ github.token }}
         generate_release_notes: true
         body: 'This release contains the validated cross-platform package matrix and source archives.'
+  # expanded-package: fills the remainder of the artifact matrix (Windows ARM64,
+  # Linux Clang/32-bit, macOS variants) so the inventory totals 85.
+
   expanded-package:
     needs: cache-gate
     name: ${{ matrix.name }}
@@ -1324,157 +1380,6 @@ jobs:
         cp "$dmg" "release-assets/${PREFIX}.dmg"
 
     - name: Upload package artifact
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-      with:
-        name: release-${{ matrix.name }}
-        path: project/release-assets/*
-        if-no-files-found: error
-  android-package:
-    needs: cache-gate
-    name: ${{ matrix.name }}
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-        - name: Android arm64-v8a
-          abi: arm64-v8a
-          expected_machine: AArch64
-          cache_id: android-arm64-v8a
-        - name: Android armeabi-v7a
-          abi: armeabi-v7a
-          expected_machine: ARM
-          cache_id: android-armeabi-v7a
-        - name: Android x86_64
-          abi: x86_64
-          expected_machine: Advanced Micro Devices X86-64
-          cache_id: android-x86_64
-        - name: Android x86
-          abi: x86
-          expected_machine: Intel 80386
-          cache_id: android-x86
-    steps:
-    - name: Checkout
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        fetch-depth: 0
-        submodules: true
-        path: project
-    - name: Set up JDK 17
-      uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
-      with:
-        java-version: '17'
-        distribution: temurin
-    - name: Set up Android SDK and NDK
-      uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
-      with:
-        packages: platform-tools platforms;android-28 ndk;30.0.16248370
-    - name: Configure Android environment
-      shell: bash
-      run: 'set -euo pipefail
-
-        sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-
-        test -n "$sdk_root"
-
-        ndk_home="$sdk_root/ndk/${ANDROID_NDK_VERSION}"
-
-        test -f "$ndk_home/build/cmake/android.toolchain.cmake"
-
-        echo "ANDROID_NDK_HOME=$ndk_home" >> "$GITHUB_ENV"
-
-        echo "ANDROID_NDK_HOME=$ndk_home"
-
-        '
-    - name: Install build tools
-      run: 'sudo apt-get update
-
-        sudo apt-get install -y ninja-build ccache
-
-        '
-    - name: Restore compiler cache
-      id: ccache-restore
-      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
-      with:
-        path: .ccache
-        key: ccache-experimental-v2-${{ matrix.cache_id }}-Release
-        restore-keys: 'ccache-experimental-v2-${{ matrix.cache_id }}-Release-
-
-          ccache-experimental-${{ matrix.cache_id }}-Release-
-
-          '
-    - name: Configure
-      working-directory: project
-      env:
-        RUNNER_OS: Linux
-        BUILD_TYPE: Release
-        ANDROID_ABI: ${{ matrix.abi }}
-        ANDROID_PLATFORM: ${{ env.ANDROID_PLATFORM }}
-        BUILD_PROJECTWX: false
-        BUILD_TESTING: false
-      run: cmake -P ./.github/scripts/configure.cmake
-    - name: Build
-      working-directory: project
-      env:
-        RUNNER_OS: Linux
-        BUILD_TYPE: Release
-      run: cmake -P ./.github/scripts/build.cmake
-    - name: Save compiler cache
-      if: always() && steps.ccache-restore.outputs.cache-hit != 'true' && hashFiles('.ccache/**') != ''
-      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
-      with:
-        path: .ccache
-    - name: Verify Android ELF architecture
-      working-directory: project
-      shell: bash
-      run: 'set -euo pipefail
-
-        target="$(find build/bin -maxdepth 1 -type f -name ''projectcli*'' -print -quit)"
-
-        test -n "$target"
-
-        readelf -h "$target"
-
-        readelf -h "$target" | grep -F "Machine:" | grep -F -- "${{ matrix.expected_machine }}"
-
-        '
-    - name: Package Android
-      working-directory: project
-      shell: bash
-      env:
-        ANDROID_ABI: ${{ matrix.abi }}
-        ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
-        ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
-        ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-        ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
-      run: |
-        set -euo pipefail
-        if [ "$GITHUB_REF_TYPE" = "tag" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
-          version="${GITHUB_REF_NAME#v}"
-        else
-          version="$(git describe --tags --always --dirty | sed 's/^v//')"
-        fi
-        target="$(find build/bin -maxdepth 1 -type f -name 'projectcli*' -print -quit)"
-        test -n "$target"
-        mkdir -p android-release/bin release-assets
-        cp "$target" android-release/bin/
-        printf 'Project: cpp-project-template\nVersion: %s\nAndroid ABI: %s\nNDK: %s\nAPI: %s\n' "$version" "$ANDROID_ABI" "$ANDROID_NDK_VERSION" "$ANDROID_PLATFORM" > android-release/BUILD-INFO.txt
-        (cd android-release && zip -q -r "../release-assets/cpp-project-template_${version}_android-ndk-${ANDROID_ABI}.zip" .)
-        bash ./.github/scripts/package_android_apk.sh           "$target"           "$ANDROID_ABI"           "$version"           "$ANDROID_NDK_VERSION"           "$ANDROID_PLATFORM"           "release-assets/cpp-project-template_${version}_android-ndk-${ANDROID_ABI}.apk"
-    - name: Verify Android APK
-      working-directory: project
-      shell: bash
-      env:
-        ANDROID_ABI: ${{ matrix.abi }}
-      run: |
-        set -euo pipefail
-        apk="$(find release-assets -maxdepth 1 -type f -name "cpp-project-template_*_android-ndk-${ANDROID_ABI}.apk" -print -quit)"
-        test -n "$apk"
-        test -s "$apk"
-        sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-        build_tools="$(find "$sdk_root/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -1)"
-        "$sdk_root/build-tools/$build_tools/apksigner" verify --verbose "$apk"
-    - name: Upload Android package artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: release-${{ matrix.name }}

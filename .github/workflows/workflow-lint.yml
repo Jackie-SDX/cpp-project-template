@@ -1,3 +1,22 @@
+# =============================================================================
+# Workflow Lint
+# =============================================================================
+# Purpose
+# --------
+# Runs actionlint against every workflow in .github/workflows on push/PR, i.e.
+# the repo's own gate that statically validates the whole pipeline (structure,
+# expressions, action references). A red run here means a workflow is invalid.
+#
+# Trigger rules
+# -------------
+#   * push to main or the experimental branch, pull requests to main, manual.
+#
+# References
+# ----------
+#   * actionlint:          https://github.com/rhysd/actionlint
+#   * Workflow reference:  https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+# =============================================================================
+
 name: Workflow Lint
 
 on:

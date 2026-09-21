@@ -1,3 +1,36 @@
+# =============================================================================
+# CI - cross-platform build & test matrix
+# =============================================================================
+# Purpose
+# --------
+# Primary continuous-integration gate. Builds and tests the project in Debug and
+# Release across the supported desktop toolchains (GCC, Clang, MSVC, MinGW,
+# LLVM/Clang-CL) on Ubuntu, macOS and Windows runners, then:
+#   * runs the test suite via CTest,
+#   * feeds coverage to Codecov and Coveralls (Linux Debug only),
+#   * runs a lightweight CPack packaging smoke on Linux Release.
+#
+# Trigger rules
+# -------------
+#   * push / pull_request against ``main`` and manual dispatch.
+#
+# Notes
+# -----
+#   * ccache is persisted between runs to keep cold rebuilds fast.
+#   * vcpkg dependencies are installed into a workspace cache directory that is
+#     saved/restored so dependency builds only happen on cache misses.
+#   * This matrix is heavy (10 configurations x 2 build types); see
+#     release.yml for the gated production packaging matrix.
+#
+# References
+# ----------
+#   * Workflow syntax:     https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+#   * Events that trigger: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows
+#   * Runner images:       https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners
+#   * actions/checkout:    https://docs.github.com/en/actions/using-workflows/actions/checkout
+#   * actions/cache:       https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows
+# =============================================================================
+
 # GitHub CI workflow synchronized from the repository update archive.
 # All matrix combinations are eligible on push/PR. Coverity remains manual-only.
 
@@ -24,6 +57,9 @@ env:
   CCACHE_COMPILERCHECK: content
 
 jobs:
+  # Build matrix: one job per (configuration, build type) entry.
+  # fail-fast is disabled so one broken toolchain does not cancel the rest.
+
   build:
     name: ${{ matrix.config.name }} - ${{ matrix.build_type }}
     runs-on: ${{ matrix.config.os }}

@@ -1,3 +1,24 @@
+# =============================================================================
+# GH Doxygen - publish API documentation to GitHub Pages
+# =============================================================================
+# Purpose
+# --------
+# Builds the Doxygen API documentation (with Graphviz call graphs) and publishes
+# it to the ``gh-pages`` branch, which a Pages site under /docs/doxygen serves.
+# CMake, Doxygen and Graphviz are pinned, cached and installed on-demand so a
+# runner image upgrade cannot silently change the generated docs.
+#
+# Trigger rules
+# -------------
+#   * push to ``main`` and manual dispatch.
+#
+# References
+# ----------
+#   * GitHub Pages:        https://docs.github.com/en/actions/pages
+#   * peaceiris/actions-gh-pages: https://github.com/peaceiris/actions-gh-pages
+#   * actions/cache:       https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows
+# =============================================================================
+
 name: GH Doxygen
 
 on:
