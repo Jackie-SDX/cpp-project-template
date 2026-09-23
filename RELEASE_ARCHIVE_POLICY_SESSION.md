@@ -127,6 +127,10 @@ Follow-up items are tracked as GitHub issues after the `v0.0.8` release.
 ## 8. Team / evidence note
 
 Work was executed by the autonomous engineering agent (OpenCode) in an isolated session
-branch. When the "second brain" peer (GitHub Copilot) review was requested for this change,
-its output was treated as evidence to evaluate, not authority; every consequential change
-was independently re-verified against repository state.
+branch. A second-brain peer review (GitHub Copilot CLI) was requested via the controller's
+peer-invitation helper but the Copilot CLI was not available in this execution environment;
+this is recorded as a quality-degradation event, not a blocker. In its place the change was
+subjected to the repo's own CI gates (actionlint 1.7.12, PR packaging smoke, full build
+matrix), local script-syntax validation, an executed simulation of the actual
+inventory/preflight logic, and an adversarial self-review of the complete diff before
+publication.
