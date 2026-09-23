@@ -117,13 +117,13 @@ footprint), which is the cleanest before/after proving the policy diff.
 
 | Policy target | GitHub Actions | GitLab CI | Status |
 |---|---|---|---|
-| Windows standalone archive `.zip` | `Compress-Archive …\${PREFIX}.zip` (`release.yml` "Package Windows"); `.7z` present only as a commented-out disabled block | `.package_windows_outputs` → `Compress-Archive "$canonicalBase.zip"`; 7Z step removed | ✅ enforced |
-| Windows installers `.exe`/`.msi` | `cpack -G NSIS64/NSIS` + `cpack -G WIX` | `cpack -G $env:NSIS_GENERATOR` + best-effort `cpack -G WIX` | ✅ preserved |
-| Linux standalone archive `.tar.gz` | `tar -czf` of `instdir` | `tar -C instdir -czf …` | ✅ enforced |
-| Linux installers `.deb`/`.rpm` | `cpack -G DEB` + `cpack -G RPM` | `cpack -G DEB`/`-G RPM` (non-fatal on failure) | ✅ preserved |
-| macOS standalone archive `.zip` | `cmake -E tar cf … --format=zip` | `cpack -C Release -G ZIP` | ✅ enforced |
-| macOS installer `.dmg` | `cpack -G DragNDrop` (with busy-detach retry loop) | `cpack -C Release -G DragNDrop` (non-fatal) | ✅ preserved |
-| Source archives `.zip` + `.tar.gz` | `git archive` in `source` job | `git archive` in `create_release` | ✅ preserved |
+| Windows standalone archive `.zip` | `Compress-Archive …\${PREFIX}.zip` (`release.yml` "Package Windows"); `.7z` present only as a commented-out disabled block | `.package_windows_outputs` → `Compress-Archive "$canonicalBase.zip"`; 7Z step removed | enforced |
+| Windows installers `.exe`/`.msi` | `cpack -G NSIS64/NSIS` + `cpack -G WIX` | `cpack -G $env:NSIS_GENERATOR` + best-effort `cpack -G WIX` | preserved |
+| Linux standalone archive `.tar.gz` | `tar -czf` of `instdir` | `tar -C instdir -czf …` | enforced |
+| Linux installers `.deb`/`.rpm` | `cpack -G DEB` + `cpack -G RPM` | `cpack -G DEB`/`-G RPM` (non-fatal on failure) | preserved |
+| macOS standalone archive `.zip` | `cmake -E tar cf … --format=zip` | `cpack -C Release -G ZIP` | enforced |
+| macOS installer `.dmg` | `cpack -G DragNDrop` (with busy-detach retry loop) | `cpack -C Release -G DragNDrop` (non-fatal) | preserved |
+| Source archives `.zip` + `.tar.gz` | `git archive` in `source` job | `git archive` in `create_release` | preserved |
 
 ---
 
@@ -310,19 +310,19 @@ already met by `v0.0.9`:
 
 | Platform / consumer | Target (issue #130 policy) | Actual (v0.0.9) | Delta |
 |---|---|---|---|
-| Windows standalone | `.zip` | `.zip` ×9 | ✅ |
-| Windows installers | `.exe`, `.msi` (unchanged) | `.exe` ×9, `.msi` ×9 | ✅ |
-| Linux standalone | `.tar.gz` | `.tar.gz` ×5 | ✅ |
-| Linux installers | `.deb`, `.rpm` (unchanged) | `.deb` ×5, `.rpm` ×5 | ✅ |
-| macOS standalone | `.zip` | `.zip` ×6 | ✅ |
-| macOS installer | `.dmg` (unchanged) | `.dmg` ×6 | ✅ |
-| Source archives | unchanged | `.zip` + `.tar.gz` | ✅ |
-| `.7z` anywhere | absent | absent (commented-only in source) | ✅ |
-| Convenience dupes (Linux `.zip`, macOS `.tar.gz`) | absent | absent | ✅ |
-| Integrity | checksums | global `SHA256SUMS` (56 lines) | ✅ |
-| Provenance/trust | — (new) | attestation JSON (GitLab) only; no signatures/SBOM | ⚠ additive gap |
-| Signing/notarization | — (new) | none on any platform | ⚠ additive gap |
-| CI signal consistency | all surfaces green | Actions green; CircleCI statuses red/pending on same commit | ❌ fix |
+| Windows standalone | `.zip` | `.zip` ×9 | met |
+| Windows installers | `.exe`, `.msi` (unchanged) | `.exe` ×9, `.msi` ×9 | met |
+| Linux standalone | `.tar.gz` | `.tar.gz` ×5 | met |
+| Linux installers | `.deb`, `.rpm` (unchanged) | `.deb` ×5, `.rpm` ×5 | met |
+| macOS standalone | `.zip` | `.zip` ×6 | met |
+| macOS installer | `.dmg` (unchanged) | `.dmg` ×6 | met |
+| Source archives | unchanged | `.zip` + `.tar.gz` | met |
+| `.7z` anywhere | absent | absent (commented-only in source) | met |
+| Convenience dupes (Linux `.zip`, macOS `.tar.gz`) | absent | absent | met |
+| Integrity | checksums | global `SHA256SUMS` (56 lines) | met |
+| Provenance/trust | — (new) | attestation JSON (GitLab) only; no signatures/SBOM | additive gap |
+| Signing/notarization | — (new) | none on any platform | additive gap |
+| CI signal consistency | all surfaces green | Actions green; CircleCI statuses red/pending on same commit | fix |
 
 ---
 
