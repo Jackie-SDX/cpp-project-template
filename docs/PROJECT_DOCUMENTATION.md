@@ -1,13 +1,18 @@
-# C++ Project Template — Fork Lineage, Engineering Decisions, and Future Work
+# C++ Project Template — Engineering Documentation
 
 **Project:** `cpp-project-template`
-**Scope of this document:** a complete, evidence-based analysis of the repository's origins
-(`MangaD/cpp-project-template`), its intermediate fork (`NaylaCruz/cpp-project-template`), and the
-current fork (`Jackie-SDX/cpp-project-template`) — everything that was built, every decision taken,
-the alternatives that were considered, and the work still worth doing.
+**Scope of this document:** the single, consolidated engineering record for this repository. It
+covers the repository's origins (`MangaD/cpp-project-template`), its intermediate fork
+(`NaylaCruz/cpp-project-template`), and the current fork (`Jackie-SDX/cpp-project-template`) —
+everything that was built, every decision taken, the alternatives considered, the GitHub + GitLab
+merge notes, the standalone release archive policy and its session record, the 2026-09-23 compiler
+& architecture Q&A, and the work still worth doing. Content that previously lived in separate
+record files (`MERGE_NOTES.md`, `RELEASE_ARCHIVE_POLICY_SESSION.md`, and the proposed
+`docs/COMPILER_ABI_NOTES.md`) is consolidated here as a single document (see Sections 11-13).
 
 **Point in time:** snapshot taken against `Jackie-SDX/cpp-project-template` at
-`main` = `96240c0` (2026-09-21); `MangaD/cpp-project-template` at `71cae18` (2026-08-23);
+`main` = `96240c0` (2026-09-21), extended through the archive-policy releases `v0.0.8`/`v0.0.9`
+(2026-09-23, PRs #8/#9); `MangaD/cpp-project-template` at `71cae18` (2026-08-23);
 `NaylaCruz/cpp-project-template` at `522bc3a` (2026-09-18).
 
 ---
@@ -29,7 +34,7 @@ and **fixed a release-asset hygiene bug** in which temporary inventory manifests
 ([PR #6](https://github.com/Jackie-SDX/cpp-project-template/pull/6)).
 
 Every claim below was verified against the actual git history, the GitHub API, the live workflows, and the
-released assets of all three repositories. Section 12 carries the verification ledger.
+released assets of all three repositories. Section 14 carries the verification ledger.
 
 **At a glance:**
 
@@ -37,7 +42,7 @@ released assets of all three repositories. Section 12 carries the verification l
 |---|---|---|---|---|---|---|
 | `MangaD/cpp-project-template` (original) | 2023-06-02 | 72 | 82 | 4 | 129 lines | `v0.0.1` (20 assets) |
 | `NaylaCruz/cpp-project-template` (intermediate) | 2026-08-29 | 335 | ~118 | ~12 | ~2 600 lines | `v0.0.4` … `v7.7.9` (up to 100 assets) |
-| `Jackie-SDX/cpp-project-template` (current) | 2026-08-22 | 339 | 122 | 11 | 2 606 lines | `v0.0.2` (96), `v0.0.3` (88), `v0.0.4` (88) |
+| `Jackie-SDX/cpp-project-template` (current) | 2026-08-22 | 339 | 122 | 11 | 2 606 lines | `v0.0.2` (96), `v0.0.3`/`v0.0.4`/`v0.0.5` (88), `v0.0.8` (68), `v0.0.9` (57) |
 
 ---
 
@@ -209,7 +214,9 @@ current pipeline. Commit message histogram over that range:
 - **Branches:** `main` plus `experimental/all-platforms-architectures-v2` namespace, smoke branches,
   and a stale `ci/remove-android` (already merged via PR #5).
 - **Releases:** `v0.0.1` (an early smoke tag), `v0.0.2` (96 assets, pre-Android-removal), `v0.0.3`
-  (88 assets, post PR #5), `v0.0.4` (88 assets, post PR #6, flagged prerelease).
+  (88 assets, post PR #5), `v0.0.4` (88 assets, post PR #6, flagged prerelease), `v0.0.5`
+  (pre-release, 88 assets), `v0.0.8` (68 assets, PR #8 archive-policy), `v0.0.9`
+  (57 assets, PR #9 strict one-archive-per-platform).
 
 ### 5.2 Changes owned by the current fork (relative to NaylaCruz `522bc3a`)
 
@@ -220,17 +227,21 @@ current pipeline. Commit message histogram over that range:
 1. **`6b1bd2e` — opencode workflow.** Adds `.github/workflows/opencode.yml`, which answers `issue_comment`
    and PR-review comments containing `/oc` or `/opencode`. This is the automation entrypoint used by the
    controlling agent infrastructure; it intentionally does minimal work (checkout + single agent action).
-2. **PR #5 (`e79bddc`) — remove Android; document workflows.** Stripped all Android/NDK support
+  2. **PR #5 (`e79bddc`) — remove Android; document workflows.** Stripped all Android/NDK support
    (workflow, packager script, manifest/activity) and added a Purpose/Trigger/References banner with
    documentation links to *every* remaining workflow. Re-verified with `actionlint` 1.7.12, `yamllint`,
    `cmake -P configure.cmake` smoke, and `git diff --check`.
-3. **PR #6 (`96240c0`) — release-asset hygiene.** The `validate-release` and `publish` jobs wrote their
+  3. **PR #6 (`96240c0`) — release-asset hygiene.** The `validate-release` and `publish` jobs wrote their
    comparison manifests (`expected.txt`/`actual.txt`/`expected.sorted`/`actual.sorted`) into
    `release-assets/`, which `softprops/action-gh-release` uploads via `release-assets/*` — so every
    release carried 4 junk files. Both jobs now `rm -f` the manifests after the comparison; the stale
-   files were also deleted from existing releases, and `MERGE_NOTES.md` was rewritten in neutral voice.
-4. **`v0.0.3` / `v0.0.4` releases** with clean 88-asset inventories (85 packages + 2 source archives +
+   files were also deleted from existing releases, and the merge notes (now § 12) were rewritten in a
+   neutral voice.
+  4. **`v0.0.3` / `v0.0.4` releases** with clean 88-asset inventories (85 packages + 2 source archives +
    `SHA256SUMS`).
+  5. **2026-09-23 archive-policy releases.** PR #8 (`959f475`) retired the 20 `.7z` archives; PR #9
+   (`a0503fd`) enforced the strict one-archive-per-platform rule and shipped final asset totals of 68
+   (`v0.0.8`) and 57 (`v0.0.9`) — see § 6.5 and § 13.
 
 ---
 
@@ -242,8 +253,9 @@ current pipeline. Commit message histogram over that range:
 - **Added (42 files):** `.circleci/config.yml`; nine workflows (`ci.yml`,
   `experimental-platform-matrix.yml`, `opencode.yml`, `release.yml`, `vcpkg-cache-warmup.yml`,
   `windows-arm64-package-smoke.yml`, `windows-package-smoke.yml`, `windows-test.yml`,
-  `workflow-lint.yml`); the `.gitlab/vcpkg-triplets/` tree (18 CMake triplet files incl. the
-  `x64-win-llvm` chainloaded toolchain); `BUGS.txt`, `MERGE_NOTES.md`, `cmake/PackageManager.cmake`,
+`workflow-lint.yml`); the `.gitlab/vcpkg-triplets/` tree (18 CMake triplet files incl. the
+   `x64-win-llvm` chainloaded toolchain); `BUGS.txt` (since retired — content absorbed into § 13),
+   `MERGE_NOTES.md` (since retired — content absorbed into § 12), `cmake/PackageManager.cmake`,
   `conanfile.txt`, `vcpkg.json`, five ADRs (`docs/architecture/decisions/001…005`), and two scripts
   (`scripts/generate_coverage.sh`, `scripts/run_clang_tidy.sh`).
 - **Removed (2 files):** `.github/workflows/build-debug.yml`, `.github/workflows/build-release.yml`
@@ -321,7 +333,8 @@ steps the same day:
   3×7=21, Windows ARM64 3×2=6, Linux 3×5=15, macOS 2×6=12), global `SHA256SUMS` 87 → 67 → **56**
   lines, release assets 88 → 68 → **57** (54 + 2 source archives + `SHA256SUMS`).
 - Decision context, actions taken, validation evidence, and residual follow-ups are recorded in
-  `RELEASE_ARCHIVE_POLICY_SESSION.md` (which replaces the obsolete root `BUGS.txt`).
+  § 13 (Release Archive Policy — Session Record), which replaces the obsolete root `BUGS.txt` (the
+  former `RELEASE_ARCHIVE_POLICY_SESSION.md`, whose content now lives in this document).
 
 ---
 
@@ -329,7 +342,7 @@ steps the same day:
 
 ### 7.1 D1 — Absorb the divergent GitHub/GitLab copies into one repo
 **Decision:** consolidate both pipelines, triplets, scripts, and source fixes into one tree
-(see `MERGE_NOTES.md`).
+(see § 12, Merge Notes).
 **Rationale:** the two copies had genuinely diverged (different CMake flags, opposite CRT linkage,
 different triplet sets, different bug fixes). Keeping one source of truth prevents silent drift.
 **Alternatives:** leave both copies live and keep a sync job (rejected — drift already bit twice);
@@ -410,7 +423,7 @@ breaks the classic static triplets).
 **Decision:** `vX.Y.Z → X.Y.Z` validated once (`resolve_version` anchors in GitLab; `CPP_PROJECT_TEMPLATE_VERSION`
 argument from the tag in GitHub), local builds stay `0.0.1.0`.
 **Rationale:** the release number is derived consistently instead of re-parsed per job (a known
-fragility — see the `canonical_package_name.txt` note in `MERGE_NOTES.md`, a candidate future change).
+fragility — see the `canonical_package_name.txt` note in § 12, a candidate future change).
 **Alternatives:** per-job sed on `CPackConfig.cmake` (rejected — fragile, still used on GitHub side);
 hardcode (rejected).
 
@@ -491,8 +504,8 @@ maintenance) with tag-scoped rules so release tags skip non-consumed jobs, honor
    must be bumped together; there is no Dependabot config in the tree yet.
 7. **Conan is configured but not CI-provisioned** — `PACKAGE_MANAGER=conan2` works locally but no
    pipeline runs `conan install` (by design, D9).
-8. **The root bug ledger was consolidated into the release-archive-policy session document**
-   (`RELEASE_ARCHIVE_POLICY_SESSION.md`, replacing `BUGS.txt`); the legacy Windows MinGW/LLVM vcpkg
+8. **The root bug ledger was consolidated into the release-archive-policy session record**
+   (§ 13, replacing `BUGS.txt`); the legacy Windows MinGW/LLVM vcpkg
    cache observability and ARM64 Windows package-smoke follow-ups carry over there.
 9. Minor: `packaging/windows/version.rc.in` still uses the old project-author identity in places;
    `CITATION.cff` still points at MangaD URLs.
@@ -511,7 +524,7 @@ maintenance) with tag-scoped rules so release tags skip non-consumed jobs, honor
   distinguish Actions-cache hits, vcpkg binary-cache hits, and source rebuilds in logs.
 - **Native ARM64 Windows package smoke** — promote once the known bug is fixed.
 - **Migrate GitHub release name extraction** to the same `canonical_package_name.txt` written by
-  `cpack_module.cmake` (noted in `MERGE_NOTES.md` as the fragile `sed` on `CPackConfig.cmake`).
+  `cpack_module.cmake` (noted in § 12 as the fragile `sed` on `CPackConfig.cmake`).
 
 **Product / build**
 - Make `conan2` the default once `conan install` is wired into every CI config that needs it (D9).
@@ -530,7 +543,370 @@ maintenance) with tag-scoped rules so release tags skip non-consumed jobs, honor
 
 ---
 
-## 11. Verification Ledger (evidence cited in this document)
+## 11. Compiler & Architecture Q&A (2026-09-23)
+
+Answers recorded from issue #130 ("UPDATE ON DISTANT REPO") on the controlling fork, consolidated
+here as the single in-tree reference. The architecture items are **recommendations**, not accepted
+policy — record them as candidates and implement only where they clearly help.
+
+### 11.1 Q: What is the difference between "CLANG" and "LLVM" in the matrix?
+
+**macOS**
+
+- **macOS Clang (apple-clang):** Apple's own fork of Clang shipped with Xcode/Command Line Tools
+  (what our `macos-apple-clang-*` artifacts use). Patched and versioned by Apple, tightly coupled to
+  the Apple SDK, default toolchain on a Mac.
+- **macOS LLVM:** upstream Clang/LLVM straight from the LLVM project (e.g. Homebrew `llvm` or an
+  official LLVM release). Same compiler family, but stock/upstream — usually newer than Apple's
+  build, no Apple-specific patches, and you point it at the SDK yourself.
+
+So: both are Clang; "apple-clang" = Apple's Xcode fork, "llvm" = upstream LLVM project build.
+
+**Windows**
+
+- Unlike macOS there is **no vendor fork** — on Windows, Clang *is* part of upstream LLVM, so
+  "Windows Clang" and "Windows LLVM" are effectively the same toolchain. Any practical difference is
+  just packaging/integration: standalone LLVM installer vs Clang bundled elsewhere, and driver mode
+  (clang-cl with MSVC headers/libs/ABI vs GNU-style driver).
+- The genuinely different Windows compiler in our matrix is **MSVC (`cl`)** — Visual Studio's own
+  compiler, not LLVM at all. (MinGW is a third variant: GCC toolchain, or Clang in GNU/MinGW mode.)
+
+### 11.2 Q: Are the architecture names the best? (i686, x86_64, arm64)
+
+Short verdict: yes, they're good — those are the de-facto toolchain conventions
+(`uname -m`/CMake/GCC style), so nothing is wrong. But there are a few refinements worth considering.
+
+**Per-arch notes**
+
+- **x86_64** — keep it. It's the most neutral, toolchain-faithful label (what `uname -m`,
+  `CMAKE_SYSTEM_PROCESSOR`, and GCC emit). The alternatives are ecosystem-specific: `amd64`
+  (Go, Debian, Rust targets, the kernel) and `x64` (Windows, Node, .NET RID). The only real trap is
+  mixing them: e.g. the CI smoke names `linux-gcc-x64.zip` while release artifacts use `x86_64`.
+  Pick exactly one canonical token and enforce it across every workflow.
+- **arm64** — fine as a cross-platform choice (matches macOS/Windows/.NET `osx-arm64`/`arm64`), but
+  Linux tooling calls this `aarch64` (`uname -m`, GCC triplets, Debian/Ubuntu). Since the scheme
+  spans all three OSes, `arm64` is a reasonable canonical form — just publish a mapping table
+  (`arm64 ↔ aarch64`) in the release docs so a Linux user can match an artifact to `uname -m`. If a
+  Linux-only namespace is ever shipped, `aarch64` is the drop-in-faithful choice there.
+- **i686** — legitimate: the conventional 32-bit x86 baseline (Pentium Pro ABI, what
+  glibc/debian i386 builds assume). If 32-bit is needed at all, `i686` is the right label. The only
+  real question is whether 32-bit support is needed at all: x86-32 is being retired across the
+  ecosystem (distros, LLVM, most prebuilt deps), so if nothing consumes it, dropping it saves build
+  inventory and CI time.
+
+**General improvements (recommendations)**
+
+1. **One canonical token per arch** — define `x86_64`, `i686`, `arm64` (or whatever is chosen) as
+   the *only* strings allowed in names/globs/validators, and grep CI for stray `x64`/`amd64`/
+   `aarch64` variants.
+2. **Add a small arch-mapping table in the release docs** — `artifact arch → uname -m → Python
+   platform.machine() → .NET RID`, so anyone can map an asset to their machine.
+3. **Keep the `platform-compiler-arch` order** — `linux-clang-arm64` already reads well; just keep
+   it consistent, including the short form users see.
+4. **If architectures expand later**, mirror the standard GNU triplets (`armv7l`/`armhf`,
+   `ppc64le`, `riscv64`, …) rather than inventing names.
+
+Net: the names are standard and defensible; the only *actual* issues are the `x86_64`/`x64`
+inconsistency and the undocumented `arm64`↔`aarch64` split.
+
+### 11.3 Q: Are there benefits to compiling across all these compiler variants?
+
+Yes — for a distributed C++ project, building across the compiler matrix has real benefits:
+
+**Real benefits**
+
+- **Different compilers catch different bugs.** MSVC, GCC, and Clang each have their own
+  diagnostics, default warning levels, and standards-conformance strictness. Code that compiles
+  cleanly on all three is almost always more portable and standard-compliant than code that only
+  builds on one.
+- **Portability proof.** Each compiler parses templates, UB-prone constructs, and standard-library
+  usage slightly differently. A green matrix is real evidence the code isn't relying on one
+  toolchain's quirks.
+- **Users get a native match.** An MSVC user wants an MSVC-built `.exe`/`.msi` (matching their
+  runtime, e.g. CRT), a MinGW user wants a GNU-ABI binary, and so on. Prebuilt artifacts per
+  compiler mean fewer "won't run on my machine" reports.
+- **Divergent optimizations/codegen.** Compilers optimize differently; building with all of them can
+  expose latent bugs (e.g. miscompilation-sensitive code) and gives a sanity check that performance
+  is in the same ballpark.
+
+**Where it has diminishing returns**
+
+- **Windows Clang vs LLVM** are effectively the same upstream toolchain (as discussed above) — that
+  pairing is mostly packaging/integration coverage, not independent compiler coverage.
+- **Apple-clang vs Homebrew LLVM on macOS** is the same Clang family; the value is SDK/version
+  coverage more than a second opinion.
+- The genuinely distinct "brains" in the matrix are: **MSVC, GCC, Clang/LLVM (incl. MinGW as its ABI
+  flavor), and Apple-clang as a vendor fork.** Those provide the independent bug-catching.
+
+**Bottom line:** keep at least one build from each genuinely distinct compiler family (MSVC, GCC,
+Clang, Apple-clang). Beyond that, extra variants mainly buy ABI/packaging coverage (MinGW,
+clang-cl) and CI cost rather than much additional bug-finding. If CI time ever becomes a pain, the
+first things to trim are duplicate legs like Clang-vs-LLVM on the same OS, not the four core
+families.
+
+---
+
+## 12. Merge Notes: GitHub Copy + GitLab Copy
+
+Records how the GitHub (`cpp-project-template-main`) and GitLab (`bs-main`) copies of the template
+were merged into this single repository, and the reasoning behind each decision. Reference material
+for reviewers; does not affect the build or releases.
+
+### 12.1 Summary of decisions
+
+- **`.github/workflows/*` + `.github/scripts/*`** — taken from the GitHub copy, wholesale.
+  `.gitlab-ci.yml` never calls these scripts, so the GitLab-side copies of them were dead/stale
+  files rather than an intentional GitLab-only change.
+- **`.gitlab/.gitlab-ci.yml` + `.gitlab/vcpkg-triplets/*`** (except the four files called out
+  below) — taken from the GitLab copy, wholesale. That is the actively used, far larger (124 KB vs
+  14 KB) pipeline; the GitHub-side copy of it was the stale template default.
+- **`CMakePresets.json`, `CTestConfig.cmake`, `CITATION.cff`, `conanfile.txt`,
+  `cmake/PackageManager.cmake`, `scripts/generate_coverage.sh`** — taken from the GitLab copy. Each
+  carries a dated comment describing a real, specific bug it fixes (wrong CDash project, a coverage
+  regex that never matched, RPM license format, etc.) and none conflict with the GitHub side.
+- **`tutorial_1.hpp`, `tutorial_1_gtest.cpp`, `UserOpt.cpp`, `utils.cpp`,
+  `projectwx/src/CMakeLists.txt`** — taken from the GitHub copy. In every case the GitHub version
+  contains a genuine fix the GitLab version lacks (overflow/negative checks in `factorial()`, a
+  character-dropping bug in `wordWrap()`, ARM64 Windows support, verified by reading the logic).
+- **Hand-merged files (not taken wholesale from either side):** root `CMakeLists.txt`, the four
+  classic Windows vcpkg triplets, `src/projectlib/test/CMakeLists.txt`, and
+  `cmake/cpack_module.cmake`. Details below.
+- **`BUGS.txt`** (GitHub-only) and **`.circleci/`** (GitLab-only) were carried over as pure
+  additions; neither pipeline references the other's extra file. `.circleci/` is unused and can be
+  removed if the project will not use CircleCI.
+
+### 12.2 Static vs. dynamic CRT on Windows
+
+The root `CMakeLists.txt` is different between the two copies for a deeper reason than one file:
+
+- GitHub's `CMakeLists.txt` forces the MSVC runtime to static
+  (`CMAKE_MSVC_RUNTIME_LIBRARY`), justified in its own comment as "consistent with the existing
+  GitHub static-vcpkg toolchain". GitLab's does not set it (CMake defaults to dynamic). The same
+  split is mirrored in the four "classic" vcpkg triplets that exist in both `.gitlab/vcpkg-triplets/`
+  trees with the same filenames but opposite `VCPKG_CRT_LINKAGE` — GitHub: static, GitLab: dynamic.
+  Mixing a statically-linked project with dynamically-linked vcpkg dependencies (or vice versa)
+  fails at link time.
+- Resolution: GitHub's own `windows-test.yml` (a workflow that only exists in the GitHub copy)
+  cross-validates this exact question — it clones the GitLab repo, overlays GitHub's
+  `.gitlab/vcpkg-triplets/` on top, and builds and tests the result. Combined with GitHub's
+  static-CRT comment pointing at the same triplets, GitHub's `static` value is the configuration that
+  is actually validated. Therefore the four classic triplet files keep GitHub's `static` value;
+  GitLab's extra comments on the two `-debug` variants (a real zlib/wxWidgets header-install
+  ordering issue) were kept as documentation.
+- GitLab separately added real, working LLVM/Clang-CL cross-compilation support
+  (`x64-win-llvm`, `x86-win-llvm`, `Clang-CL-override.cmake`, etc.) that deliberately uses
+  **dynamic** CRT via its own chainloaded toolchain file. Had GitHub's static override been kept as a
+  plain `set(CMAKE_MSVC_RUNTIME_LIBRARY ...)`, it would silently win over that toolchain file and
+  break the LLVM path. The merged `CMakeLists.txt` therefore sets
+  `CMAKE_MSVC_RUNTIME_LIBRARY_DEFAULT` instead — a default that the LLVM toolchain file's own
+  (later-executing) setting can override.
+- The same conflict existed one level down in `src/projectlib/test/CMakeLists.txt`, where the MSVC
+  branch directly forces the test target's runtime library. That branch is now skipped under clang-cl
+  (`AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang"`) so it cannot override the LLVM path there
+  either. Both fixes are explained in comments at the point they are made.
+- First place to watch after merging is the "Windows LLVM x64" leg in `ci.yml` and the GitLab
+  LLVM/Clang-CL jobs: if `CMAKE_MSVC_RUNTIME_LIBRARY_DEFAULT` and the clang-cl skip do not compose as
+  documented, a CRT-mismatch linker error appears there — an isolated, easy-to-spot failure mode.
+
+### 12.3 `cmake/cpack_module.cmake`
+
+Neither side was a strict superset here, so it was hand-merged:
+
+- Base: **GitHub's** version. It fixes a real bug still present in GitLab's — a
+  `CPACK_NSIS_DEFINES` block with quoted `VIAddVersionKey` arguments that produces malformed NSIS
+  commands — and uses safer `file(TO_CMAKE_PATH ...)` path handling instead of raw backslash
+  escapes.
+- Added back from **GitLab**: the `canonical_package_name.txt` write. `.gitlab-ci.yml`'s packaging
+  jobs read that file back and hard-fail if it is missing. It is a pure addition and does not affect
+  GitHub's release process, which extracts the package name its own way (a `sed` pattern over
+  `CPackConfig.cmake` in `release.yml`). GitLab's own comment notes that sed approach is the fragile
+  one; migrating `release.yml` to read the same file is a candidate future change but was
+  deliberately not made unrequested.
+- Also added back from **GitLab**: `CPACK_DMG_BACKGROUND_IMAGE` for the macOS installer (cosmetic).
+
+### 12.4 Carried over from GitLab as-is
+
+`x64-win-llvm.cmake`, `x64-win-llvm-release.cmake`, `x86-win-llvm.cmake`, `Clang-CL-C.cmake`,
+`Clang-CL-CXX.cmake`, `Clang-CL-override.cmake`, `Windows-MSVC.cmake`, `extra_setup.cmake`,
+`port_specialization.cmake`, and the `x64-win-llvm/` subfolder. These are referenced only by
+`.gitlab-ci.yml` — GitHub's workflows get their LLVM triplet from a separate external repository
+(`Neumann-A/my-vcpkg-triplets`, pinned in `ci.yml` / `release.yml`) — so there is no overlap to
+resolve.
+
+### 12.5 Pre-existing items intentionally not changed
+
+- Some files still say `MangaD` / `David Gonçalves` (the original template's upstream identity —
+  e.g. `CITATION.cff`'s ORCID, a test file's `@author` doc-comment) while `CMakeLists.txt` uses
+  `NaylaCruz`. This inconsistency pre-existed in both copies and is a leftover-templating cleanup,
+  not a merge conflict.
+- `src/projectwx/src/CMakeLists.txt` has one more `)` than `(` by a naive paren count; the imbalance
+  is inside a commented-out line (`#MSVC_RUNTIME_LIBRARY ...DLL")`), present in GitHub's original
+  file, and is not a real imbalance.
+
+---
+
+## 13. Release Archive Policy — Session Record (2026-09-23)
+
+Session record for the 2026-09-23 changes to the standalone release archive policy on this
+repository, including the shift to the **strict one-archive-per-platform** rule for `v0.0.9`. This
+section absorbs the former root `RELEASE_ARCHIVE_POLICY_SESSION.md` and replaces the obsolete root
+`BUGS.txt` (which has served its purpose: all items it listed are resolved or carried forward in
+§ 13.7 below).
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-23 |
+| Target repository | `Jackie-SDX/cpp-project-template` |
+| Origin | Issue #130 ("UPDATE ON DISTANT REPO") on the controlling fork |
+| Affected releases | `v0.0.8`, `v0.0.9` |
+| Document scope | Plan, actions, decisions, bugs observed, validation evidence, follow-ups |
+
+### 13.1 Objective
+
+Harden the standalone release archive policy so every upload "just works" for the platform it
+targets.
+
+Policy history on this date:
+
+- **`v0.0.8` (Option A, merged via PR #8):** removed the 20 `.7z` standalone archives entirely;
+  kept the Linux `.zip` and macOS `.tar.gz` convenience archives; installers and source archives
+  untouched.
+- **`v0.0.9` (strict policy, supersedes Option A):** after inspection, the existing `v0.0.8` assets
+  still shipped two standalone archives per Linux/macOS toolchain (Linux `.zip` + `.tar.gz`, macOS
+  `.tar.gz` + `.zip`). Per explicit owner direction in the issue thread, the convenience archives
+  were dropped so **each platform ships exactly one standalone archive per toolchain**.
+
+### 13.2 New policy (current, `v0.0.9`)
+
+| Platform | Standalone archive (only) | Installers (unchanged) |
+|---|---|---|
+| Windows | `.zip` | `.exe` (NSIS), `.msi` (WiX) |
+| Linux | `.tar.gz` | `.deb`, `.rpm` |
+| macOS | `.zip` | `.dmg` |
+
+`.7z` is never generated, uploaded, checksummed, or published. The historical Windows
+`cpack -G 7Z` alternative remains in the source as a **commented-out, disabled block** in the
+Windows packaging steps so the option stays documented without shipping (see
+`.github/workflows/release.yml`, `.github/workflows/windows-package-smoke.yml`,
+`.github/workflows/windows-arm64-package-smoke.yml`, and GitLab parity comments). The
+`7zip`/`7z` tool provisioning retained by the Windows runners exists solely so the commented
+alternative can be restored as-is.
+
+### 13.3 Inventory math
+
+| Class | Before (85) | After Option A (65) | After strict policy (54) |
+|---|---|---|---|
+| Windows core packages (7 toolchains × 3 formats) | 28 | 21 | 21 |
+| Windows ARM64 packages (2 × 3 formats) | 8 | 6 | 6 |
+| Linux packages (5 × 3 formats) | 25 | 20 | 15 |
+| macOS packages (6 × 3 formats) | 24 | 18 | 12 |
+| **Total packages** | **85** | **65** | **54** |
+| Source archives | 2 | 2 | 2 |
+| Global `SHA256SUMS` lines | 87 | 67 | 56 |
+| Release assets | 88 | 68 | 57 |
+
+### 13.4 Bugs and observations found during inspection
+
+- `vcpkg-cache-warmup.yml` provisions `7zip` on the Windows runner and uses `7z | Select-Object
+  -First 1` purely as a version probe — tooling, not artifact generation; left unchanged.
+- `docs/install.md` lines 243-244 point at third-party `mingw-builds-binaries` `.7z` downloads
+  (niXman releases) — third-party toolchain archives, out of scope; left unchanged.
+- `cmake/cpack_module.cmake` and the top-level `CMakeLists.txt` contain no `.7z` logic — no changes
+  needed there.
+- No `.7z` references exist under `.circleci/`, `HISTORICAL/`, `packaging/`, or `scripts/`.
+- `v0.0.5` (a historical prerelease) still carries 88 assets including `.7z`; that is a historical
+  tag and is intentionally left untouched.
+- `v0.0.8` still shipped Linux `.zip` and macOS `.tar.gz` convenience archives alongside the
+  canonical archives. This was the direct trigger for the strict one-archive-per-platform policy in
+  `v0.0.9`.
+
+### 13.5 Files changed
+
+GitHub Actions workflows (`v0.0.8` + `v0.0.9` combined):
+
+- `.github/workflows/release.yml`:
+  - `v0.0.8`: header + policy banner; removed the two `(cd instdir && cmake -E tar cf ...
+    --format=7zip .)` lines in the `package` and `expanded-package` Linux/macOS steps; removed the
+    `cmake -E tar --format=7zip` block in the `expanded-package` Windows step; commented-out the
+    `cpack -G 7Z` alternative in the `package` "Package Windows" step; removed `.7z` from the
+    expected/actual inventory globs and printf lists in `validate-release` and `publish`; updated
+    counts 85 → 65 and `SHA256SUMS` 87 → 67.
+  - `v0.0.9` (strict): removed the Linux `(cd instdir && cmake -E tar cf
+    "../release-assets/${PREFIX}.zip" --format=zip .)` lines in the `package`, `package-smoke`, and
+    `expanded-package` Linux steps; removed the macOS `(cd instdir && tar -czf
+    "../release-assets/${PREFIX}.tar.gz" .)` lines in the `package` and `expanded-package` macOS
+    steps; removed the corresponding `.zip` / `.tar.gz` entries from the expected/actual inventory
+    printf lists and globs in `validate-release` and `publish`; updated counts 65 → 54 and
+    `SHA256SUMS` 67 → 56; header + policy banner rewritten with the strict policy.
+- `.github/workflows/ci.yml`:
+  - `v0.0.8`: Linux packaging smoke no longer generates or asserts `linux-gcc-x64.7z`.
+  - `v0.0.9`: Linux packaging smoke no longer generates or asserts `linux-gcc-x64.zip`.
+- `.github/workflows/windows-package-smoke.yml` — header; `cpack -G 7Z` block now a commented-out
+  disabled alternative; `.7z` removed from the expected-artifacts list.
+- `.github/workflows/windows-arm64-package-smoke.yml` — header; `cpack -G 7Z` block now a
+  commented-out disabled alternative; `.7z` removed from the expected list and the `Get-FileHash`
+  glob.
+- `.gitlab/.gitlab-ci.yml`:
+  - `v0.0.8`: removed the Windows `cpack -C Release -G 7Z` step and the `*.7z` copy/upload in the
+    Windows/Linux/macOS legs (with comments documenting the policy); updated related format mentions
+    in comments.
+  - `v0.0.9`: Linux legs no longer run `cpack -C Release -G ZIP` or copy `*.zip`; the macOS leg no
+    longer manually builds `release-assets/${CANONICAL_BASE}.tar.gz` (the `.zip` from CPack's ZIP
+    generator remains); comments updated to the strict policy.
+
+Documentation (`v0.0.8` + `v0.0.9` combined):
+
+- `docs/PROJECT_DOCUMENTATION.md` — current-pipeline inventory count reflected for Option A
+  (65 / 67) and then the strict policy (54 / 56); release-flow ascii diagram updated; § 6.5
+  archive-format policy decision record updated to the strict one-archive-per-platform rule; the
+  session record itself consolidated into § 13 (this section).
+- `docs/install.md` — Archive section (see § 6.5) now documents the single-archive-per-platform
+  policy table (Windows `.zip`, Linux `.tar.gz`, macOS `.zip`).
+- `RELEASE_ARCHIVE_POLICY_SESSION.md` — deleted; content absorbed into this section.
+- `BUGS.txt` — deleted (obsolete; residual follow-ups carried into § 13.7).
+
+### 13.6 Validation
+
+- YAML parse of every edited workflow plus `workflow-lint.yml`'s `actionlint` gate.
+- PowerShell/bash syntax checks of the edited inline script blocks.
+- Grep proof: no active (non-comment) `.7z` path remains anywhere in the pipeline (GitHub Actions +
+  GitLab CI); no active Linux `.zip` or macOS `.tar.gz` generation path remains in the pipeline.
+- Refactored inventory-validator simulation: 54 expected packages, 56 `SHA256SUMS` lines, 57 release
+  assets.
+- CI verification on the pull request branch (GitHub Actions) before merge.
+- Post-release asset inspection of `v0.0.8` via the GitHub API: 68 assets, correct extensions, no
+  `.7z`; the remaining duplicate-archive shape (Linux `.zip`, macOS `.tar.gz`) documented and fixed
+  in `v0.0.9`.
+- Post-release asset inspection of `v0.0.9` via the GitHub API: 57 assets, exactly one standalone
+  archive per platform/toolchain, no `.7z`.
+
+### 13.7 Residual follow-ups (carried over from `BUGS.txt`)
+
+1. **Windows MinGW CI** — investigate deterministic toolchain provisioning, ABI-stable cache
+   namespaces, and whether the desired vcpkg packages are actually restored versus rebuilt.
+2. **Windows LLVM CI** — investigate deterministic LLVM toolchain discovery, exact ABI
+   compatibility, and package-level binary-cache reuse.
+3. **Cache observability** — distinguish GitHub Actions archive hits, vcpkg binary-cache hits, and
+   source rebuilds in logs; a successful Actions cache step is not proof that vcpkg skipped
+   compilation.
+4. **ARM64 Windows package smoke** — remains a separately documented known bug and is intentionally
+   left unchanged.
+
+Follow-up items are tracked as GitHub issues after the `v0.0.9` release.
+
+### 13.8 Team / evidence note
+
+Work was executed by the autonomous engineering agent (OpenCode) in an isolated session branch. A
+second-brain peer review (GitHub Copilot CLI) was requested via the controller's peer-invitation
+helper but the Copilot CLI was not available in that execution environment; this is recorded as a
+quality-degradation event, not a blocker. In its place the change was subjected to the repo's own CI
+gates (actionlint 1.7.12, PR packaging smoke, full build matrix), local script-syntax validation, an
+executed simulation of the actual inventory/preflight logic, and an adversarial self-review of the
+complete diff before publication.
+
+---
+
+## 14. Verification Ledger (evidence cited in this document)
 
 | # | Claim | Evidence |
 |---|---|---|
@@ -544,23 +920,30 @@ maintenance) with tag-scoped rules so release tags skip non-consumed jobs, honor
 | E8 | Post-merge CI / Lint / Doxygen / vcpkg warmup green on `96240c0`; Release runs green for `v0.0.3`/`v0.0.4` | GitHub Actions run history (listed in §1–§5) |
 | E9 | Original release `v0.0.1` = 20 assets, version `1.0.0.0` | GitHub API `MangaD/cpp-project-template/releases/tags/v0.0.1` |
 | E10 | Source bug fixes present (factorial/wordWrap) and correct | diff `71cae18…96240c0` for the four source files |
-| E11 | Manager abstraction, ADRs, MERGE_NOTES, CMakePresets content | full-text reads of those files at `96240c0`; the root `BUGS.txt` was later replaced by `RELEASE_ARCHIVE_POLICY_SESSION.md` |
+| E11 | Manager abstraction, ADRs, merge notes (§ 12), CMakePresets content | full-text reads of those files at `96240c0`; the root `BUGS.txt` was later replaced by the session record consolidated into § 13 |
 | E12 | CI transient earlier: one Windows CLANGARM64 MinGW Debug flake in msys2 `paccache` (rerun green) | run log from the pointing run; unrelated to the doc’s claims |
+| E13 | § 11 Q&A (LLVM vs Clang; arch-naming review; multi-compiler benefits) reproduces the issue #130 answers verbatim | issue #130 comments `5798570508`, `5798660594`, `5798725416` on the controlling fork |
+| E14 | § 12 Merge Notes reproduces the former `MERGE_NOTES.md`; § 13 reproduces the former `RELEASE_ARCHIVE_POLICY_SESSION.md` (incl. `BUGS.txt` residuals); both standalone files deleted | full-text reads at `eec83c9`; `git rm` record in the consolidation commit |
+| E15 | `v0.0.8` = 68 assets, `v0.0.9` = 57 assets, exactly one standalone archive per platform/toolchain, no `.7z` | GitHub API `releases/tags/{v0.0.8,v0.0.9}` asset lists (2026-09-23) |
+| E16 | Consolidation is docs-only: no workflow/CMake/source change, no `.7z`/`.zip`/`.tar.gz` references re-introduced | PR diff scope; `actionlint` gate green on the branch |
 
 ---
 
-## 12. References
+## 15. References
 
 - Original repo: https://github.com/MangaD/cpp-project-template
 - Intermediate fork: https://github.com/NaylaCruz/cpp-project-template
 - Current fork: https://github.com/Jackie-SDX/cpp-project-template
 - PR #5 (Android removal + workflow docs): https://github.com/Jackie-SDX/cpp-project-template/pull/5
 - PR #6 (release-asset hygiene): https://github.com/Jackie-SDX/cpp-project-template/pull/6
-- Releases: `v0.0.2` / `v0.0.3` / `v0.0.4` on the current fork.
-- In-repo records merged at `96240c0`: `MERGE_NOTES.md`,
+- Releases: `v0.0.2` / `v0.0.3` / `v0.0.4` / `v0.0.5` (88 assets), `v0.0.8` (68 assets),
+  `v0.0.9` (57 assets) on the current fork.
+- Issue #130 ("UPDATE ON DISTANT REPO") on the controlling fork — origin of the archive-policy
+  (PRs #8/#9) and the compiler & architecture Q&A recorded in § 11.
+- In-repo records merged at `96240c0`: the merge notes (consolidated into § 12),
   `docs/architecture/decisions/001…005`, `TODO.md`, `README.md`. The root bug
-  ledger (`BUGS.txt`) was retired and replaced by `RELEASE_ARCHIVE_POLICY_SESSION.md` as part of the
-  2026-09 archive-format policy change.
+  ledger (`BUGS.txt`) was retired and replaced by the release-archive-policy session record
+  (consolidated into § 13) as part of the 2026-09 archive-format policy change.
 
 ---
 

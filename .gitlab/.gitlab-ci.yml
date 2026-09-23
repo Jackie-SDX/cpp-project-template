@@ -2060,7 +2060,7 @@ clear_cache:
     # Standalone archive policy (2026-09-23): Windows ships .zip only; the
     # historical `cpack -C Release -G 7Z` step (and its .7z copy/upload below)
     # has been removed. Restore it only behind an explicit re-review of the
-    # policy recorded in docs/RELEASE_ARCHIVE_POLICY_SESSION.md.
+    # policy recorded in docs/PROJECT_DOCUMENTATION.md § 13.
     Pop-Location
 
     # NSIS and WiX have no "output file name" override variable -- checked

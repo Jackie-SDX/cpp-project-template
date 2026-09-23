@@ -454,8 +454,8 @@ cmake --build . --config Release
 <a id="archive"></a>
 ### Archive
 
-Current standalone archive policy (2026-09-23, strict; see `RELEASE_ARCHIVE_POLICY_SESSION.md` and
-`docs/PROJECT_DOCUMENTATION.md` § 6.5):
+Current standalone archive policy (2026-09-23, strict; see `docs/PROJECT_DOCUMENTATION.md` § 6.5
+and § 13):
 
 | Platform | Archive to download |
 |---|---|
