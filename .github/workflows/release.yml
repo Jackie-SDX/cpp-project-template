@@ -4,17 +4,31 @@
 # Purpose
 # --------
 # Builds the full desktop artifact matrix (Windows MSVC/MinGW/LLVM, Linux
-# GCC/Clang, macOS Clang/GCC/LLVM; 85 artifacts after Android support was
-# retired), validates the complete expected inventory, and publishes a GitHub
-# release with generated checksums when a ``v*`` tag is pushed.
+# GCC/Clang, macOS Clang/GCC/LLVM; 65 artifacts after Android support was
+# retired and the 20 ``.7z`` standalone archives were removed), validates the
+# complete expected inventory, and publishes a GitHub release with generated
+# checksums when a ``v*`` tag is pushed.
 #
 # Android / NDK support was removed from this pipeline in this revision; see
 #   - .github/scripts/configure.cmake    (NDK toolchain branch deleted)
 #   - .github/workflows/experimental-android-ndk.yml  (workflow removed)
 #   - .github/scripts/package_android_apk.sh          (APK packager removed)
 #   - packaging/android/               (APK manifest + activity removed)
-# and the release inventory counts below are now 85 packages + 2 source
-# archives instead of 93 + 2.
+# and the release inventory counts below are now 65 packages + 2 source
+# archives instead of 93 + 2 (Android removal dropped 93+2 to 85+2; the 20
+# ``.7z`` standalone archives removed under the archive-format policy dropped
+# that to 65+2).
+#
+# Standalone archive format policy (2026-09-23)
+# ---------------------------------------------
+#   Windows  -> .zip       canonical standalone archive (.7z removed)
+#   Linux    -> .tar.gz    canonical standalone archive (+ .zip convenience)
+#   macOS    -> .zip       canonical standalone archive (+ .tar.gz convenience)
+# ``.7z`` is never generated, uploaded, or published. The historical optional
+# Windows CPack 7Z generator is preserved as a commented-out disabled block in
+# the Windows packaging steps below so it stays documented without shipping.
+# Installers (.msi/.exe, .deb/.rpm, .dmg) and source archives are unchanged.
+# See docs/RELEASE_ARCHIVE_POLICY_SESSION.md and docs/install.md#archive.
 #
 # Trigger rules
 # -------------
@@ -477,9 +491,13 @@ jobs:
         cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
         Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:PREFIX}_nsis.exe" -Force
-        cpack --config CPackConfig.cmake -C Release -G 7Z
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
-        Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
+        # Standalone archive policy (2026-09-23): Windows ships .zip only. The
+        # historical .7z alternative is retained here as a documented, disabled
+        # block; uncomment the three lines below to restore it (requires the
+        # 7zip tool installed above):
+        # cpack --config CPackConfig.cmake -C Release -G 7Z
+        # if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
+        # Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
         cpack --config CPackConfig.cmake -C Release -G WIX
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
         Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:PREFIX}_wix.msi" -Force
@@ -492,8 +510,6 @@ jobs:
       run: 'mkdir -p release-assets
 
         (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
-
-        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
 
         (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
 
@@ -521,8 +537,6 @@ jobs:
         mkdir -p release-assets
 
         (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
-
-        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
 
         (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
 
@@ -615,8 +629,6 @@ jobs:
 
         (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.zip" --format=zip .)
 
-        (cd instdir && cmake -E tar cf "../release-assets/linux-gcc-x64.7z" --format=7zip .)
-
         (cd instdir && tar -czf "../release-assets/linux-gcc-x64.tar.gz" .)
 
         cpack --config build/CPackConfig.cmake -C Release -G DEB
@@ -699,7 +711,7 @@ jobs:
         with:
           name: source-archives
           path: release-assets
-      # Expected inventory: 85 platform packages + source archives.
+      # Expected inventory: 65 platform packages + source archives.
 
       - name: Verify release inventory
         working-directory: release-assets
@@ -716,21 +728,18 @@ jobs:
           for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686 windows-llvm-arm64; do
             printf '%s\n' \
               "cpp-project-template_"$version"_"$compiler_arch".zip" \
-              "cpp-project-template_"$version"_"$compiler_arch".7z" \
               "cpp-project-template_"$version"_"$compiler_arch"_nsis.exe" \
               "cpp-project-template_"$version"_"$compiler_arch"_wix.msi" >> expected.txt
           done
           for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do
             printf '%s\n' \
               "cpp-project-template_"$version"_"$compiler_arch".zip" \
-              "cpp-project-template_"$version"_"$compiler_arch".7z" \
                "cpp-project-template_"$version"_"$compiler_arch"_nsis.exe" \
                "cpp-project-template_"$version"_"$compiler_arch"_wix.msi" >> expected.txt
           done
           for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do
             printf '%s\n' \
               "cpp-project-template_"$version"_"$compiler_arch".zip" \
-              "cpp-project-template_"$version"_"$compiler_arch".7z" \
               "cpp-project-template_"$version"_"$compiler_arch".tar.gz" \
               "cpp-project-template_"$version"_"$compiler_arch".deb" \
               "cpp-project-template_"$version"_"$compiler_arch".rpm" >> expected.txt
@@ -738,21 +747,20 @@ jobs:
           for compiler_arch in macos-clang-arm64 macos-apple-clang-x86_64 macos-gcc-x86_64 macos-gcc-arm64 macos-llvm-x86_64 macos-llvm-arm64; do
             printf '%s\n' \
               "cpp-project-template_"$version"_"$compiler_arch".zip" \
-              "cpp-project-template_"$version"_"$compiler_arch".7z" \
               "cpp-project-template_"$version"_"$compiler_arch".tar.gz" \
               "cpp-project-template_"$version"_"$compiler_arch".dmg" >> expected.txt
           done
           sort -u expected.txt > expected.sorted
-          test "$(wc -l < expected.sorted)" -eq 85
+          test "$(wc -l < expected.sorted)" -eq 65
 
           : > actual.txt
-          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
+          for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
             [ -f "$f" ] || continue
             case "$f" in *_source.zip|*_source.tar.gz) continue ;; esac
             printf '%s\n' "$f" >> actual.txt
           done
           sort -u actual.txt > actual.sorted
-          test "$(wc -l < actual.sorted)" -eq 85
+          test "$(wc -l < actual.sorted)" -eq 65
 
           cmp -s expected.sorted actual.sorted || { echo 'Release inventory mismatch:'; comm -3 expected.sorted actual.sorted; exit 1; }
           while IFS= read -r f; do
@@ -775,7 +783,7 @@ jobs:
           set -euo pipefail
           rm -f SHA256SUMS
           files=()
-          for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
+          for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
             [ -f "$f" ] && files+=("$f")
           done
           printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
@@ -817,33 +825,33 @@ jobs:
         : > expected.txt
 
         for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686 windows-llvm-arm64; do printf
-        ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe"
+''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}_nsis.exe"
         "cpp-project-template_${version}_${compiler_arch}_wix.msi" >> expected.txt; done
 
-        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}_nsis.exe" "cpp-project-template_${version}_${compiler_arch}_wix.msi"
+        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}_nsis.exe" "cpp-project-template_${version}_${compiler_arch}_wix.msi"
         >> expected.txt; done
 
         for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip"
-        "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz" "cpp-project-template_${version}_${compiler_arch}.deb"
+        "cpp-project-template_${version}_${compiler_arch}.tar.gz" "cpp-project-template_${version}_${compiler_arch}.deb"
         "cpp-project-template_${version}_${compiler_arch}.rpm" >> expected.txt; done
 
         for compiler_arch in macos-clang-arm64 macos-apple-clang-x86_64 macos-gcc-x86_64 macos-gcc-arm64 macos-llvm-x86_64 macos-llvm-arm64; do printf ''%s\n''
-        "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.7z" "cpp-project-template_${version}_${compiler_arch}.tar.gz"
+        "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}.tar.gz"
         "cpp-project-template_${version}_${compiler_arch}.dmg" >> expected.txt; done
 
 
         sort -u expected.txt > expected.sorted
 
-        test "$(wc -l < expected.sorted)" -eq 85
+        test "$(wc -l < expected.sorted)" -eq 65
 
         : > actual.txt
 
-        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
+        for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
         printf ''%s\n'' "$f" >> actual.txt; done
 
         sort -u actual.txt > actual.sorted
 
-        test "$(wc -l < actual.sorted)" -eq 85
+        test "$(wc -l < actual.sorted)" -eq 65
 
         cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }
 
@@ -855,7 +863,7 @@ jobs:
         set -euo pipefail
         rm -f SHA256SUMS
         files=()
-        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
+        for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
           [ -f "$f" ] && files+=("$f")
         done
         printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
@@ -868,16 +876,16 @@ jobs:
       run: |
         set -euo pipefail
         package_count=0
-        for f in *.zip *.7z *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
+        for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
           [ -f "$f" ] || continue
           case "$f" in
             *_source.zip|*_source.tar.gz) continue ;;
           esac
           package_count=$((package_count + 1))
         done
-        test "$package_count" -eq 85
+        test "$package_count" -eq 65
         test -s SHA256SUMS
-        test "$(wc -l < SHA256SUMS)" -eq 87
+        test "$(wc -l < SHA256SUMS)" -eq 67
         sha256sum -c SHA256SUMS
 
     - name: Publish GitHub release
@@ -890,7 +898,7 @@ jobs:
         generate_release_notes: true
         body: 'This release contains the validated cross-platform package matrix and source archives.'
   # expanded-package: fills the remainder of the artifact matrix (Windows ARM64,
-  # Linux Clang/32-bit, macOS variants) so the inventory totals 85.
+  # Linux Clang/32-bit, macOS variants) so the inventory totals 65.
 
   expanded-package:
     needs: cache-gate
@@ -1306,14 +1314,6 @@ jobs:
 
         Compress-Archive -Path instdir\* -DestinationPath "release-assets\$env:PREFIX.zip" -Force
 
-        Push-Location instdir
-
-        cmake -E tar cf "../release-assets/$env:PREFIX.7z" --format=7zip .
-
-        if ($LASTEXITCODE -ne 0) { Pop-Location; throw '7Z archive generation failed' }
-
-        Pop-Location
-
         Push-Location build
         cpack --config CPackConfig.cmake -C Release -G NSIS64
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw 'NSIS64 package generation failed' }
@@ -1331,8 +1331,6 @@ jobs:
       run: 'mkdir -p release-assets
 
         (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
-
-        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
 
         (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
 
@@ -1360,8 +1358,6 @@ jobs:
         mkdir -p release-assets
 
         (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
-
-        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.7z" --format=7zip .)
 
         (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
 

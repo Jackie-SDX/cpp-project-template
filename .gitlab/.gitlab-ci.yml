@@ -2022,7 +2022,7 @@ clear_cache:
 # plain file cpack_module.cmake writes during the build job's own cmake
 # configure (already carrying the real resolved version) -- not re-derived
 # independently here. This guarantees the manually-built ZIP's name is
-# byte-for-byte the same base CPack itself uses for the .7z/.exe/.msi it
+# byte-for-byte the same base CPack itself uses for the .exe/.msi it
 # generates a few lines below, instead of two separate naming computations
 # that could drift apart.
 .package_windows_outputs: &package_windows_outputs
@@ -2057,8 +2057,10 @@ clear_cache:
     } else {
       Write-Host "WiX not available; shipping without the .msi."
     }
-    cpack -C Release -G 7Z
-    if ($LASTEXITCODE -ne 0) { Write-Host "7Z packaging failed. Shipping without the .7z." }
+    # Standalone archive policy (2026-09-23): Windows ships .zip only; the
+    # historical `cpack -C Release -G 7Z` step (and its .7z copy/upload below)
+    # has been removed. Restore it only behind an explicit re-review of the
+    # policy recorded in docs/RELEASE_ARCHIVE_POLICY_SESSION.md.
     Pop-Location
 
     # NSIS and WiX have no "output file name" override variable -- checked
@@ -2076,7 +2078,7 @@ clear_cache:
 
     New-Item -ItemType Directory -Force -Path release-assets | Out-Null
     Copy-Item "$canonicalBase.zip" release-assets\
-    Get-ChildItem build\package\*_nsis.exe, build\package\*_wix.msi, build\package\*.7z -ErrorAction SilentlyContinue | Copy-Item -Destination release-assets\
+    Get-ChildItem build\package\*_nsis.exe, build\package\*_wix.msi -ErrorAction SilentlyContinue | Copy-Item -Destination release-assets\
     Get-ChildItem release-assets
 
 package_windows_x64_release:
@@ -2135,7 +2137,7 @@ package_windows_x86_release:
       - release-assets/
     expire_in: 1 week
 
-# 2026-09-13, alongside build:windows:mingw -- same NSIS/WiX/7Z/ZIP
+# 2026-09-13, alongside build:windows:mingw -- same NSIS/WiX/ZIP
 # packaging as the MSVC jobs above via the shared *package_windows_outputs
 # anchor (CPack's generators don't care what compiler produced the binaries
 # being packaged); sourced from build:windows:mingw instead of
@@ -2380,9 +2382,8 @@ package_linux_x64_release:
     - cpack -C Release -G DEB || echo "DEB packaging failed."
     - cpack -C Release -G RPM || echo "RPM packaging failed."
     - cpack -C Release -G ZIP || echo "ZIP packaging failed."
-    - cpack -C Release -G 7Z || echo "7Z packaging failed."
     - cd ..
-    - cp build/package/*.deb build/package/*.rpm build/package/*.zip build/package/*.7z release-assets/ 2>/dev/null || true
+    - cp build/package/*.deb build/package/*.rpm build/package/*.zip release-assets/ 2>/dev/null || true
     - ls -la release-assets
   artifacts:
     when: always
@@ -2424,16 +2425,15 @@ package_linux_arm64_release:
     - *read_canonical_base_bash
     - tar -C instdir -czf "release-assets/${CANONICAL_BASE}.tar.gz" .
     - cd build
-    # 2026-09-13: DEB/RPM/ZIP/7Z are new for this leg (previously tar.gz only).
+    # 2026-09-13: DEB/RPM/ZIP are new for this leg (previously tar.gz only).
     # Same as x64: each format is independent, a failure here is logged, not
     # fatal. This is the first real run of DEB/RPM on this arm64 image --
     # treat it as unproven until confirmed, same as build:windows:mingw was.
     - cpack -C Release -G DEB || echo "DEB packaging failed."
     - cpack -C Release -G RPM || echo "RPM packaging failed."
     - cpack -C Release -G ZIP || echo "ZIP packaging failed."
-    - cpack -C Release -G 7Z || echo "7Z packaging failed."
     - cd ..
-    - cp build/package/*.deb build/package/*.rpm build/package/*.zip build/package/*.7z release-assets/ 2>/dev/null || true
+    - cp build/package/*.deb build/package/*.rpm build/package/*.zip release-assets/ 2>/dev/null || true
     - ls -la release-assets
   artifacts:
     when: always
@@ -2481,14 +2481,13 @@ package_macos_release:
     # 2026-09-13 fix: this was `cd build && cpack ... && cd .. || echo ...`.
     # If cpack failed, the whole chain short-circuited *before* `cd ..` ran,
     # leaving the script stranded inside build/ for every command after --
-    # the .dmg copy and (now) ZIP/7Z below would have silently resolved
+    # the .dmg copy and (now) ZIP below would have silently resolved
     # against the wrong directory. Each format now runs independently and
     # `cd ..` always runs regardless of any single format's outcome.
     - cpack -C Release -G DragNDrop || echo "DragNDrop packaging failed -- shipping without the .dmg for this platform."
     - cpack -C Release -G ZIP || echo "ZIP packaging failed."
-    - cpack -C Release -G 7Z || echo "7Z packaging failed."
     - cd ..
-    - cp build/package/*.dmg build/package/*.zip build/package/*.7z release-assets/ 2>/dev/null || true
+    - cp build/package/*.dmg build/package/*.zip release-assets/ 2>/dev/null || true
     - ls -la release-assets
   artifacts:
     when: always

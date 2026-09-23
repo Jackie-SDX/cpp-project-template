@@ -117,7 +117,7 @@ clang-format / clang-tidy / cppcheck / sanitizer / valgrind configs
 - **Quality gates in CI:** `ccache`, `clang-tidy`, `clang-format`, `cppcheck`, `valgrind` memcheck,
   Coverity Scan, Codecov, Coveralls, CDash (submission to the *upstream author's* dashboard).
 - **Packaging:** CPack → DEB/RPM (Linux), NSIS `.exe` + WiX `.msi` (Windows), DMG (macOS),
-  `.tar.gz`/`.7z`/`.zip` everywhere.
+  `.tar.gz`/`.zip` convenience archives everywhere (upstream's `.7z` variant retired 2026-09 — § 6.5).
 - **CI:** GitHub Actions `build-debug` (`BUILD_TYPE=Coverage`) and `build-release`
   (`BUILD_TYPE=Release`) matrix (3 OS × {MSVC, MinGW, GCC, Clang, LLVM}), a manual cache-clear
   workflow, and a Doxygen pages workflow. GitLab CI mirrored the GitHub copy via docker images.
@@ -156,7 +156,8 @@ current pipeline. Commit message histogram over that range:
 - **A tag-gated release pipeline** (`release.yml` on `v*` tags) with a full cross-platform package
   matrix — Windows MSVC/MinGW/LLVM × {x64, x86, ARM64}, Linux GCC/Clang × {x86_64, i686, arm64}, macOS
   Clang/GCC/LLVM × {x86_64, arm64}; an AI/CMake-inventoried expected-artifact list, a `validate-release`
-  inventory job (expected vs actual, 85 packages), a global `SHA256SUMS`, and a single `publish` job
+  inventory job (expected vs actual, 65 packages since the 20 `.7z` standalone archives were
+  retired), a global `SHA256SUMS`, and a single `publish` job
   built on `softprops/action-gh-release`.
 - **Cache discipline:** Windows cache-gate jobs per toolchain, deterministic `hashFiles()` cache keys,
   shared vcpkg/ccache namespaces, `restore-keys` fallbacks, and a separate vcpkg cache warmup workflow.
@@ -293,6 +294,27 @@ current pipeline. Commit message histogram over that range:
 
 The difference between `v7.7.9` (100) and current (88) is exactly the **8 Android artifacts removed**
 plus the **4 strays** — i.e. no other product asset changed.
+
+### 6.5 Archive-format policy (decision record, 2026-09-23)
+
+Issued from issue #130 ("UPDATE ON DISTANT REPO") on the current fork, confirmed as **Option A** in the
+issue discussion (remove `.7z` only; keep the Linux `.zip` and macOS `.tar.gz` convenience archives).
+
+| Platform | Canonical standalone archive | Convenience archive | Installers (unchanged) |
+|---|---|---|---|
+| Windows | `.zip` | — (`.7z` retired) | `.exe` (NSIS), `.msi` (WiX) |
+| Linux | `.tar.gz` | `.zip` | `.deb`, `.rpm` |
+| macOS | `.zip` | `.tar.gz` | `.dmg` |
+
+- `.7z` is no longer generated, uploaded, checksummed, or published in any workflow (GitHub Actions
+  `release.yml`/`ci.yml`/package-smoke workflows and GitLab CI). The historical Windows `cpack -G 7Z`
+  alternative remains in the source as a **commented-out, disabled block** so the option stays
+  documented without shipping.
+- Inventory math: 85 → **65** packages (20 `.7z` retired; Windows 4×7→21, Windows ARM64 4×2→6, Linux
+  5×5→20, macOS 6×4→18), global `SHA256SUMS` 87 → **67** lines, release assets 88 → **68** (65 +
+  2 source archives + `SHA256SUMS`).
+- Decision context, actions taken, validation evidence, and residual follow-ups are recorded in
+  `RELEASE_ARCHIVE_POLICY_SESSION.md` (which replaces the obsolete root `BUGS.txt`).
 
 ---
 
@@ -436,8 +458,8 @@ policy in the controller repo; the fork's action is intentionally minimal).
 ```
 cache-gate (8 Windows legs)
    ├─► package (8 configs) + source (2 archives) + expanded-package (fills ARM64/Clang/32-bit/macOS)
-   └─► validate-release  : inventory must == 85 packages; SHA256SUMS written + verified; manifests rm -f
-   └─► publish (tag only): re-verify, preflight (85 packages; SHA256SUMS 87 lines), softprops upload
+   └─► validate-release  : inventory must == 65 packages; SHA256SUMS written + verified; manifests rm -f
+   └─► publish (tag only): re-verify, preflight (65 packages; SHA256SUMS 67 lines), softprops upload
 ```
 
 ### 8.4 GitLab pipeline
@@ -462,8 +484,9 @@ maintenance) with tag-scoped rules so release tags skip non-consumed jobs, honor
    must be bumped together; there is no Dependabot config in the tree yet.
 7. **Conan is configured but not CI-provisioned** — `PACKAGE_MANAGER=conan2` works locally but no
    pipeline runs `conan install` (by design, D9).
-8. **`BUGS.txt` is "obsolete / all fixed"** but still lists Windows MinGW/LLVM vcpkg cache
-   observability and a separately-known ARM64 Windows package-smoke bug as follow-ups.
+8. **The root bug ledger was consolidated into the release-archive-policy session document**
+   (`RELEASE_ARCHIVE_POLICY_SESSION.md`, replacing `BUGS.txt`); the legacy Windows MinGW/LLVM vcpkg
+   cache observability and ARM64 Windows package-smoke follow-ups carry over there.
 9. Minor: `packaging/windows/version.rc.in` still uses the old project-author identity in places;
    `CITATION.cff` still points at MangaD URLs.
 10. `docs/architecture/decisions/.test` and `scripts/.test` / `.gitlab/vcpkg-triplets/.test` are
@@ -477,8 +500,8 @@ maintenance) with tag-scoped rules so release tags skip non-consumed jobs, honor
 - **Prune dead workflows/config:** decide whether `.circleci/config.yml` is wired up or deleted;
   remove the stale `ci/remove-android` branch.
 - **Dependabot config** for the SHA-pinned actions + vcpkg baselines.
-- **Investigate Windows MinGW/LLVM vcpkg cache behavior** (from `BUGS.txt`): distinguish Actions-cache
-  hits, vcpkg binary-cache hits, and source rebuilds in logs.
+- **Investigate Windows MinGW/LLVM vcpkg cache behavior** (carried over from the archived bug ledger):
+  distinguish Actions-cache hits, vcpkg binary-cache hits, and source rebuilds in logs.
 - **Native ARM64 Windows package smoke** — promote once the known bug is fixed.
 - **Migrate GitHub release name extraction** to the same `canonical_package_name.txt` written by
   `cpack_module.cmake` (noted in `MERGE_NOTES.md` as the fragile `sed` on `CPackConfig.cmake`).
@@ -514,7 +537,7 @@ maintenance) with tag-scoped rules so release tags skip non-consumed jobs, honor
 | E8 | Post-merge CI / Lint / Doxygen / vcpkg warmup green on `96240c0`; Release runs green for `v0.0.3`/`v0.0.4` | GitHub Actions run history (listed in §1–§5) |
 | E9 | Original release `v0.0.1` = 20 assets, version `1.0.0.0` | GitHub API `MangaD/cpp-project-template/releases/tags/v0.0.1` |
 | E10 | Source bug fixes present (factorial/wordWrap) and correct | diff `71cae18…96240c0` for the four source files |
-| E11 | Manager abstraction, ADRs, MERGE_NOTES, BUGS.txt, CMakePresets content | full-text reads of those files at `96240c0` |
+| E11 | Manager abstraction, ADRs, MERGE_NOTES, CMakePresets content | full-text reads of those files at `96240c0`; the root `BUGS.txt` was later replaced by `RELEASE_ARCHIVE_POLICY_SESSION.md` |
 | E12 | CI transient earlier: one Windows CLANGARM64 MinGW Debug flake in msys2 `paccache` (rerun green) | run log from the pointing run; unrelated to the doc’s claims |
 
 ---
@@ -527,8 +550,10 @@ maintenance) with tag-scoped rules so release tags skip non-consumed jobs, honor
 - PR #5 (Android removal + workflow docs): https://github.com/Jackie-SDX/cpp-project-template/pull/5
 - PR #6 (release-asset hygiene): https://github.com/Jackie-SDX/cpp-project-template/pull/6
 - Releases: `v0.0.2` / `v0.0.3` / `v0.0.4` on the current fork.
-- In-repo records merged at `96240c0`: `MERGE_NOTES.md`, `BUGS.txt`,
-  `docs/architecture/decisions/001…005`, `TODO.md`, `README.md`.
+- In-repo records merged at `96240c0`: `MERGE_NOTES.md`,
+  `docs/architecture/decisions/001…005`, `TODO.md`, `README.md`. The root bug
+  ledger (`BUGS.txt`) was retired and replaced by `RELEASE_ARCHIVE_POLICY_SESSION.md` as part of the
+  2026-09 archive-format policy change.
 
 ---
 

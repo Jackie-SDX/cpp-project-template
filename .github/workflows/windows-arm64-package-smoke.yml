@@ -5,7 +5,7 @@
 # --------
 # Verifies native Windows ARM64 packaging on a windows-11-arm runner: builds
 # with the native ARM64 MSVC toolset, installs, and produces the standard
-# zip/7z/nsis/wix artifacts, then checks the PE machine header is ARM64 (0xAA64).
+# zip/nsis/wix artifacts, then checks the PE machine header is ARM64 (0xAA64).
 #
 # Trigger rules
 # -------------
@@ -179,9 +179,13 @@ jobs:
           cpack --config CPackConfig.cmake -C Release -G NSIS64
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.exe")) { throw 'NSIS64 package generation failed' }
           Copy-Item "package\$base.exe" "..\release-assets\windows-msvc-arm64.exe" -Force
-          cpack --config CPackConfig.cmake -C Release -G 7Z
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.7z")) { throw '7Z package generation failed' }
-          Copy-Item "package\$base.7z" "..\release-assets\windows-msvc-arm64.7z" -Force
+          # Standalone archive policy (2026-09-23): Windows ships .zip only. The
+          # historical .7z alternative is retained here as a documented, disabled
+          # block; uncomment the three lines below to restore it (requires the
+          # 7zip tool installed on the runner):
+          # cpack --config CPackConfig.cmake -C Release -G 7Z
+          # if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.7z")) { throw '7Z package generation failed' }
+          # Copy-Item "package\$base.7z" "..\release-assets\windows-msvc-arm64.7z" -Force
           cpack --config CPackConfig.cmake -C Release -G WIX
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.msi")) { throw 'MSI package generation failed' }
           Copy-Item "package\$base.msi" "..\release-assets\windows-msvc-arm64.msi" -Force
@@ -194,14 +198,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $expected = @(
             'windows-msvc-arm64.zip',
-            'windows-msvc-arm64.7z',
             'windows-msvc-arm64.exe',
             'windows-msvc-arm64.msi'
           )
           foreach ($file in $expected) {
             if (-not (Test-Path "release-assets\$file")) { throw "Missing release artifact: $file" }
           }
-          Get-FileHash release-assets\*.zip,release-assets\*.7z,release-assets\*.exe,release-assets\*.msi -Algorithm SHA256 |
+          Get-FileHash release-assets\*.zip,release-assets\*.exe,release-assets\*.msi -Algorithm SHA256 |
             ForEach-Object { "{0}  {1}" -f $_.Hash.ToLowerInvariant(), $_.Path.Replace((Get-Location).Path + '\', '').Replace('\', '/') } |
             Set-Content release-assets\SHA256SUMS
           Get-ChildItem release-assets
