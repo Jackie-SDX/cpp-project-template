@@ -454,16 +454,18 @@ cmake --build . --config Release
 <a id="archive"></a>
 ### Archive
 
-Current standalone archive policy (2026-09-23, see `RELEASE_ARCHIVE_POLICY_SESSION.md` and
+Current standalone archive policy (2026-09-23, strict; see `RELEASE_ARCHIVE_POLICY_SESSION.md` and
 `docs/PROJECT_DOCUMENTATION.md` § 6.5):
 
 | Platform | Archive to download |
 |---|---|
-| Windows | `.zip` (default) |
-| Linux | `.tar.gz` (default) or `.zip` |
-| macOS | `.zip` (default) or `.tar.gz` |
+| Windows | `.zip` |
+| Linux | `.tar.gz` |
+| macOS | `.zip` |
 
-`.7z` archives are intentionally not published. Installers and source archives are unaffected.
+Each platform ships exactly one standalone archive per toolchain. `.7z` archives are never
+published, and the former Linux `.zip` / macOS `.tar.gz` convenience archives have been removed.
+Installers and source archives are unaffected.
 
 **Package the binary:**
 ```sh

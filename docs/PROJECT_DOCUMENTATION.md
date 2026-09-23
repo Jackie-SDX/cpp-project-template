@@ -117,7 +117,8 @@ clang-format / clang-tidy / cppcheck / sanitizer / valgrind configs
 - **Quality gates in CI:** `ccache`, `clang-tidy`, `clang-format`, `cppcheck`, `valgrind` memcheck,
   Coverity Scan, Codecov, Coveralls, CDash (submission to the *upstream author's* dashboard).
 - **Packaging:** CPack → DEB/RPM (Linux), NSIS `.exe` + WiX `.msi` (Windows), DMG (macOS),
-  `.tar.gz`/`.zip` convenience archives everywhere (upstream's `.7z` variant retired 2026-09 — § 6.5).
+  and a strict one-archive-per-platform policy (Windows/Linux/macOS → `.zip`/`.tar.gz`/`.zip`;
+  upstream's `.7z` variant and the Linux `.zip`/macOS `.tar.gz` convenience archives retired 2026-09 — § 6.5).
 - **CI:** GitHub Actions `build-debug` (`BUILD_TYPE=Coverage`) and `build-release`
   (`BUILD_TYPE=Release`) matrix (3 OS × {MSVC, MinGW, GCC, Clang, LLVM}), a manual cache-clear
   workflow, and a Doxygen pages workflow. GitLab CI mirrored the GitHub copy via docker images.
@@ -156,8 +157,8 @@ current pipeline. Commit message histogram over that range:
 - **A tag-gated release pipeline** (`release.yml` on `v*` tags) with a full cross-platform package
   matrix — Windows MSVC/MinGW/LLVM × {x64, x86, ARM64}, Linux GCC/Clang × {x86_64, i686, arm64}, macOS
   Clang/GCC/LLVM × {x86_64, arm64}; an AI/CMake-inventoried expected-artifact list, a `validate-release`
-  inventory job (expected vs actual, 65 packages since the 20 `.7z` standalone archives were
-  retired), a global `SHA256SUMS`, and a single `publish` job
+  inventory job (expected vs actual, 54 packages since the 20 `.7z` and the Linux
+  `.zip`/macOS `.tar.gz` convenience archives were retired), a global `SHA256SUMS`, and a single `publish` job
   built on `softprops/action-gh-release`.
 - **Cache discipline:** Windows cache-gate jobs per toolchain, deterministic `hashFiles()` cache keys,
   shared vcpkg/ccache namespaces, `restore-keys` fallbacks, and a separate vcpkg cache warmup workflow.
@@ -297,22 +298,28 @@ plus the **4 strays** — i.e. no other product asset changed.
 
 ### 6.5 Archive-format policy (decision record, 2026-09-23)
 
-Issued from issue #130 ("UPDATE ON DISTANT REPO") on the current fork, confirmed as **Option A** in the
-issue discussion (remove `.7z` only; keep the Linux `.zip` and macOS `.tar.gz` convenience archives).
+Issued from issue #130 ("UPDATE ON DISTANT REPO") on the current fork. The policy tightened in two
+steps the same day:
 
-| Platform | Canonical standalone archive | Convenience archive | Installers (unchanged) |
-|---|---|---|---|
-| Windows | `.zip` | — (`.7z` retired) | `.exe` (NSIS), `.msi` (WiX) |
-| Linux | `.tar.gz` | `.zip` | `.deb`, `.rpm` |
-| macOS | `.zip` | `.tar.gz` | `.dmg` |
+1. **Option A** (`v0.0.8`, merged via PR #8): remove the 20 `.7z` standalone archives only; keep the
+   Linux `.zip` and macOS `.tar.gz` convenience archives.
+2. **Strict one-archive-per-platform** (`v0.0.9`, supersedes Option A): the `v0.0.8` assets still
+   shipped two standalone archives per Linux/macOS toolchain, so per explicit owner direction the
+   convenience archives were also removed. Each platform now ships exactly one standalone archive.
+
+| Platform | Standalone archive (only) | Installers (unchanged) |
+|---|---|---|
+| Windows | `.zip` | `.exe` (NSIS), `.msi` (WiX) |
+| Linux | `.tar.gz` | `.deb`, `.rpm` |
+| macOS | `.zip` | `.dmg` |
 
 - `.7z` is no longer generated, uploaded, checksummed, or published in any workflow (GitHub Actions
   `release.yml`/`ci.yml`/package-smoke workflows and GitLab CI). The historical Windows `cpack -G 7Z`
   alternative remains in the source as a **commented-out, disabled block** so the option stays
   documented without shipping.
-- Inventory math: 85 → **65** packages (20 `.7z` retired; Windows 4×7→21, Windows ARM64 4×2→6, Linux
-  5×5→20, macOS 6×4→18), global `SHA256SUMS` 87 → **67** lines, release assets 88 → **68** (65 +
-  2 source archives + `SHA256SUMS`).
+- Inventory math: 85 → 65 → **54** packages (20 `.7z` + Linux `.zip`/macOS `.tar.gz` retired; Windows
+  3×7=21, Windows ARM64 3×2=6, Linux 3×5=15, macOS 2×6=12), global `SHA256SUMS` 87 → 67 → **56**
+  lines, release assets 88 → 68 → **57** (54 + 2 source archives + `SHA256SUMS`).
 - Decision context, actions taken, validation evidence, and residual follow-ups are recorded in
   `RELEASE_ARCHIVE_POLICY_SESSION.md` (which replaces the obsolete root `BUGS.txt`).
 
@@ -458,8 +465,8 @@ policy in the controller repo; the fork's action is intentionally minimal).
 ```
 cache-gate (8 Windows legs)
    ├─► package (8 configs) + source (2 archives) + expanded-package (fills ARM64/Clang/32-bit/macOS)
-   └─► validate-release  : inventory must == 65 packages; SHA256SUMS written + verified; manifests rm -f
-   └─► publish (tag only): re-verify, preflight (65 packages; SHA256SUMS 67 lines), softprops upload
+   └─► validate-release  : inventory must == 54 packages; SHA256SUMS written + verified; manifests rm -f
+   └─► publish (tag only): re-verify, preflight (54 packages; SHA256SUMS 56 lines), softprops upload
 ```
 
 ### 8.4 GitLab pipeline
