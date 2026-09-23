@@ -4,7 +4,7 @@
 # Purpose
 # --------
 # Pull-request-time packaging smoke for one representative Windows config
-# (MinGW x64): builds, installs, packages zip/7z/exe/msi and verifies artifacts
+# (MinGW x64): builds, installs, packages zip/exe/msi and verifies artifacts
 # + checksums, so packaging regressions surface before the full release matrix.
 #
 # Trigger rules
@@ -143,9 +143,13 @@ jobs:
             throw "NSIS package generation failed"
           }
           Copy-Item "package\$env:BASE.exe" "..\release-assets\windows-mingw-x64.exe" -Force
-          cpack --config CPackConfig.cmake -C Release -G 7Z
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
-          Copy-Item "package\$env:BASE.7z" "..\release-assets\windows-mingw-x64.7z" -Force
+          # Standalone archive policy (2026-09-23): Windows ships .zip only. The
+          # historical .7z alternative is retained here as a documented, disabled
+          # block; uncomment the three lines below to restore it (requires the
+          # 7zip tool installed on the runner):
+          # cpack --config CPackConfig.cmake -C Release -G 7Z
+          # if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
+          # Copy-Item "package\$env:BASE.7z" "..\release-assets\windows-mingw-x64.7z" -Force
           cpack --config CPackConfig.cmake -C Release -G WIX
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
           Copy-Item "package\$env:BASE.msi" "..\release-assets\windows-mingw-x64.msi" -Force
@@ -158,7 +162,6 @@ jobs:
           set -euo pipefail
           for f in \
             windows-mingw-x64.zip \
-            windows-mingw-x64.7z \
             windows-mingw-x64.exe \
             windows-mingw-x64.msi; do
             test -f "release-assets/$f"

@@ -328,7 +328,6 @@ jobs:
           test -n "$(find instdir -type f -print -quit)"
           mkdir -p package-smoke
           (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.zip" --format=zip .)
-          (cd instdir && cmake -E tar cf "../package-smoke/linux-gcc-x64.7z" --format=7zip .)
           (cd instdir && tar -czf "../package-smoke/linux-gcc-x64.tar.gz" .)
           cpack --config build/CPackConfig.cmake -C Release -G DEB
           cpack --config build/CPackConfig.cmake -C Release -G RPM
@@ -339,7 +338,6 @@ jobs:
           cp "$deb" package-smoke/linux-gcc-x64.deb
           cp "$rpm" package-smoke/linux-gcc-x64.rpm
           test -f package-smoke/linux-gcc-x64.zip
-          test -f package-smoke/linux-gcc-x64.7z
           test -f package-smoke/linux-gcc-x64.tar.gz
           test -f package-smoke/linux-gcc-x64.deb
           test -f package-smoke/linux-gcc-x64.rpm
