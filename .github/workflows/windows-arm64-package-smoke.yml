@@ -242,4 +242,3 @@ jobs:
           name: windows-arm64-package-smoke
           path: project/release-assets/*
           if-no-files-found: error
-          if-no-files-found: error
