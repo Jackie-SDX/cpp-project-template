@@ -1406,6 +1406,34 @@ Nothing below is claimed as done.
 
 ---
 
+---
+## 18. CPP Project Distribution Hardening — Completed (2026-09-25)
+
+- [x] Fixed Windows runtime DLL deployment and added automatic runtime-closure validation.
+- [x] Upgraded Windows ZIP/NSIS/MSI validation from file-existence checks to functional install/run/uninstall testing.
+- [x] Corrected Windows package architecture validation for x86_64, i686 and ARM64.
+- [x] Fixed Debian runtime dependency generation and package metadata validation.
+- [x] Added and validated proper macOS .app bundle structure, metadata and architecture checks.
+- [x] Standardized package/architecture naming across CMake, CI, release artifacts and documentation.
+- [x] Fixed release version propagation so filenames, packages, installers and metadata use the same version.
+- [x] Added a single machine-readable release contract for the supported artifacts.
+- [x] Hardened release inventory validation against missing, extra, duplicate or forbidden artifacts.
+- [x] Removed unsafe release asset overwrite behavior.
+- [x] Added GitLab release completeness/floor validation without changing its best-effort model.
+- [x] Retired conflicting CircleCI status reporting while preserving its configuration for reference.
+- [x] Added deterministic archive generation and verified reproducibility.
+- [x] Added final-artifact runtime dependency reports for Linux/macOS/Windows.
+- [x] Added SBOM/provenance generation and verification where supported.
+- [x] Added artifact integrity/security checks, including archive safety, checksum coverage and identity validation.
+- [x] Added consumer-side release verification tooling.
+- [x] Hardened vcpkg cache keys, cache gates and cold-cache behavior.
+- [x] Fixed multiple CI/release defects found during real execution, including cache, DMG, runtime, architecture and inventory failures.
+- [x] Performed real CI/release validation and iterated until the required checks passed.
+- [x] Published and verified the hardened v0.0.10 release with 61 assets and green CI.
+- [x] Merged the completed hardening work into main.
+- [x] Documented the implementation, validation evidence, encountered bugs and fixes.
+
+*Evidence for each item lives in §16 (cache/release repair), §17.3 (item-by-item implementation), §17.4 (bugs and fixes), §17.7 (`v0.0.10` release evidence) and §17.9 (deferred work).
 *This document was generated from verified repository state; all hashes, counts, asset lists, and run
 results were read directly from the three Git repositories and the GitHub API. Any later change to
 `main` supersedes the exact figures above.*
