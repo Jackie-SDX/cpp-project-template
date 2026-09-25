@@ -34,6 +34,15 @@ endif()
 if (NOT "$ENV{BUILD_TESTING}" STREQUAL "")
 	list(APPEND extra_config_args "-DBUILD_TESTING:BOOL=$ENV{BUILD_TESTING}")
 endif()
+# Release identity (CORE-10): both release pipelines resolve the version from
+# the git tag once and export CPP_PROJECT_TEMPLATE_VERSION before configure.
+# Every generated artifact reads it (version.rc, template.desktop, config.h,
+# CPACK_PACKAGE_VERSION -> DEB/RPM Version:). Before this line GitHub's
+# packaging legs configured the 0.0.1.0 placeholder instead, which is how a
+# DEB named ..._0.0.9_....deb ended up declaring "Version: 0.0.1".
+if (NOT "$ENV{CPP_PROJECT_TEMPLATE_VERSION}" STREQUAL "")
+	list(APPEND extra_config_args "-D CPP_PROJECT_TEMPLATE_VERSION=$ENV{CPP_PROJECT_TEMPLATE_VERSION}")
+endif()
 if ("$ENV{USE_VCPKG}" STREQUAL "OFF")
 	list(APPEND extra_config_args "-D PACKAGE_MANAGER=system")
 endif()
