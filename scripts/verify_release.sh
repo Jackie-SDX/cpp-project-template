@@ -15,7 +15,10 @@
 #   3. forbidden formats   : no .7z/.msix/AppImage/Flatpak/Snap, no Linux
 #                            .zip, no macOS .tar.gz (CORE-5)
 #   4. filename/arch       : packaged Windows/Linux payloads match the
-#                            contract architecture (python3 when available)
+#                            contract architecture (python3 when available).
+#                            NSIS installers are checked as the 32-bit stub
+#                            they always are; their payload is covered by the
+#                            sibling contract .zip row for the same platform.
 #   5. SBOM presence       : release-sbom.spdx.json present, non-empty,
 #                            parses as JSON (python3 when available)
 #   6. evidence presence   : release-evidence.json + contract present
@@ -185,10 +188,20 @@ for name in sorted(os.listdir(d)):
                             bad.append("%s: %s -> machine 0x%04X != 0x%04X" % (name, n, m, want))
                         checked += 1
         elif name.endswith((".exe", ".msi")):
+            # NSIS always ships a 32-bit i386 stub, whatever payload
+            # architecture it carries: reading the stub header and comparing
+            # it to the contract arch produced a false failure for every
+            # non-i686 NSIS installer (machine 0x014C != 0x8664/0xAA64).
+            # The payload is verified through the sibling contract .zip row
+            # above, and scripts/validate_release_artifacts.sh unpacks the
+            # installer itself during the tag run.
+            want_file = 0x14C if name.endswith("_nsis.exe") else want
             with open(path, "rb") as fh:
                 m = pe_machine(fh.read(1 << 20))
-            if m is not None and m != want:
-                bad.append("%s: machine 0x%04X != 0x%04X" % (name, m, want))
+            if m is not None and m != want_file:
+                bad.append("%s: machine 0x%04X != 0x%04X%s" % (
+                    name, m, want_file,
+                    " (NSIS stub is i386)" if name.endswith("_nsis.exe") else ""))
             checked += 1
         elif name.endswith(".tar.gz") and os_ == "linux":
             with tarfile.open(path, "r:gz") as t:
