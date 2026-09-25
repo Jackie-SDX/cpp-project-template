@@ -743,20 +743,57 @@ jobs:
         dmg=$(ls release-assets/*.dmg 2>/dev/null | head -1 || true)
         if [ -n "$dmg" ]; then
           mnt=$(mktemp -d /tmp/dmgmnt.XXXXXX)
-          # hdiutil attach on runner images is racy right after CPack's own
-          # attach/detach cycle (diskarbitration settles slowly and cancels
-          # the attach); retry, and dump diagnostics if it still refuses.
+          # hdiutil attach rejects the CPack-produced DMG with
+          # "attach canceled" on macOS 15 runners. Try three strategies:
+          #  A: explicit mountpoint, default verify   (3 tries, backoff)
+          #  B: explicit mountpoint, -noverify        (2 tries)
+          #  C: default /Volumes mount, -noverify     (MountPoint parsed
+          #     from the -plist output)
+          # If none attach, dump UDIF verify + verbose attach diagnostics.
           attached=0
           for attempt in 1 2 3; do
             if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
               attached=1
               break
             fi
-            echo "hdiutil attach attempt $attempt failed" >&2
+            echo "attach strategy A attempt $attempt failed" >&2
             sleep $((attempt * 2))
           done
           if [ "$attached" != "1" ]; then
+            for attempt in 1 2; do
+              if hdiutil attach "$dmg" -noverify -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
+                attached=1
+                break
+              fi
+              echo "attach strategy B attempt $attempt failed" >&2
+              sleep 1
+            done
+          fi
+          if [ "$attached" != "1" ]; then
+            attach_plist=$(mktemp /tmp/attachplist.XXXXXX)
+            if hdiutil attach "$dmg" -noverify -nobrowse -readonly -plist > "$attach_plist" 2> "$attach_plist.err"; then
+              mnt=$(python3 - "$attach_plist" <<'PY'
+        import plistlib, sys
+        with open(sys.argv[1], "rb") as fh:
+            entities = plistlib.load(fh)
+        print(next((e.get("MountPoint", "") for e in entities if e.get("MountPoint")), ""))
+        PY
+              )
+              if [ -n "$mnt" ]; then
+                attached=2
+                echo "attach strategy C ok (default mount at $mnt)"
+              fi
+            else
+              cat "$attach_plist.err" >&2 || true
+            fi
+            rm -f "$attach_plist" "$attach_plist.err"
+          fi
+          if [ "$attached" = "0" ]; then
             echo "hdiutil attach failed for $dmg; diagnostics:" >&2
+            echo "--- hdiutil verify (UDIF checksum):" >&2
+            hdiutil verify "$dmg" >&2 || echo "UDIF verify FAILED" >&2
+            echo "--- hdiutil attach -verbose:" >&2
+            hdiutil attach "$dmg" -verbose -nobrowse -readonly -mountpoint "$mnt" || true
             ls -la "$dmg" >&2 || true
             hdiutil imageinfo "$dmg" >&2 || true
             hdiutil info >&2 || true
@@ -1880,20 +1917,57 @@ jobs:
         dmg=$(ls release-assets/*.dmg 2>/dev/null | head -1 || true)
         if [ -n "$dmg" ]; then
           mnt=$(mktemp -d /tmp/dmgmnt.XXXXXX)
-          # hdiutil attach on runner images is racy right after CPack's own
-          # attach/detach cycle (diskarbitration settles slowly and cancels
-          # the attach); retry, and dump diagnostics if it still refuses.
+          # hdiutil attach rejects the CPack-produced DMG with
+          # "attach canceled" on macOS 15 runners. Try three strategies:
+          #  A: explicit mountpoint, default verify   (3 tries, backoff)
+          #  B: explicit mountpoint, -noverify        (2 tries)
+          #  C: default /Volumes mount, -noverify     (MountPoint parsed
+          #     from the -plist output)
+          # If none attach, dump UDIF verify + verbose attach diagnostics.
           attached=0
           for attempt in 1 2 3; do
             if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
               attached=1
               break
             fi
-            echo "hdiutil attach attempt $attempt failed" >&2
+            echo "attach strategy A attempt $attempt failed" >&2
             sleep $((attempt * 2))
           done
           if [ "$attached" != "1" ]; then
+            for attempt in 1 2; do
+              if hdiutil attach "$dmg" -noverify -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
+                attached=1
+                break
+              fi
+              echo "attach strategy B attempt $attempt failed" >&2
+              sleep 1
+            done
+          fi
+          if [ "$attached" != "1" ]; then
+            attach_plist=$(mktemp /tmp/attachplist.XXXXXX)
+            if hdiutil attach "$dmg" -noverify -nobrowse -readonly -plist > "$attach_plist" 2> "$attach_plist.err"; then
+              mnt=$(python3 - "$attach_plist" <<'PY'
+        import plistlib, sys
+        with open(sys.argv[1], "rb") as fh:
+            entities = plistlib.load(fh)
+        print(next((e.get("MountPoint", "") for e in entities if e.get("MountPoint")), ""))
+        PY
+              )
+              if [ -n "$mnt" ]; then
+                attached=2
+                echo "attach strategy C ok (default mount at $mnt)"
+              fi
+            else
+              cat "$attach_plist.err" >&2 || true
+            fi
+            rm -f "$attach_plist" "$attach_plist.err"
+          fi
+          if [ "$attached" = "0" ]; then
             echo "hdiutil attach failed for $dmg; diagnostics:" >&2
+            echo "--- hdiutil verify (UDIF checksum):" >&2
+            hdiutil verify "$dmg" >&2 || echo "UDIF verify FAILED" >&2
+            echo "--- hdiutil attach -verbose:" >&2
+            hdiutil attach "$dmg" -verbose -nobrowse -readonly -mountpoint "$mnt" || true
             ls -la "$dmg" >&2 || true
             hdiutil imageinfo "$dmg" >&2 || true
             hdiutil info >&2 || true
