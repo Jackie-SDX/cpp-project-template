@@ -81,6 +81,24 @@ foreach(_f IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
 	_wrt_add_search_dir("${_dir}")
 endforeach()
 
+# MinGW/MSYS2 toolchain runtime DLLs (libstdc++-6.dll, libwinpthread-1.dll,
+# libgcc_s_*.dll, ...) live in the compiler's bin directory. That directory
+# is NOT part of CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES (which lists lib/ and
+# lib/gcc/... only), so a MinGW leg could build wxWidgets from vcpkg yet
+# fail the closure with "MISSING libstdc++-6.dll". The compiler's own bin
+# directory plus the MSYS2 prefix dirs cover MINGW32/MINGW64/UCRT64/CLANG*
+# environments.
+if(CMAKE_CXX_COMPILER)
+	get_filename_component(_wrt_cxx_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+	_wrt_add_search_dir("${_wrt_cxx_bin}")
+endif()
+if(DEFINED ENV{MINGW_PREFIX})
+	_wrt_add_search_dir("$ENV{MINGW_PREFIX}/bin")
+endif()
+if(DEFINED ENV{MSYSTEM_PREFIX})
+	_wrt_add_search_dir("$ENV{MSYSTEM_PREFIX}/bin")
+endif()
+
 if(_wrt_search_dirs)
 	list(REMOVE_DUPLICATES _wrt_search_dirs)
 endif()
