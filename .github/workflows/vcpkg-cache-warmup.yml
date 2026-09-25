@@ -276,7 +276,15 @@ jobs:
         id: cache-state
         shell: bash
         run: |
-          before="$(find project/vcpkg_cache -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
+          # A cold start has no project/vcpkg_cache directory at all (actions/cache
+          # only materializes the path when something was restored). find(1) then
+          # exits 1, and under `bash -e -o pipefail` that killed the step before
+          # the save steps could ever run -- which is why a never-seeded key
+          # never produced a cache. Treat "directory absent" as zero entries.
+          before=0
+          if [ -d project/vcpkg_cache ]; then
+            before="$(find project/vcpkg_cache -type f -name '*.zip' | wc -l | tr -d ' ')"
+          fi
           echo "before=${before}" >> "$GITHUB_OUTPUT"
           echo "restored zip entries: ${before} (exact hit: ${{ steps.vcpkg-binary-cache-restore.outputs.cache-hit }})"
 
@@ -323,7 +331,10 @@ jobs:
         run: |
           set -euo pipefail
           before="${{ steps.cache-state.outputs.before }}"
-          after="$(find project/vcpkg_cache -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
+          after=0
+          if [ -d project/vcpkg_cache ]; then
+            after="$(find project/vcpkg_cache -type f -name '*.zip' | wc -l | tr -d ' ')"
+          fi
           echo "zip entries before install: ${before}, after: ${after}"
           if [ "${after}" -gt "${before}" ]; then
             echo "::warning::Stale vcpkg seed under key ${VCPKG_CACHE_KEY}: the exact cache hit did not contain $((after - before)) package(s) that had to be rebuilt. Delete that cache key and re-run 'Release vcpkg cache warmup' to replace it."

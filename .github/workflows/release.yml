@@ -189,8 +189,8 @@ jobs:
         run: |
           bash project/scripts/vcpkg_cache_gate.sh \
             --key "${VCPKG_CACHE_KEY}" \
-            --hit "${{ steps.package-cache.outputs.cache-hit }}" \
-            --tool-hit "${{ steps.vcpkg-tool-cache.outputs.cache-hit }}" \
+            --hit "${{ steps.package-cache.outputs.cache-hit || 'false' }}" \
+            --tool-hit "${{ steps.vcpkg-tool-cache.outputs.cache-hit || 'false' }}" \
             --record-file .vcpkg-seed/record \
             --label "${{ matrix.name }} vcpkg package cache"
   # package: core 10-config desktop matrix (Windows MSVC/MinGW/LLVM, Linux GCC,

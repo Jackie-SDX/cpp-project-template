@@ -25,8 +25,16 @@
 # The vcpkg *tool* cache is only ever reported (--tool-hit): a miss costs a
 # bootstrap, never a 30 minute rebuild, so it must not block a release.
 #
+# Empty-string cache-hit values are accepted. actions/cache's first-party
+# README documents three states for the `cache-hit` output -- `true` (exact
+# hit), `false` (partial/restore-key hit) and `''` (no cache found at all) --
+# so a brand-new fork, an expired cache or a never-seeded key legitimately
+# produces an empty `--hit`. That is a miss, not a usage error; rejecting it
+# would turn every legitimate cold start into a hard failure (exit 2) before
+# the decision rules above could even run.
+#
 # Usage
-#   vcpkg_cache_gate.sh --key K --hit true|false --record-file F
+#   vcpkg_cache_gate.sh --key K --hit true|false|"" --record-file F
 #                       [--tool-hit true|false] [--mode block|warn]
 #                       [--max-age-hours 24] [--label text] [--selftest]
 #
@@ -36,8 +44,9 @@ set -euo pipefail
 
 usage() {
   printf '%s\n' \
-    'usage: vcpkg_cache_gate.sh --key K --hit true|false --record-file F [--tool-hit true|false]' \
+    'usage: vcpkg_cache_gate.sh --key K --hit true|false|"" --record-file F [--tool-hit true|false]' \
     '                          [--mode block|warn] [--max-age-hours N] [--label text] [--selftest]' \
+    '       an empty --hit is actions/cache'"'"'s "no cache found" state and counts as a miss' \
     '       see the header comment of this file for the decision rules'
 }
 
@@ -48,8 +57,10 @@ die() {
 
 UPSTREAM_REPOSITORY="Jackie-SDX/cpp-project-template"
 
+# __unset__ distinguishes "the --hit flag was omitted" (usage error) from
+# "actions/cache rendered an empty cache-hit" (a legitimate miss).
 key=""
-hit=""
+hit="__unset__"
 tool_hit=""
 record_file=""
 mode=""
@@ -83,11 +94,15 @@ normalize_bool() {
 
 if [ "$selftest" -eq 0 ]; then
   [ -n "$key" ] || { usage; exit 2; }
-  [ -n "$hit" ] || { usage; exit 2; }
+  # --hit must be present, but its value may legitimately be empty:
+  # actions/cache yields "" when no cache (not even a restore-key prefix) was
+  # found, which is exactly the cold-start state the decision rules handle.
+  [ "$hit" != "__unset__" ] || { usage; exit 2; }
   [ -n "$record_file" ] || { usage; exit 2; }
   hit="$(normalize_bool "$hit")"
-  [ -n "$tool_hit" ] && tool_hit="$(normalize_bool "$tool_hit")"
-  [ -n "$tool_hit" ] || tool_hit=""
+  if [ -n "$tool_hit" ]; then
+    tool_hit="$(normalize_bool "$tool_hit")"
+  fi
   case "$max_age_hours" in
     ''|*[!0-9]*) die "--max-age-hours must be a non-negative integer" ;;
   esac
@@ -272,10 +287,25 @@ if [ "$selftest" -eq 1 ]; then
     # 8. usage errors.
     rc=0; "$0" --key K1 >/dev/null 2>&1 || rc=$?
     check "$rc" "2" "missing required arguments exit 2"
+    rc=0; "$0" --key K1 --record-file "$tmpdir/missing" >/dev/null 2>&1 || rc=$?
+    check "$rc" "2" "missing --hit exits 2"
     rc=0; "$0" --key K1 --hit maybe --record-file "$tmpdir/missing" >/dev/null 2>&1 || rc=$?
     check "$rc" "2" "invalid --hit exits 2"
     rc=0; "$0" --key K1 --hit false --record-file "$tmpdir/missing" --mode nope >/dev/null 2>&1 || rc=$?
     check "$rc" "2" "invalid --mode exits 2"
+
+    # 9. actions/cache's empty cache-hit ("no cache found") is a miss, never a
+    #    usage error: a brand-new fork / expired cache / never-seeded key must
+    #    reach the decision rules instead of dying with exit 2.
+    rc=0; GITHUB_REPOSITORY="$UPSTREAM_REPOSITORY" GITHUB_EVENT_NAME=push \
+      "$0" --key K1 --hit "" --record-file "$tmpdir/missing" >/dev/null 2>&1 || rc=$?
+    check "$rc" "0" "empty --hit on a cold start passes (was: usage error)"
+    rc=0; GITHUB_REPOSITORY="$UPSTREAM_REPOSITORY" GITHUB_EVENT_NAME=push \
+      "$0" --key K1 --hit "" --record-file "$tmpdir/fresh" >/dev/null 2>&1 || rc=$?
+    check "$rc" "1" "empty --hit with a fresh seed record still fails upstream"
+    rc=0; GITHUB_REPOSITORY="someone/fork" GITHUB_EVENT_NAME=push \
+      "$0" --key K1 --hit "" --record-file "$tmpdir/fresh" >/dev/null 2>&1 || rc=$?
+    check "$rc" "0" "empty --hit with a fresh seed record only warns on a fork"
 
     if [ "$failures" -ne 0 ]; then
       printf 'selftest: %s failure(s)\n' "$failures" >&2
