@@ -120,7 +120,7 @@ jobs:
       - name: Install build dependencies
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt-get install -y ninja-build ccache lcov valgrind libwxgtk3.2-dev libgtest-dev
+            sudo apt-get install -y ninja-build ccache lcov valgrind libwxgtk3.2-dev libgtest-dev rpm dpkg-dev
           elif [ "$RUNNER_OS" == "Windows" ]; then
             choco install ninja ccache -y
           elif [ "$RUNNER_OS" == "macOS" ]; then
@@ -327,18 +327,19 @@ jobs:
           cmake --install build --prefix instdir --strip --config Release
           test -n "$(find instdir -type f -print -quit)"
           mkdir -p package-smoke
-          (cd instdir && tar -czf "../package-smoke/linux-gcc-x64.tar.gz" .)
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          scripts/make_deterministic_tarball.sh --epoch "$SOURCE_DATE_EPOCH" --input instdir --output "package-smoke/linux-gcc-x86_64.tar.gz"
           cpack --config build/CPackConfig.cmake -C Release -G DEB
           cpack --config build/CPackConfig.cmake -C Release -G RPM
           deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
           rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
           test -n "$deb"
           test -n "$rpm"
-          cp "$deb" package-smoke/linux-gcc-x64.deb
-          cp "$rpm" package-smoke/linux-gcc-x64.rpm
-          test -f package-smoke/linux-gcc-x64.tar.gz
-          test -f package-smoke/linux-gcc-x64.deb
-          test -f package-smoke/linux-gcc-x64.rpm
+          cp "$deb" package-smoke/linux-gcc-x86_64.deb
+          cp "$rpm" package-smoke/linux-gcc-x86_64.rpm
+          test -f package-smoke/linux-gcc-x86_64.tar.gz
+          test -f package-smoke/linux-gcc-x86_64.deb
+          test -f package-smoke/linux-gcc-x86_64.rpm
           sha256sum package-smoke/* > package-smoke/SHA256SUMS
 
       - name: Upload coverage to Codecov
