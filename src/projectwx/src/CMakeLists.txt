@@ -27,7 +27,32 @@ if (WIN32)
 	configure_file("${PACKAGING_DIR}/windows/version.rc.in" "${PROJECT_BINARY_DIR}/${PROJECT_WX_NAME}_version.rc")
 endif()
 
-add_executable(${PROJECT_WX_NAME} WIN32 ${SRC_FILES}
+# macOS application bundle (CORE-4). These MACOSX_BUNDLE_* variables are
+# consumed when add_executable() runs below, so they must be set here, in the
+# same directory scope as the target. The bundle identifier is derived from
+# the repository owner (GitHub organization Jackie-SDX, reversed to reverse
+# DNS) rather than the upstream fork it was copied from, so consumers see a
+# stable, project-owned identity.
+if (APPLE)
+	string(TOLOWER "${ORGANIZATION}" _wx_org_id)
+	string(REPLACE "-" "" _wx_org_id "${_wx_org_id}")
+	string(TOLOWER "${PROJECT_NAME}" _wx_project_id)
+	set(MACOSX_BUNDLE_BUNDLE_NAME "${PROJECT_WX_NAME}")
+	set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.github.${_wx_org_id}.${_wx_project_id}")
+	set(MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
+	set(MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+	set(MACOSX_BUNDLE_LONG_VERSION_STRING "${PROJECT_VERSION}")
+	set(MACOSX_BUNDLE_INFO_STRING "${PROJECT_WX_NAME} ${PROJECT_VERSION} - ${PROJECT_DESCRIPTION}")
+	set(MACOSX_BUNDLE_ICON_FILE "${PROJECT_WX_NAME}.icns")
+	set(MACOSX_BUNDLE_COPYRIGHT "${CPACK_PACKAGE_COPYRIGHT}")
+	set(_wx_bundle_keyword MACOSX_BUNDLE)
+	set_source_files_properties("${PACKAGING_DIR}/apple/icon.icns"
+		PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+	set(_wx_icon_source "${PACKAGING_DIR}/apple/icon.icns")
+endif()
+
+add_executable(${PROJECT_WX_NAME} ${_wx_bundle_keyword} WIN32 ${SRC_FILES}
+	${_wx_icon_source}
 	$<$<PLATFORM_ID:Windows>:${PACKAGING_DIR}/windows/icon.rc>
 	$<$<PLATFORM_ID:Windows>:${PROJECT_BINARY_DIR}/${PROJECT_WX_NAME}_version.rc>)
 

@@ -73,11 +73,11 @@ jobs:
         config:
           - { name: "Ubuntu GCC", os: ubuntu-24.04, cc: "gcc", cxx: "g++", arch: x64, vcpkg_triplet: x64-linux, use_vcpkg: "ON" }
           - { name: "macOS Clang", os: macos-latest, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: arm64-osx, use_vcpkg: "ON" }
-          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", arch: x64, environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, vcpkg_cache_prefix: windows-master-x64, use_vcpkg: "ON" }
-          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", arch: x86, environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, vcpkg_cache_prefix: windows-master-x86, use_vcpkg: "ON" }
-          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", arch: x64, vcpkg_triplet: x64-win-llvm, vcpkg_cache_prefix: windows-llvm-master-x64, use_vcpkg: "ON" }
-          - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", arch: x64, vcpkg_triplet: x64-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x64, use_vcpkg: "ON", msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain, msys2_bin: mingw64\bin }
-          - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", arch: x86, vcpkg_triplet: x86-mingw-dynamic, vcpkg_cache_prefix: windows-mingw-master-x86, use_vcpkg: "ON", msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain, msys2_bin: mingw32\bin }
+          - { name: "Windows MSVC x64", os: windows-latest, cc: "cl", cxx: "cl", arch: x64, environment_script: "vcvars64.bat", vcpkg_triplet: x64-windows-static, use_vcpkg: "ON" }
+          - { name: "Windows MSVC i686", os: windows-latest, cc: "cl", cxx: "cl", arch: x86, environment_script: "vcvars32.bat", vcpkg_triplet: x86-windows-static, use_vcpkg: "ON" }
+          - { name: "Windows LLVM x64", os: windows-latest, cc: "clang-cl", cxx: "clang-cl", arch: x64, vcpkg_triplet: x64-win-llvm, use_vcpkg: "ON" }
+          - { name: "Windows MinGW x64", os: windows-latest, cc: "x86_64-w64-mingw32-gcc", cxx: "x86_64-w64-mingw32-g++", arch: x64, vcpkg_triplet: x64-mingw-dynamic, use_vcpkg: "ON", msys2_msystem: MINGW64, msys2_toolchain: mingw-w64-x86_64-toolchain, msys2_bin: mingw64\bin }
+          - { name: "Windows MinGW i686", os: windows-latest, cc: "i686-w64-mingw32-gcc", cxx: "i686-w64-mingw32-g++", arch: x86, vcpkg_triplet: x86-mingw-dynamic, use_vcpkg: "ON", msys2_msystem: MINGW32, msys2_toolchain: mingw-w64-i686-toolchain, msys2_bin: mingw32\bin }
           - { name: "Windows CLANGARM64 MinGW", os: windows-11-arm, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: none, use_vcpkg: "OFF", msys2_msystem: CLANGARM64, msys2_toolchain: mingw-w64-clang-aarch64-toolchain, msys2_packages: wxwidgets3.2-msw:p gtest:p, msys2_bin: clangarm64\bin }
           - { name: "Linux Clang ARM64", os: ubuntu-24.04-arm, cc: "clang", cxx: "clang++", arch: arm64, vcpkg_triplet: none, use_vcpkg: "OFF" }
 
@@ -120,7 +120,7 @@ jobs:
       - name: Install build dependencies
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt-get install -y ninja-build ccache lcov valgrind libwxgtk3.2-dev libgtest-dev
+            sudo apt-get install -y ninja-build ccache lcov valgrind libwxgtk3.2-dev libgtest-dev rpm dpkg-dev
           elif [ "$RUNNER_OS" == "Windows" ]; then
             choco install ninja ccache -y
           elif [ "$RUNNER_OS" == "macOS" ]; then
@@ -204,15 +204,37 @@ jobs:
           echo "C++ compiler: $cxx_path"
           echo "Compiler fingerprint: $compiler_hash"
 
+      # ADR 006: CI owns its own vcpkg cache namespace (windows-ci-*) so a CI
+      # bag can never be written into, or restored from, the release family.
+      # The compiler fingerprint stays in the key for MinGW/LLVM because those
+      # legs install their toolchain through msys2/setup-msys2 with caching,
+      # which can outlive a runner image update.
+      - name: Resolve Windows vcpkg cache key
+        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
+        shell: bash
+        run: |
+          case "${{ matrix.config.name }}" in
+            *MSVC*) toolchain=msvc ;;
+            *MinGW*) toolchain=mingw ;;
+            *LLVM*) toolchain=llvm ;;
+            *) echo "Unsupported Windows vcpkg configuration: ${{ matrix.config.name }}" >&2; exit 1 ;;
+          esac
+          bash project/scripts/vcpkg_cache_key.sh github-env \
+            --family ci \
+            --toolchain "$toolchain" \
+            --arch "${{ matrix.config.arch }}" \
+            --build-type "${{ matrix.build_type }}" \
+            --extra-fingerprint "${{ steps.compiler-fingerprint.outputs.compiler_hash || 'none' }}" \
+            --manifest project/vcpkg.json
+
       - name: Restore MSVC vcpkg binary cache
         if: runner.os == 'Windows' && contains(matrix.config.name, 'MSVC')
         id: msvc-vcpkg-binary-cache-restore
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
-          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
-          restore-keys: |
-            ${{ matrix.config.vcpkg_cache_prefix }}-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
 
       - name: Restore MinGW and LLVM vcpkg binary cache
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM'))
@@ -220,9 +242,8 @@ jobs:
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
-          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
-          restore-keys: |
-            ${{ matrix.config.vcpkg_cache_prefix }}-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
 
       - name: Initialize vcpkg binary cache directory
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF'
@@ -277,14 +298,14 @@ jobs:
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
-          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ env.VCPKG_CACHE_KEY }}
 
       - name: Save MinGW and LLVM vcpkg binary cache
         if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && (contains(matrix.config.name, 'MinGW') || contains(matrix.config.name, 'LLVM')) && success() && steps.toolchain-vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
-          key: ${{ matrix.config.vcpkg_cache_prefix }}-${{ matrix.build_type }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ steps.compiler-fingerprint.outputs.compiler_hash }}-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ env.VCPKG_CACHE_KEY }}
 
       - name: Configure
         env:
@@ -327,18 +348,19 @@ jobs:
           cmake --install build --prefix instdir --strip --config Release
           test -n "$(find instdir -type f -print -quit)"
           mkdir -p package-smoke
-          (cd instdir && tar -czf "../package-smoke/linux-gcc-x64.tar.gz" .)
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          scripts/make_deterministic_tarball.sh --epoch "$SOURCE_DATE_EPOCH" --input instdir --output "package-smoke/linux-gcc-x86_64.tar.gz"
           cpack --config build/CPackConfig.cmake -C Release -G DEB
           cpack --config build/CPackConfig.cmake -C Release -G RPM
           deb=$(find build/package -maxdepth 1 -type f -name '*.deb' | head -1)
           rpm=$(find build/package -maxdepth 1 -type f -name '*.rpm' | head -1)
           test -n "$deb"
           test -n "$rpm"
-          cp "$deb" package-smoke/linux-gcc-x64.deb
-          cp "$rpm" package-smoke/linux-gcc-x64.rpm
-          test -f package-smoke/linux-gcc-x64.tar.gz
-          test -f package-smoke/linux-gcc-x64.deb
-          test -f package-smoke/linux-gcc-x64.rpm
+          cp "$deb" package-smoke/linux-gcc-x86_64.deb
+          cp "$rpm" package-smoke/linux-gcc-x86_64.rpm
+          test -f package-smoke/linux-gcc-x86_64.tar.gz
+          test -f package-smoke/linux-gcc-x86_64.deb
+          test -f package-smoke/linux-gcc-x86_64.rpm
           sha256sum package-smoke/* > package-smoke/SHA256SUMS
 
       - name: Upload coverage to Codecov

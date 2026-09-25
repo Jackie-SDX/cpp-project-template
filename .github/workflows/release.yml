@@ -4,12 +4,16 @@
 # Purpose
 # --------
 # Builds the full desktop artifact matrix (Windows MSVC/MinGW/LLVM, Linux
-# GCC/Clang, macOS Clang/GCC/LLVM; 54 artifacts after Android support was
+# GCC/Clang, macOS Clang/GCC/LLVM; 54 packages after Android support was
 # retired, the 20 ``.7z`` standalone archives were removed, and the Linux
 # ``.zip`` / macOS ``.tar.gz`` convenience archives were dropped under the
-# strict one-archive-per-platform policy), validates the complete expected
-# inventory, and publishes a GitHub release with generated checksums when a
-# ``v*`` tag is pushed.
+# strict one-archive-per-platform policy), validates the inventory against
+# packaging/release-contract.tsv (56 files for the package+source scope, 61
+# for the published GitHub release: + SHA256SUMS, release-contract.tsv,
+# release-evidence.json, release-sbom.spdx.json, verify-release.sh) and
+# publishes a GitHub release with generated checksums and provenance
+# attestations when a ``v*`` tag is pushed. Package counts are never
+# hardcoded here -- scripts/release_contract.sh is the source of truth.
 #
 # Android / NDK support was removed from this pipeline in this revision; see
 #   - .github/scripts/configure.cmake    (NDK toolchain branch deleted)
@@ -82,9 +86,12 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_COMPILERCHECK: content
 jobs:
-  # cache-gate: warms/proves the vcpkg + compiler caches used by every
-  # downstream package job and fails fast on tag runs when the upstream
-  # release cache contract is not satisfiable.
+  # cache-gate: proves the vcpkg binary cache contract (ADR 006) before any
+  # package job starts. It fails a tag/dispatch run only when vcpkg-cache-warmup
+  # recorded a seed for this exact key recently and the cache is nevertheless
+  # gone; a cold start (fork, first run, key change, expired record) always
+  # proceeds and lets the package job build slowly, because a cache miss must
+  # never fail a release.
 
   cache-gate:
     name: Windows release cache gate (${{ matrix.name }})
@@ -93,6 +100,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # One leg per Windows vcpkg consumer of this workflow: the six package
+        # legs below and the MSVC ARM64 expanded-package leg. (No LLVM ARM64
+        # vcpkg build exists, so there is no LLVM ARM64 seed to gate.)
         include:
           - name: Windows MSVC x64
             compiler: msvc
@@ -119,11 +129,6 @@ jobs:
             compiler: llvm
             arch: x86
             tool_arch: X64
-          - name: Windows LLVM ARM64
-            os: windows-11-arm
-            compiler: llvm
-            arch: arm64
-            tool_arch: ARM64
           - name: Windows MinGW x64
             compiler: mingw
             os: windows-latest
@@ -138,24 +143,31 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { path: project }
-      - name: Resolve cache prefix
+      - name: Resolve release cache key
         shell: bash
         run: |
-          case "${{ matrix.compiler }}" in
-            msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-            mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-            llvm) if [ "${{ matrix.arch }}" = "arm64" ]; then echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-arm64-Release" >> "$GITHUB_ENV"; else echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV"; fi ;;
-            *) echo "Unsupported cache compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
-          esac
+          bash project/scripts/vcpkg_cache_key.sh github-env \
+            --family release \
+            --toolchain "${{ matrix.compiler }}" \
+            --arch "${{ matrix.arch }}" \
+            --build-type Release \
+            --manifest project/vcpkg.json
       - name: Restore release package cache
         id: package-cache
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: project/vcpkg_cache
-          key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
-          restore-keys: |
-            ${{ env.VCPKG_CACHE_PREFIX }}-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
           lookup-only: true
+      - name: Restore vcpkg cache seed record
+        id: seed-record
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: .vcpkg-seed/record
+          key: vcpkg-seed-${{ env.VCPKG_CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-seed-${{ env.VCPKG_CACHE_KEY }}-
       - name: Checkout vcpkg
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -173,9 +185,14 @@ jobs:
             vcpkg-tool-windows-${{ matrix.tool_arch }}-${{ env.VCPKG_GIT_REF }}-
           lookup-only: true
       - name: Enforce upstream release cache contract
-        if: github.repository == 'NaylaCruz/cpp-project-template' && (steps.package-cache.outputs.cache-hit != 'true' || steps.vcpkg-tool-cache.outputs.cache-hit != 'true')
-        shell: pwsh
-        run: throw "Release cache gate failed for ${{ matrix.name }}. Package cache hit=${{ steps.package-cache.outputs.cache-hit }}, vcpkg tool cache hit=${{ steps.vcpkg-tool-cache.outputs.cache-hit }}. Seed the release vcpkg caches with vcpkg-cache-warmup before tagging."
+        shell: bash
+        run: |
+          bash project/scripts/vcpkg_cache_gate.sh \
+            --key "${VCPKG_CACHE_KEY}" \
+            --hit "${{ steps.package-cache.outputs.cache-hit }}" \
+            --tool-hit "${{ steps.vcpkg-tool-cache.outputs.cache-hit }}" \
+            --record-file .vcpkg-seed/record \
+            --label "${{ matrix.name }} vcpkg package cache"
   # package: core 10-config desktop matrix (Windows MSVC/MinGW/LLVM, Linux GCC,
   # macOS Clang). Skipped on plain PRs unless the full-release-test label is set.
 
@@ -214,6 +231,9 @@ jobs:
           toolchain: mingw
           arch: x64
           nsis_generator: NSIS64
+          msys2_msystem: MINGW64
+          msys2_toolchain: mingw-w64-x86_64-toolchain
+          msys2_bin: mingw64/bin
         - name: Windows MinGW x86
           os: windows-latest
           cc: gcc
@@ -222,6 +242,9 @@ jobs:
           toolchain: mingw
           arch: x86
           nsis_generator: NSIS
+          msys2_msystem: MINGW32
+          msys2_toolchain: mingw-w64-i686-toolchain
+          msys2_bin: mingw32/bin
         - name: Windows LLVM x64
           os: windows-latest
           cc: clang-cl
@@ -256,7 +279,7 @@ jobs:
           os: macos-latest
           cc: clang
           cxx: clang++
-          toolchain: clang
+          toolchain: apple-clang
           arch: arm64
     defaults:
       run:
@@ -268,6 +291,43 @@ jobs:
         submodules: true
         fetch-depth: 0
         path: project
+    # CORE-10/P0-6: resolve version + release epoch BEFORE configure so the
+    # same VERSION feeds CPack (CPACK_PACKAGE_VERSION, installers, DEB/RPM)
+    # and SOURCE_DATE_EPOCH normalizes every archive produced below.
+    - name: Resolve release version, epoch and naming
+      working-directory: project
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+          version="${GITHUB_REF_NAME#v}"
+        else
+          # Non-tag runs (workflow_dispatch/PR validation): nearest release tag
+          # only -- CMake project(VERSION) rejects describe output with commit
+          # counts (0.0.9-13-g...), so it must never reach configure.
+          version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+          version="${version:-0.0.0}"
+        fi
+        epoch="$(git log -1 --format=%ct)"
+        case "${{ runner.os }}" in
+          Linux) platform="linux" ;;
+          Windows) platform="windows" ;;
+          macOS) platform="macos" ;;
+          *) echo "unsupported runner OS ${{ runner.os }}" >&2; exit 1 ;;
+        esac
+        case "${{ matrix.arch }}" in
+          x64) package_arch="x86_64" ;;
+          x86) package_arch="i686" ;;
+          arm64) package_arch="arm64" ;;
+          *) echo "unsupported arch ${{ matrix.arch }}" >&2; exit 1 ;;
+        esac
+        {
+          echo "VERSION=$version"
+          echo "SOURCE_DATE_EPOCH=$epoch"
+          echo "CPP_PROJECT_TEMPLATE_VERSION=$version"
+          echo "RELEASE_PREFIX=cpp-project-template_${version}_${platform}-${{ matrix.toolchain }}-${package_arch}"
+        } >> "$GITHUB_ENV"
+        echo "version=$version epoch=$epoch"
     - name: Restore compiler cache
       id: ccache-restore
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -294,7 +354,7 @@ jobs:
 
         '
     - name: Install packaging dependencies
-      run: "if [ \"$RUNNER_OS\" = \"Linux\" ]; then\n  sudo apt-get update\n  sudo apt-get install -y ninja-build ccache rpm libwxgtk3.2-dev libgtest-dev\n\
+      run: "if [ \"$RUNNER_OS\" = \"Linux\" ]; then\n  sudo apt-get update\n  sudo apt-get install -y ninja-build ccache rpm dpkg-dev libwxgtk3.2-dev libgtest-dev\n\
         elif [ \"$RUNNER_OS\" = \"Windows\" ]; then\n  choco install ninja ccache nsis 7zip -y --no-progress\n  choco install wixtoolset -y --no-progress\n\
         elif [ \"$RUNNER_OS\" = \"macOS\" ]; then\n  brew install ninja ccache wxwidgets googletest\nfi\n"
     - name: Refresh Windows environment
@@ -302,6 +362,40 @@ jobs:
       shell: pwsh
       run: "if (Test-Path \"$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1\") {\n  Import-Module \"$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1\"\
         \n  refreshenv\n}\n7z | Select-Object -First 1\n"
+    # CORE-1/P0-4: the MinGW legs must compile with the matching MSYS2
+    # toolchain (x64->MINGW64, x86->MINGW32). Without this the runner's
+    # stray gcc silently produces x86_64 binaries for the i686 leg.
+    - name: Setup MSYS2 MinGW
+      id: msys2
+      if: runner.os == 'Windows' && matrix.toolchain == 'mingw'
+      uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+      with:
+        msystem: ${{ matrix.msys2_msystem }}
+        update: false
+        path-type: minimal
+        install: ${{ matrix.msys2_toolchain }}
+    - name: Add MSYS2 compiler to PATH
+      if: runner.os == 'Windows' && matrix.toolchain == 'mingw'
+      shell: pwsh
+      run: |
+        $msysRoot = "${{ steps.msys2.outputs.msys2-location }}"
+        if (-not $msysRoot) { throw "MSYS2 location output was empty" }
+        $bin = Join-Path $msysRoot "${{ matrix.msys2_bin }}"
+        if (-not (Test-Path $bin)) { throw "MSYS2 compiler directory not found: $bin" }
+        $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+    - name: Assert MinGW target architecture
+      if: runner.os == 'Windows' && matrix.toolchain == 'mingw'
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${{ matrix.arch }}" in
+          x64) want=x86_64-w64-mingw32 ;;
+          x86) want=i686-w64-mingw32 ;;
+          *) echo "unknown mingw arch ${{ matrix.arch }}" >&2; exit 1 ;;
+        esac
+        got=$(gcc -dumpmachine | tr '[:upper:]' '[:lower:]')
+        echo "gcc -dumpmachine = $got (expected $want)"
+        test "$got" = "$want"
     - name: Get Windows vcpkg triplets
       if: runner.os == 'Windows'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -313,20 +407,21 @@ jobs:
     - name: Resolve GitLab-style vcpkg cache key
       if: runner.os == 'Windows'
       shell: bash
-      run: "case \"${{ matrix.toolchain }}\" in\n  msvc) cache_prefix=\"windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  mingw) cache_prefix=\"\
-        windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  llvm) cache_prefix=\"windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{\
-        \ matrix.arch }}-Release\" ;;\n  *) echo \"Unsupported Windows cache toolchain: ${{ matrix.toolchain }}\" >&2; exit 1 ;;\nesac\necho \"VCPKG_CACHE_PREFIX=${cache_prefix}\"\
-        \ >> \"$GITHUB_ENV\"\n"
+      run: |
+        bash project/scripts/vcpkg_cache_key.sh github-env \
+          --family release \
+          --toolchain "${{ matrix.toolchain }}" \
+          --arch "${{ matrix.arch }}" \
+          --build-type Release \
+          --manifest project/vcpkg.json
     - name: Restore GitLab-style vcpkg binary cache
       if: runner.os == 'Windows'
       id: vcpkg-binary-cache-restore
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
-        restore-keys: '${{ env.VCPKG_CACHE_PREFIX }}-
-
-          '
+        key: ${{ env.VCPKG_CACHE_KEY }}
+        restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
     - name: Checkout Windows vcpkg
       if: runner.os == 'Windows'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -361,9 +456,9 @@ jobs:
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
         restore-keys: |
-          vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
+          vcpkg-downloads-windows-${{ runner.arch }}-
     - name: vcpkg
       if: runner.os == 'Windows'
       shell: pwsh
@@ -390,7 +485,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
     - name: Save Windows vcpkg tool cache
       if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -402,7 +497,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        key: ${{ env.VCPKG_CACHE_KEY }}
     - name: Configure
       working-directory: project
       env:
@@ -467,21 +562,6 @@ jobs:
         echo "base=$base" >> "$GITHUB_OUTPUT"
 
         '
-    - name: Resolve release version and naming
-      working-directory: project
-      shell: bash
-      run: 'if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags
-        --always --dirty | sed ''s/^v//'')"; fi
-
-        case "$RUNNER_OS" in Linux) platform="linux" ;; Windows) platform="windows" ;; macOS) platform="macos" ;; *) exit 1 ;; esac
-
-        case "${{ matrix.arch }}" in x64) package_arch="x86_64" ;; x86) package_arch="i686" ;; arm64) package_arch="arm64" ;; *) exit 1 ;; esac
-
-        echo "VERSION=$version" >> "$GITHUB_ENV"
-
-        echo "RELEASE_PREFIX=cpp-project-template_${version}_${platform}-${{ matrix.toolchain }}-${package_arch}" >> "$GITHUB_ENV"
-
-        '
     - name: Package Windows
       if: runner.os == 'Windows'
       working-directory: project
@@ -492,7 +572,7 @@ jobs:
       run: |
         $ErrorActionPreference = 'Stop'
         New-Item -ItemType Directory -Force release-assets | Out-Null
-        Compress-Archive -Path instdir\* -DestinationPath "release-assets\$env:PREFIX.zip" -Force
+        & .\scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets\$env:PREFIX.zip" -Epoch ([int]$env:SOURCE_DATE_EPOCH)
         Push-Location build
         cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
@@ -515,7 +595,7 @@ jobs:
         PREFIX: ${{ env.RELEASE_PREFIX }}
       run: 'mkdir -p release-assets
 
-        (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
+        scripts/make_deterministic_tarball.sh --epoch "$SOURCE_DATE_EPOCH" --input instdir --output "release-assets/${PREFIX}.tar.gz"
 
         cpack --config build/CPackConfig.cmake -C Release -G DEB
 
@@ -540,7 +620,7 @@ jobs:
       run: |
         mkdir -p release-assets
 
-        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
+        pwsh -NoProfile -File scripts/make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets/${PREFIX}.zip" -Epoch "$SOURCE_DATE_EPOCH"
 
         cpack_ok=0
         for attempt in 1 2 3; do
@@ -564,17 +644,252 @@ jobs:
 
         cp "$dmg" "release-assets/${PREFIX}.dmg"
 
+    # CORE-1/CORE-2: extract the ZIP candidate and prove the runtime DLL
+    # closure plus a bounded CLI smoke straight from the FINAL payload.
+    - name: Verify Windows package payload closure
+      if: runner.os == 'Windows'
+      working-directory: project
+      shell: pwsh
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+        EXPECTED_ARCH: ${{ matrix.arch }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        New-Item -ItemType Directory -Force verify-artifacts | Out-Null
+        $want = switch ($env:EXPECTED_ARCH) {
+          'x64' { 'x86_64' }
+          'x86' { 'i686' }
+          'arm64' { 'arm64' }
+          default { throw "unknown arch $($env:EXPECTED_ARCH)" }
+        }
+        $zip = "release-assets\$env:PREFIX.zip"
+        if (-not (Test-Path $zip)) { throw "zip not found: $zip" }
+        if (Test-Path verify-zip) { Remove-Item -Recurse -Force verify-zip }
+        Expand-Archive -Path $zip -DestinationPath verify-zip
+        & .\cmake\windows\Resolve-WindowsRuntimeDeps.ps1 -Root verify-zip -ExpectedArch $want -Report "verify-artifacts\runtime-deps-$env:PREFIX.json"
+        & .\verify-zip\bin\projectcli.exe -v
+        if ($LASTEXITCODE -ne 0) { throw "projectcli smoke failed with exit code $LASTEXITCODE" }
+        if (Test-Path "build\windows-runtime-dependencies.json") {
+          Copy-Item "build\windows-runtime-dependencies.json" "verify-artifacts\install-tree-$env:PREFIX.json" -Force
+        }
+    # CORE-4 + USEFUL-5 (macOS): extract the ZIP candidate, assert the
+    # .app contract (structure, Info.plist identity + version, Mach-O
+    # architecture, no developer paths in load commands), mount + inspect
+    # the DMG, generate the USEFUL-4 runtime report from the FINAL shipped
+    # payload (not the build tree), and perform a bounded GUI launch.
+    - name: Verify macOS package payload
+      if: runner.os == 'macOS'
+      working-directory: project
+      shell: bash
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+        EXPECTED_ARCH: ${{ matrix.arch }}
+        EXPECTED_VERSION: ${{ env.VERSION }}
+        EXPECTED_GUI: '1'
+      run: |
+        set -euo pipefail
+        mkdir -p verify-artifacts
+        zip="release-assets/${PREFIX}.zip"
+        test -f "$zip"
+        rm -rf verify-macos && mkdir verify-macos
+        unzip -q "$zip" -d verify-macos
+        if [ "${EXPECTED_GUI}" = "1" ]; then
+          # --- CORE-4: .app bundle at payload root -------------------------
+          app=$(find verify-macos -maxdepth 2 -name '*.app' -type d | head -1)
+          if [ -z "$app" ]; then
+            echo "no .app bundle in zip payload:" >&2
+            find verify-macos -maxdepth 3 >&2
+            exit 1
+          fi
+          test -d "$app/Contents/MacOS"
+          bin=$(find "$app/Contents/MacOS" -type f | head -1)
+          test -n "$bin"
+          echo "bundle: $app"
+          # --- CORE-4/CORE-10: Info.plist parses, identity + version correct --
+          test -f "$app/Contents/Info.plist"
+          python3 - "$app/Contents/Info.plist" "$EXPECTED_VERSION" <<'PY'
+        import plistlib, re, sys
+        path, version = sys.argv[1], sys.argv[2]
+        with open(path, "rb") as fh:
+            info = plistlib.load(fh)
+        bid = info.get("CFBundleIdentifier", "")
+        if not re.fullmatch(r"[a-z0-9]+(\.[a-z0-9-]+)+", bid):
+            raise SystemExit(f"bad CFBundleIdentifier: {bid!r}")
+        if not bid.startswith("com.github."):
+            raise SystemExit(f"bundle id not project-owned: {bid!r}")
+        short = str(info.get("CFBundleShortVersionString", ""))
+        build = str(info.get("CFBundleVersion", ""))
+        def ok(v):
+            return v == version or v.startswith(version + ".")
+        if not (ok(short) or ok(build)):
+            raise SystemExit(f"version mismatch: short={short!r} build={build!r} expected={version!r}")
+        print(f"Info.plist OK: id={bid} short={short} build={build}")
+        PY
+        else
+          # BUILD_PROJECTWX=OFF leg: CLI-only payload, and no stray bundle.
+          echo "GUI disabled for this leg (BUILD_PROJECTWX=OFF) -- CLI-only payload"
+          bin="verify-macos/bin/projectcli"
+          test -f "$bin"
+          if find verify-macos -maxdepth 2 -name '*.app' -type d | grep -q .; then
+            echo "unexpected .app bundle on a GUI-disabled leg:" >&2
+            find verify-macos -maxdepth 2 -name '*.app' -type d >&2
+            exit 1
+          fi
+          app=""
+        fi
+        # --- CORE-4: Mach-O architecture -------------------------------------
+        case "$EXPECTED_ARCH" in
+          x64|x86_64) want=x86_64 ;;
+          arm64)      want=arm64 ;;
+          *) echo "unknown expected arch: $EXPECTED_ARCH" >&2; exit 1 ;;
+        esac
+        arch=$(lipo -archs "$bin")
+        echo "lipo -archs: $arch (want $want)"
+        case " $arch " in *" $want "*) ;; *) echo "architecture mismatch" >&2; exit 1 ;; esac
+        # --- CORE-4: no developer paths in load commands ---------------------
+        loads=$(otool -L "$bin" | tail -n +2)
+        if printf '%s\n' "$loads" | grep -E "/Users/|${HOME}/" >/dev/null; then
+          echo "developer path in Mach-O load commands:" >&2
+          printf '%s\n' "$loads" >&2
+          exit 1
+        fi
+        # --- USEFUL-5: DMG mount + payload check ----------------------------
+        dmg=$(ls release-assets/*.dmg 2>/dev/null | head -1 || true)
+        if [ -n "$dmg" ]; then
+          mnt=$(mktemp -d /tmp/dmgmnt.XXXXXX)
+          # hdiutil attach rejects the CPack-produced DMG with
+          # "attach canceled" on macOS 15 runners. Try three strategies:
+          #  A: explicit mountpoint, default verify   (3 tries, backoff)
+          #  B: explicit mountpoint, -noverify        (2 tries)
+          #  C: default /Volumes mount, -noverify     (MountPoint parsed
+          #     from the -plist output)
+          #  D: default /Volumes mount, bare defaults (Finder-equivalent
+          #     invocation: no -nobrowse/-readonly/-noverify)
+          # If none attach, dump UDIF verify + verbose attach diagnostics.
+          attached=0
+          for attempt in 1 2 3; do
+            if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
+              attached=1
+              break
+            fi
+            echo "attach strategy A attempt $attempt failed" >&2
+            sleep $((attempt * 2))
+          done
+          if [ "$attached" != "1" ]; then
+            for attempt in 1 2; do
+              if hdiutil attach "$dmg" -noverify -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
+                attached=1
+                break
+              fi
+              echo "attach strategy B attempt $attempt failed" >&2
+              sleep 1
+            done
+          fi
+          if [ "$attached" != "1" ]; then
+            for spec in C D; do
+              attach_plist=$(mktemp /tmp/attachplist.XXXXXX)
+              hdi_ok=0
+              if [ "$spec" = "C" ]; then
+                if hdiutil attach "$dmg" -noverify -nobrowse -readonly -plist > "$attach_plist" 2> "$attach_plist.err"; then
+                  hdi_ok=1
+                fi
+              else
+                if hdiutil attach "$dmg" -plist > "$attach_plist" 2> "$attach_plist.err"; then
+                  hdi_ok=1
+                fi
+              fi
+              if [ "$hdi_ok" = "1" ]; then
+                mnt=$(python3 - "$attach_plist" <<'PY'
+        import plistlib, sys
+        with open(sys.argv[1], "rb") as fh:
+            entities = plistlib.load(fh)
+        print(next((e.get("MountPoint", "") for e in entities if e.get("MountPoint")), ""))
+        PY
+              )
+                if [ -n "$mnt" ]; then
+                  attached=2
+                  echo "attach strategy $spec ok (default mount at $mnt)"
+                  rm -f "$attach_plist" "$attach_plist.err"
+                  break
+                fi
+                echo "attach strategy $spec attached but MountPoint empty" >&2
+              else
+                echo "attach strategy $spec failed:" >&2
+                cat "$attach_plist.err" >&2 || true
+              fi
+              rm -f "$attach_plist" "$attach_plist.err"
+            done
+          fi
+          if [ "$attached" = "0" ]; then
+            echo "hdiutil attach failed for $dmg; diagnostics:" >&2
+            echo "--- hdiutil verify (UDIF checksum):" >&2
+            hdiutil verify "$dmg" >&2 || echo "UDIF verify FAILED" >&2
+            echo "--- hdiutil attach -verbose:" >&2
+            hdiutil attach "$dmg" -verbose -nobrowse -readonly -mountpoint "$mnt" || true
+            ls -la "$dmg" >&2 || true
+            hdiutil imageinfo "$dmg" >&2 || true
+            hdiutil info >&2 || true
+            mount >&2 || true
+            exit 1
+          fi
+          if [ -n "$app" ]; then
+            test -d "$mnt/$(basename "$app")"
+            echo "DMG mounts and contains $(basename "$app")"
+          else
+            test -f "$mnt/bin/projectcli"
+            echo "DMG mounts and contains bin/projectcli"
+          fi
+          detached=0
+          for d in 1 2 3; do
+            if hdiutil detach "$mnt" >/dev/null 2>&1 || hdiutil detach "$mnt" -force >/dev/null 2>&1; then
+              detached=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$detached" != "1" ]; then
+            echo "warning: could not detach $mnt (best-effort; job cleanup will unmount)" >&2
+          fi
+        else
+          echo "no .dmg produced for this leg (best-effort) -- skipping mount check"
+        fi
+        # --- USEFUL-4: runtime report from the FINAL extracted payload -------
+        scripts/runtime_deps_macos.sh --root verify-macos --out "verify-artifacts/runtime-deps-$PREFIX.json"
+        # --- CORE-1/USEFUL-5: bounded GUI launch (8s window) -----------------
+        if [ "${EXPECTED_GUI}" = "1" ]; then
+          "$bin" &
+          gui_pid=$!
+          sleep 8
+          if kill -0 "$gui_pid" 2>/dev/null; then
+            kill -9 "$gui_pid" 2>/dev/null || true
+            echo "bounded launch OK: GUI alive after 8s, killed"
+          else
+            rc=0
+            wait "$gui_pid" || rc=$?
+            echo "GUI exited rc=$rc"
+            test "$rc" -eq 0
+          fi
+        else
+          echo "GUI launch skipped (BUILD_PROJECTWX=OFF leg)"
+        fi
     - name: Upload package artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: release-${{ matrix.name }}
         path: project/release-assets/*
         if-no-files-found: error
-  # package-smoke: cheap Linux GCC x64 packaging smoke that runs on every PR
+    - name: Upload runtime dependency report
+      if: runner.os == 'Windows' || runner.os == 'macOS'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: runtime-deps-${{ matrix.name }}
+        path: project/verify-artifacts/*.json
+        if-no-files-found: error
+  # package-smoke: cheap Linux GCC x86_64 packaging smoke that runs on every PR
   # (unless the full-release-test label opts in to the real matrix).
 
   package-smoke:
-    name: Linux GCC x64 PR packaging smoke
+    name: Linux GCC x86_64 PR packaging smoke
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-release-test')
     runs-on: ubuntu-24.04
     steps:
@@ -594,7 +909,7 @@ jobs:
     - name: Install dependencies
       run: 'sudo apt-get update
 
-        sudo apt-get install -y ninja-build ccache rpm libwxgtk3.2-dev libgtest-dev
+        sudo apt-get install -y ninja-build ccache rpm dpkg-dev libwxgtk3.2-dev libgtest-dev
 
         '
     - name: Configure
@@ -627,17 +942,23 @@ jobs:
     - name: Install
       run: cmake --install build --prefix instdir --strip
     - name: Package Linux smoke
-      run: 'mkdir -p release-assets
+      run: 'set -euo pipefail
 
-        (cd instdir && tar -czf "../release-assets/linux-gcc-x64.tar.gz" .)
+        epoch="$(git log -1 --format=%ct)"
+
+        export SOURCE_DATE_EPOCH="$epoch"
+
+        mkdir -p release-assets
+
+        scripts/make_deterministic_tarball.sh --epoch "$epoch" --input instdir --output "release-assets/linux-gcc-x86_64.tar.gz"
 
         cpack --config build/CPackConfig.cmake -C Release -G DEB
 
         cpack --config build/CPackConfig.cmake -C Release -G RPM
 
-        cp build/package/*.deb release-assets/linux-gcc-x64.deb
+        cp build/package/*.deb release-assets/linux-gcc-x86_64.deb
 
-        cp build/package/*.rpm release-assets/linux-gcc-x64.rpm
+        cp build/package/*.rpm release-assets/linux-gcc-x86_64.rpm
 
         sha256sum release-assets/* > release-assets/SHA256SUMS
 
@@ -645,7 +966,7 @@ jobs:
     - name: Upload smoke artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
-        name: release-linux-gcc-x64-pr-smoke
+        name: release-linux-gcc-x86_64-pr-smoke
         path: release-assets/*
         if-no-files-found: error
   # source: builds the release source archives (zip + tar.gz) used to derive
@@ -665,12 +986,16 @@ jobs:
     - name: Resolve version
       working-directory: project
       shell: bash
-      run: 'if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags
-        --always --dirty | sed ''s/^v//'')"; fi
-
+      run: |
+        set -euo pipefail
+        if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+          version="${GITHUB_REF_NAME#v}"
+        else
+          version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+          version="${version:-0.0.0}"
+        fi
         echo "VERSION=$version" >> "$GITHUB_ENV"
-
-        '
+        echo "resolved version: $version"
     - name: Create source archives
       working-directory: project
       run: 'mkdir -p ../source-assets
@@ -686,9 +1011,10 @@ jobs:
         name: source-archives
         path: source-assets/*
         if-no-files-found: error
-  # validate-release: downloads every package + source artifact and asserts the
-  # expected 85-package inventory (see header) plus matching SHA256SUMS.
-
+  # validate-release: contract-driven validation of the staged release
+  # (CORE-5/6/8/10, USEFUL-3/4/7). The expected inventory comes from
+  # packaging/release-contract.tsv through scripts/release_contract.sh --
+  # this job never hardcodes package counts.
   validate-release:
     name: Validate release inventory
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-release-test'))
@@ -700,6 +1026,10 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
       - name: Download package artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -711,69 +1041,33 @@ jobs:
         with:
           name: source-archives
           path: release-assets
-      # Expected inventory: 54 platform packages + source archives.
-
-      - name: Verify release inventory
-        working-directory: release-assets
+      - name: Download runtime dependency reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: runtime-deps-*
+          path: runtime-deps
+          merge-multiple: true
+      - name: Resolve release version
         shell: bash
         run: |
           set -euo pipefail
-          source_zip=$(find . -maxdepth 1 -type f -name 'cpp-project-template_*_source.zip' -print -quit)
-          test -n "$source_zip"
-          version=$(printf '%s' "$source_zip" | sed 's#^./cpp-project-template_##' | sed 's#_source.zip$##')
-          test -s "cpp-project-template_"$version"_source.zip"
-          test -s "cpp-project-template_"$version"_source.tar.gz"
-
-          : > expected.txt
-          for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686 windows-llvm-arm64; do
-            printf '%s\n' \
-              "cpp-project-template_"$version"_"$compiler_arch".zip" \
-              "cpp-project-template_"$version"_"$compiler_arch"_nsis.exe" \
-              "cpp-project-template_"$version"_"$compiler_arch"_wix.msi" >> expected.txt
-          done
-          for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do
-            printf '%s\n' \
-              "cpp-project-template_"$version"_"$compiler_arch".zip" \
-               "cpp-project-template_"$version"_"$compiler_arch"_nsis.exe" \
-               "cpp-project-template_"$version"_"$compiler_arch"_wix.msi" >> expected.txt
-          done
-          for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do
-            printf '%s\n' \
-              "cpp-project-template_"$version"_"$compiler_arch".tar.gz" \
-              "cpp-project-template_"$version"_"$compiler_arch".deb" \
-              "cpp-project-template_"$version"_"$compiler_arch".rpm" >> expected.txt
-          done
-          for compiler_arch in macos-clang-arm64 macos-apple-clang-x86_64 macos-gcc-x86_64 macos-gcc-arm64 macos-llvm-x86_64 macos-llvm-arm64; do
-            printf '%s\n' \
-              "cpp-project-template_"$version"_"$compiler_arch".zip" \
-              "cpp-project-template_"$version"_"$compiler_arch".dmg" >> expected.txt
-          done
-          sort -u expected.txt > expected.sorted
-          test "$(wc -l < expected.sorted)" -eq 54
-
-          : > actual.txt
-          for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
-            [ -f "$f" ] || continue
-            case "$f" in *_source.zip|*_source.tar.gz) continue ;; esac
-            printf '%s\n' "$f" >> actual.txt
-          done
-          sort -u actual.txt > actual.sorted
-          test "$(wc -l < actual.sorted)" -eq 54
-
-          cmp -s expected.sorted actual.sorted || { echo 'Release inventory mismatch:'; comm -3 expected.sorted actual.sorted; exit 1; }
-          while IFS= read -r f; do
-            test -s "$f" || { echo "Empty artifact: $f"; exit 1; }
-          done < actual.sorted
-          # Remove the temporary inventory manifests from the staged asset
-          # directory. Keeping release-assets/* clean guarantees the publish
-          # upload can never leak expected.txt/actual.txt/expected.sorted/
-          # actual.sorted as stray release assets (a bug that affected v0.0.2
-          # and v0.0.3).
-          rm -f expected.txt expected.sorted actual.txt actual.sorted
-
-      # Write one SHA256SUMS file covering every package artifact so
-      # consumers can verify download integrity from a single file.
-
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            # Non-tag runs (workflow_dispatch/PR validation): nearest release tag
+            # only -- CMake project(VERSION) rejects describe output with commit
+            # counts (0.0.9-13-g...), so it must never reach configure.
+            version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+            version="${version:-0.0.0}"
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "resolved version: $version"
+      - name: Contract inventory and forbidden formats (CORE-5/8)
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/release_contract.sh check --dir release-assets --version "$VERSION" --scope github-packages
+          scripts/release_contract.sh check-forbidden --dir release-assets
       - name: Write global SHA256SUMS
         working-directory: release-assets
         shell: bash
@@ -785,14 +1079,90 @@ jobs:
             [ -f "$f" ] && files+=("$f")
           done
           printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Validate structure, safety and package metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-meta
+          scripts/validate_release_artifacts.sh --dir release-assets --version "$VERSION" --scope github-packages --evidence release-meta/validate-release.json
+      - name: Verify identity and version contract (CORE-10)
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/verify_release_identity.sh --repo . --version "$VERSION" --evidence release-meta/identity.json
+      - name: Secret, integrity and manifest scan (USEFUL-7)
+        shell: bash
+        run: |
+          set -euo pipefail
+          hits=0
+          pattern='AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[baprs]-|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY'
+          if grep -RIn --binary-files=without-match -E "$pattern" release-assets; then
+            echo 'secret-like token found inside release payloads' >&2; hits=1
+          fi
+          if grep -RIn --binary-files=without-match -E "$pattern" .github .gitlab scripts cmake packaging CMakeLists.txt; then
+            echo 'secret-like token found in the repository surface' >&2; hits=1
+          fi
+          junk=$(find release-assets -maxdepth 1 -type f \( -name '*.pdb' -o -name '*.ilk' -o -name '*.tmp' -o -name '*~' -o -name '*.swp' -o -name '.DS_Store' \) -print)
+          if [ -n "$junk" ]; then
+            echo "debug/temp artifacts staged: $junk" >&2; hits=1
+          fi
+          test "$hits" -eq 0
+          echo 'secret/integrity scan: clean'
+      # USEFUL-4 resolves DT_NEEDED sonames against a *supported host*
+      # (runtime_deps_elf.sh consults ldconfig/dpkg). The hosted runner does
+      # not ship the wxGTK runtime that every Linux artifact links against, so
+      # without this step each artifact reports its declared system dependency
+      # as "missing" and the gate fails for a purely environmental reason.
+      - name: Provide Linux runtime libraries for USEFUL-4 resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libwxgtk3.2-1t64
+          ldconfig -p | grep -F 'libwx_gtk3u_core-3.2.so.0'
+      - name: ELF runtime dependency report (USEFUL-4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-meta
+          scripts/runtime_deps_elf.sh --dir release-assets --out release-meta/runtime-deps-elf.json
+      - name: Runtime report coverage (USEFUL-4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # one report per Windows/macOS contract leg, produced by the package jobs
+          expected=$(scripts/release_contract.sh list --format tsv \
+            | awk -F'\t' '/^#/ || /^os\t/ || NF < 6 { next } $1 == "windows" || $1 == "macos" { print $1 "/" $2 "/" $3 }' \
+            | sort -u | wc -l | tr -d ' ')
+          found=$(find runtime-deps -type f -name 'runtime-deps-*.json' ! -name 'install-tree-*' | wc -l | tr -d ' ')
+          echo "runtime dependency reports: found=$found expected=$expected"
+          test "$found" -eq "$expected"
+          find runtime-deps -type f | sort
+      - name: Generate SBOM (USEFUL-6)
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: release-sbom.spdx.json
+          upload-artifact: true
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: validation-evidence
+          path: release-meta/*
+          if-no-files-found: error
+      - name: Upload runtime dependency reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-deps-evidence
+          path: runtime-deps/**/*.json
+          if-no-files-found: error
 
-      - name: Verify checksums
-        working-directory: release-assets
-        run: sha256sum -c SHA256SUMS
-
-  # publish: runs only on tag pushes; re-validates the inventory, writes a
-  # global SHA256SUMS and publishes the GitHub release via softprops/action-gh-release.
-
+  # publish: tag-only. Re-validates the frozen candidate set against the
+  # contract's github-full scope, publishes exactly that set once (no
+  # same-name overwrite can exist), then attests and re-verifies the
+  # published bytes against the pre-publication digests (CORE-6, USEFUL-6/8).
   publish:
     name: Publish release
     if: github.event_name == 'push' && github.ref_type == 'tag'
@@ -801,7 +1171,13 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
     - name: Download package artifacts
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
       with:
@@ -813,90 +1189,161 @@ jobs:
       with:
         name: source-archives
         path: release-assets
-    - name: Verify release inventory
-      working-directory: release-assets
+    - name: Download validation evidence
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: validation-evidence
+        path: release-meta
+    - name: Assemble final candidate set (CORE-6)
       shell: bash
-      run: 'set -euo pipefail
-
-        version=$(printf ''%s'' "$GITHUB_REF_NAME" | sed ''s/^v//'')
-
-        : > expected.txt
-
-        for compiler_arch in windows-msvc-x86_64 windows-msvc-i686 windows-mingw-x86_64 windows-mingw-i686 windows-llvm-x86_64 windows-llvm-i686 windows-llvm-arm64; do printf
-''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}_nsis.exe"
-        "cpp-project-template_${version}_${compiler_arch}_wix.msi" >> expected.txt; done
-
-        for compiler_arch in windows-msvc-arm64 windows-clangarm64-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.zip" "cpp-project-template_${version}_${compiler_arch}_nsis.exe" "cpp-project-template_${version}_${compiler_arch}_wix.msi"
-        >> expected.txt; done
-
-        for compiler_arch in linux-gcc-x86_64 linux-gcc-i686 linux-gcc-arm64 linux-clang-x86_64 linux-clang-arm64; do printf ''%s\n'' "cpp-project-template_${version}_${compiler_arch}.tar.gz"
-        "cpp-project-template_${version}_${compiler_arch}.deb"
-        "cpp-project-template_${version}_${compiler_arch}.rpm" >> expected.txt; done
-
-        for compiler_arch in macos-clang-arm64 macos-apple-clang-x86_64 macos-gcc-x86_64 macos-gcc-arm64 macos-llvm-x86_64 macos-llvm-arm64; do printf ''%s\n''
-        "cpp-project-template_${version}_${compiler_arch}.zip"
-        "cpp-project-template_${version}_${compiler_arch}.dmg" >> expected.txt; done
-
-
-        sort -u expected.txt > expected.sorted
-
-        test "$(wc -l < expected.sorted)" -eq 54
-
-        : > actual.txt
-
-        for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do [ -f "$f" ] || continue; case "$f" in *_source.zip|*_source.tar.gz) continue;; esac;
-        printf ''%s\n'' "$f" >> actual.txt; done
-
-        sort -u actual.txt > actual.sorted
-
-        test "$(wc -l < actual.sorted)" -eq 54
-
-        cmp -s expected.sorted actual.sorted || { echo ''Release inventory mismatch:''; comm -3 expected.sorted actual.sorted; exit 1; }
-
-        rm -f expected.txt expected.sorted actual.txt actual.sorted'
-    - name: Write global SHA256SUMS
+      run: |
+        set -euo pipefail
+        version="${GITHUB_REF_NAME#v}"
+        echo "VERSION=$version" >> "$GITHUB_ENV"
+        mkdir -p release-meta
+        # contract + consumer verifier ship with the release itself so
+        # verification works without checking out the repository (USEFUL-8)
+        cp packaging/release-contract.tsv release-assets/release-contract.tsv
+        cp scripts/verify_release.sh release-assets/verify-release.sh
+        chmod +x release-assets/verify-release.sh
+        scripts/release_contract.sh json --scope github-full --version "$version" > release-meta/contract.json
+        python3 - release-assets release-meta "$version" "$GITHUB_SHA" > release-assets/release-evidence.json <<'PY'
+        import datetime, hashlib, json, os, sys
+        directory, meta, version, commit = sys.argv[1:5]
+        digests = {}
+        for name in sorted(os.listdir(directory)):
+            if name in ("release-evidence.json", "SHA256SUMS"):
+                continue
+            path = os.path.join(directory, name)
+            if not os.path.isfile(path):
+                continue
+            h = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            digests[name] = h.hexdigest()
+        with open(os.path.join(meta, "contract.json"), encoding="utf-8") as fh:
+            contract = json.load(fh)
+        run_id = os.environ.get("GITHUB_RUN_ID", "")
+        evidence = {
+            "schema": "cpp-project-template.release-evidence.v1",
+            "version": version,
+            "sourceCommit": commit,
+            "repository": os.environ.get("GITHUB_REPOSITORY", ""),
+            "runId": run_id,
+            "runUrl": "%s/%s/actions/runs/%s" % (
+                os.environ.get("GITHUB_SERVER_URL", ""),
+                os.environ.get("GITHUB_REPOSITORY", ""),
+                run_id),
+            "createdAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "contract": contract,
+            "artifactCount": len(digests),
+            "digests": digests,
+            "validation": {
+                "inventory": "scripts/release_contract.sh check (validate-release job)",
+                "structure": "release-meta/validate-release.json",
+                "identity": "release-meta/identity.json",
+                "runtimeDependencies": "runtime-deps-evidence artifact (PE/ELF/macOS reports)",
+                "sbom": "release-sbom.spdx.json",
+                "provenance": "actions/attest-build-provenance, verified after upload with gh attestation verify",
+            },
+        }
+        json.dump(evidence, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        PY
+    - name: Write global SHA256SUMS over the frozen candidate set
       working-directory: release-assets
       shell: bash
       run: |
         set -euo pipefail
         rm -f SHA256SUMS
         files=()
-        for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
+        for f in *; do
           [ -f "$f" ] && files+=("$f")
         done
         printf '%s\0' "${files[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
-    - name: Verify checksums
-      working-directory: release-assets
-      run: sha256sum -c SHA256SUMS
-    - name: Preflight release upload
-      working-directory: release-assets
+        sha256sum -c SHA256SUMS
+    - name: Final contract and artifact validation (github-full)
       shell: bash
       run: |
         set -euo pipefail
-        package_count=0
-        for f in *.zip *.tar.gz *.deb *.rpm *.exe *.msi *.dmg; do
-          [ -f "$f" ] || continue
-          case "$f" in
-            *_source.zip|*_source.tar.gz) continue ;;
-          esac
-          package_count=$((package_count + 1))
-        done
-        test "$package_count" -eq 54
-        test -s SHA256SUMS
-        test "$(wc -l < SHA256SUMS)" -eq 56
-        sha256sum -c SHA256SUMS
-
+        scripts/release_contract.sh check --dir release-assets --version "$VERSION" --scope github-full
+        scripts/release_contract.sh check-forbidden --dir release-assets
+        scripts/validate_release_artifacts.sh --dir release-assets --version "$VERSION" --scope github-full --evidence release-meta/final-validate.json
+        scripts/verify_release_identity.sh --repo . --version "$VERSION" --evidence release-meta/final-identity.json
+    - name: Freeze pre-publication digests (CORE-6)
+      shell: bash
+      run: |
+        set -euo pipefail
+        (cd release-assets && for f in *; do [ -f "$f" ] && sha256sum "$f"; done) \
+          | LC_ALL=C sort -k2 > pre-publish-digests.txt
+        echo "frozen $(wc -l < pre-publish-digests.txt | tr -d ' ') candidate file(s)"
+    - name: Refuse to touch an existing release (CORE-6 immutability)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          echo "Release $GITHUB_REF_NAME already exists; refusing to publish (no same-name overwrite)." >&2
+          exit 1
+        fi
+        echo "no existing release for $GITHUB_REF_NAME; publish is a create"
     - name: Publish GitHub release
       uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
       with:
         files: release-assets/*
         fail_on_unmatched_files: true
-        overwrite_files: true
         token: ${{ github.token }}
         generate_release_notes: true
-        body: 'This release contains the validated cross-platform package matrix and source archives.'
+        body: 'This release contains the validated cross-platform package matrix, source archives, checksums, release contract, evidence, SBOM and consumer verifier.'
+    - name: Attest build provenance (USEFUL-6)
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-path: 'release-assets/*'
+    - name: Verify published bytes, attestations and consumer path (CORE-6/USEFUL-6/8)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        version="${GITHUB_REF_NAME#v}"
+        mkdir -p published
+        gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir published --clobber
+        # 1. every published byte equals the frozen pre-publication candidate
+        (cd published && sha256sum -c ../pre-publish-digests.txt)
+        # 2. the published file set is exactly the frozen set (no strays)
+        (cd published && ls | LC_ALL=C sort) > published.list
+        (cd release-assets && ls | LC_ALL=C sort) > candidate.list
+        diff -u candidate.list published.list
+        # 3. provenance attestations verify for the published artifacts
+        verified=0
+        for f in published/*; do
+          case "$f" in
+            *.zip|*.tar.gz|*.deb|*.rpm|*.exe|*.msi|*.dmg)
+              gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" --format json >/dev/null
+              verified=$((verified + 1)) ;;
+          esac
+        done
+        echo "attestations verified for $verified packaged artifact(s)"
+        # 4. the shipped consumer verifier passes against the published set
+        bash published/verify-release.sh --dir published --version "$version"
+    - name: Publish summary
+      shell: bash
+      run: |
+        {
+          echo "## Release ${GITHUB_REF_NAME} published"
+          echo
+          echo "- source commit: \`${GITHUB_SHA}\`"
+          echo "- candidate files frozen before upload: $(wc -l < pre-publish-digests.txt | tr -d ' ')"
+          echo "- post-publication digests: verified against the frozen set"
+          echo "- provenance: attested and verified with \`gh attestation verify\`"
+          echo "- inventory: \`packaging/release-contract.tsv\` (scope github-full)"
+        } >> "$GITHUB_STEP_SUMMARY"
+
   # expanded-package: fills the remainder of the artifact matrix (Windows ARM64,
-  # Linux Clang/32-bit, macOS variants) so the inventory totals 54.
+  # Linux Clang/32-bit, macOS variants) so the inventory totals the 54 package
+  # rows defined by packaging/release-contract.tsv.
 
   expanded-package:
     needs: cache-gate
@@ -1009,10 +1456,46 @@ jobs:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        fetch-depth: 1
+        fetch-depth: 0
         submodules: false
         path: project
         show-progress: false
+    # CORE-10/P0-6: same version/epoch resolution as the `package` job,
+    # before configure, so CPack and the archives agree on one identity.
+    - name: Resolve release version, epoch and naming
+      working-directory: project
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+          version="${GITHUB_REF_NAME#v}"
+        else
+          # Non-tag runs (workflow_dispatch/PR validation): nearest release tag
+          # only -- CMake project(VERSION) rejects describe output with commit
+          # counts (0.0.9-13-g...), so it must never reach configure.
+          version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+          version="${version:-0.0.0}"
+        fi
+        epoch="$(git log -1 --format=%ct)"
+        case "${{ runner.os }}" in
+          Linux) platform="linux" ;;
+          Windows) platform="windows" ;;
+          macOS) platform="macos" ;;
+          *) echo "unsupported runner OS ${{ runner.os }}" >&2; exit 1 ;;
+        esac
+        case "${{ matrix.arch }}" in
+          x64) package_arch="x86_64" ;;
+          x86) package_arch="i686" ;;
+          arm64) package_arch="arm64" ;;
+          *) echo "unsupported arch ${{ matrix.arch }}" >&2; exit 1 ;;
+        esac
+        {
+          echo "VERSION=$version"
+          echo "SOURCE_DATE_EPOCH=$epoch"
+          echo "CPP_PROJECT_TEMPLATE_VERSION=$version"
+          echo "RELEASE_PREFIX=cpp-project-template_${version}_${platform}-${{ matrix.compiler }}-${package_arch}"
+        } >> "$GITHUB_ENV"
+        echo "version=$version epoch=$epoch"
     - name: Restore compiler cache
       id: ccache-restore
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -1024,9 +1507,9 @@ jobs:
       if: runner.os == 'Linux'
       shell: bash
       run: "sudo apt-get update\nif [[ \"${{ matrix.linux_multilib }}\" == \"true\" ]]; then\n  sudo dpkg --add-architecture i386\n  sudo apt-get update\n\
-        \  sudo apt-get install -y ninja-build ccache pkg-config rpm gcc-multilib g++-multilib libwxgtk3.2-dev:i386 libgtest-dev:i386\n  echo \"CFLAGS=-m32\"\
+        \  sudo apt-get install -y ninja-build ccache pkg-config rpm dpkg-dev gcc-multilib g++-multilib libwxgtk3.2-dev:i386 libgtest-dev:i386\n  echo \"CFLAGS=-m32\"\
         \ >> \"$GITHUB_ENV\"\n  echo \"CXXFLAGS=-m32\" >> \"$GITHUB_ENV\"\n  echo \"LDFLAGS=-m32\" >> \"$GITHUB_ENV\"\n  echo \"PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig\"\
-        \ >> \"$GITHUB_ENV\"\nelse\n  sudo apt-get install -y ninja-build ccache pkg-config rpm libwxgtk3.2-dev libgtest-dev\nfi\nif [[ \"${{ matrix.compiler\
+        \ >> \"$GITHUB_ENV\"\nelse\n  sudo apt-get install -y ninja-build ccache pkg-config rpm dpkg-dev libwxgtk3.2-dev libgtest-dev\nfi\nif [[ \"${{ matrix.compiler\
         \ }}\" == \"clang\" ]]; then\n  sudo apt-get install -y clang\nfi\n"
     - name: Install macOS dependencies
       if: runner.os == 'macOS'
@@ -1115,22 +1598,20 @@ jobs:
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
       shell: bash
       run: |
-        case "${{ matrix.compiler }}" in
-          msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-          mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-          llvm) if [ "${{ matrix.arch }}" = "arm64" ]; then echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-arm64-Release" >> "$GITHUB_ENV"; else echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV"; fi ;;
-          *) echo "Unsupported Windows vcpkg compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
-        esac
+        bash project/scripts/vcpkg_cache_key.sh github-env \
+          --family release \
+          --toolchain "${{ matrix.compiler }}" \
+          --arch "${{ matrix.arch }}" \
+          --build-type Release \
+          --manifest project/vcpkg.json
     - name: Restore Windows vcpkg binary cache
       id: vcpkg-cache-restore
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX  }}-${{ hashFiles('project/vcpkg.json')  }}
-        restore-keys: |
-          ${{ env.VCPKG_CACHE_PREFIX  }}-
-          vcpkg-experimental-${{ matrix.cache_id  }}-${{ env.VCPKG_GIT_REF  }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT  }}-${{ matrix.vcpkg_triplet  }}-
+        key: ${{ env.VCPKG_CACHE_KEY }}
+        restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
 
     - name: Checkout Windows vcpkg
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
@@ -1166,9 +1647,9 @@ jobs:
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.compiler }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
         restore-keys: |
-          vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
+          vcpkg-downloads-windows-${{ runner.arch }}-
     - name: vcpkg
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
       shell: pwsh
@@ -1198,7 +1679,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.compiler }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
     - name: Save Windows vcpkg tool cache
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -1210,7 +1691,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        key: ${{ env.VCPKG_CACHE_KEY }}
     - name: Configure
       working-directory: project
       env:
@@ -1284,21 +1765,6 @@ jobs:
         echo "base=$base" >> "$GITHUB_OUTPUT"
 
         '
-    - name: Resolve release version and naming
-      working-directory: project
-      shell: bash
-      run: 'if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags
-        --always --dirty | sed ''s/^v//'')"; fi
-
-        case "$RUNNER_OS" in Linux) platform="linux" ;; Windows) platform="windows" ;; macOS) platform="macos" ;; *) exit 1 ;; esac
-
-        case "${{ matrix.arch }}" in x64) package_arch="x86_64" ;; x86) package_arch="i686" ;; arm64) package_arch="arm64" ;; *) exit 1 ;; esac
-
-        echo "VERSION=$version" >> "$GITHUB_ENV"
-
-        echo "RELEASE_PREFIX=cpp-project-template_${version}_${platform}-${{ matrix.compiler }}-${package_arch}" >> "$GITHUB_ENV"
-
-        '
     - name: Package Windows
       if: runner.os == 'Windows'
       working-directory: project
@@ -1310,7 +1776,7 @@ jobs:
 
         New-Item -ItemType Directory -Force release-assets | Out-Null
 
-        Compress-Archive -Path instdir\* -DestinationPath "release-assets\$env:PREFIX.zip" -Force
+        & .\scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets\$env:PREFIX.zip" -Epoch ([int]$env:SOURCE_DATE_EPOCH)
 
         Push-Location build
         cpack --config CPackConfig.cmake -C Release -G NSIS64
@@ -1328,7 +1794,7 @@ jobs:
         PREFIX: ${{ env.RELEASE_PREFIX }}
       run: 'mkdir -p release-assets
 
-        (cd instdir && tar -czf "../release-assets/${PREFIX}.tar.gz" .)
+        scripts/make_deterministic_tarball.sh --epoch "$SOURCE_DATE_EPOCH" --input instdir --output "release-assets/${PREFIX}.tar.gz"
 
         cpack --config build/CPackConfig.cmake -C Release -G DEB
 
@@ -1353,7 +1819,7 @@ jobs:
       run: |
         mkdir -p release-assets
 
-        (cd instdir && cmake -E tar cf "../release-assets/${PREFIX}.zip" --format=zip .)
+        pwsh -NoProfile -File scripts/make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets/${PREFIX}.zip" -Epoch "$SOURCE_DATE_EPOCH"
 
         cpack_ok=0
         for attempt in 1 2 3; do
@@ -1377,9 +1843,248 @@ jobs:
 
         cp "$dmg" "release-assets/${PREFIX}.dmg"
 
+    # CORE-1/CORE-2: extract the ZIP candidate and prove the runtime DLL
+    # closure plus a bounded CLI smoke straight from the FINAL payload.
+    - name: Verify Windows package payload closure
+      if: runner.os == 'Windows'
+      working-directory: project
+      shell: pwsh
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+        EXPECTED_ARCH: ${{ matrix.arch }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        New-Item -ItemType Directory -Force verify-artifacts | Out-Null
+        $want = switch ($env:EXPECTED_ARCH) {
+          'x64' { 'x86_64' }
+          'x86' { 'i686' }
+          'arm64' { 'arm64' }
+          default { throw "unknown arch $($env:EXPECTED_ARCH)" }
+        }
+        $zip = "release-assets\$env:PREFIX.zip"
+        if (-not (Test-Path $zip)) { throw "zip not found: $zip" }
+        if (Test-Path verify-zip) { Remove-Item -Recurse -Force verify-zip }
+        Expand-Archive -Path $zip -DestinationPath verify-zip
+        & .\cmake\windows\Resolve-WindowsRuntimeDeps.ps1 -Root verify-zip -ExpectedArch $want -Report "verify-artifacts\runtime-deps-$env:PREFIX.json"
+        & .\verify-zip\bin\projectcli.exe -v
+        if ($LASTEXITCODE -ne 0) { throw "projectcli smoke failed with exit code $LASTEXITCODE" }
+        if (Test-Path "build\windows-runtime-dependencies.json") {
+          Copy-Item "build\windows-runtime-dependencies.json" "verify-artifacts\install-tree-$env:PREFIX.json" -Force
+        }
+    # CORE-4 + USEFUL-5 (macOS): extract the ZIP candidate, assert the
+    # .app contract (structure, Info.plist identity + version, Mach-O
+    # architecture, no developer paths in load commands), mount + inspect
+    # the DMG, generate the USEFUL-4 runtime report from the FINAL shipped
+    # payload (not the build tree), and perform a bounded GUI launch.
+    - name: Verify macOS package payload
+      if: runner.os == 'macOS'
+      working-directory: project
+      shell: bash
+      env:
+        PREFIX: ${{ env.RELEASE_PREFIX }}
+        EXPECTED_ARCH: ${{ matrix.arch }}
+        EXPECTED_VERSION: ${{ env.VERSION }}
+        # Matrix legs may explicitly disable the GUI (BUILD_PROJECTWX=OFF);
+        # those legitimately ship a CLI-only payload, so bundle assertions
+        # must be conditional on the leg actually building projectwx.
+        EXPECTED_GUI: ${{ matrix.build_projectwx == 'OFF' && '0' || '1' }}
+      run: |
+        set -euo pipefail
+        mkdir -p verify-artifacts
+        zip="release-assets/${PREFIX}.zip"
+        test -f "$zip"
+        rm -rf verify-macos && mkdir verify-macos
+        unzip -q "$zip" -d verify-macos
+        if [ "${EXPECTED_GUI}" = "1" ]; then
+          # --- CORE-4: .app bundle at payload root -------------------------
+          app=$(find verify-macos -maxdepth 2 -name '*.app' -type d | head -1)
+          if [ -z "$app" ]; then
+            echo "no .app bundle in zip payload:" >&2
+            find verify-macos -maxdepth 3 >&2
+            exit 1
+          fi
+          test -d "$app/Contents/MacOS"
+          bin=$(find "$app/Contents/MacOS" -type f | head -1)
+          test -n "$bin"
+          echo "bundle: $app"
+          # --- CORE-4/CORE-10: Info.plist parses, identity + version correct --
+          test -f "$app/Contents/Info.plist"
+          python3 - "$app/Contents/Info.plist" "$EXPECTED_VERSION" <<'PY'
+        import plistlib, re, sys
+        path, version = sys.argv[1], sys.argv[2]
+        with open(path, "rb") as fh:
+            info = plistlib.load(fh)
+        bid = info.get("CFBundleIdentifier", "")
+        if not re.fullmatch(r"[a-z0-9]+(\.[a-z0-9-]+)+", bid):
+            raise SystemExit(f"bad CFBundleIdentifier: {bid!r}")
+        if not bid.startswith("com.github."):
+            raise SystemExit(f"bundle id not project-owned: {bid!r}")
+        short = str(info.get("CFBundleShortVersionString", ""))
+        build = str(info.get("CFBundleVersion", ""))
+        def ok(v):
+            return v == version or v.startswith(version + ".")
+        if not (ok(short) or ok(build)):
+            raise SystemExit(f"version mismatch: short={short!r} build={build!r} expected={version!r}")
+        print(f"Info.plist OK: id={bid} short={short} build={build}")
+        PY
+        else
+          # BUILD_PROJECTWX=OFF leg: CLI-only payload, and no stray bundle.
+          echo "GUI disabled for this leg (BUILD_PROJECTWX=OFF) -- CLI-only payload"
+          bin="verify-macos/bin/projectcli"
+          test -f "$bin"
+          if find verify-macos -maxdepth 2 -name '*.app' -type d | grep -q .; then
+            echo "unexpected .app bundle on a GUI-disabled leg:" >&2
+            find verify-macos -maxdepth 2 -name '*.app' -type d >&2
+            exit 1
+          fi
+          app=""
+        fi
+        # --- CORE-4: Mach-O architecture -------------------------------------
+        case "$EXPECTED_ARCH" in
+          x64|x86_64) want=x86_64 ;;
+          arm64)      want=arm64 ;;
+          *) echo "unknown expected arch: $EXPECTED_ARCH" >&2; exit 1 ;;
+        esac
+        arch=$(lipo -archs "$bin")
+        echo "lipo -archs: $arch (want $want)"
+        case " $arch " in *" $want "*) ;; *) echo "architecture mismatch" >&2; exit 1 ;; esac
+        # --- CORE-4: no developer paths in load commands ---------------------
+        loads=$(otool -L "$bin" | tail -n +2)
+        if printf '%s\n' "$loads" | grep -E "/Users/|${HOME}/" >/dev/null; then
+          echo "developer path in Mach-O load commands:" >&2
+          printf '%s\n' "$loads" >&2
+          exit 1
+        fi
+        # --- USEFUL-5: DMG mount + payload check ----------------------------
+        dmg=$(ls release-assets/*.dmg 2>/dev/null | head -1 || true)
+        if [ -n "$dmg" ]; then
+          mnt=$(mktemp -d /tmp/dmgmnt.XXXXXX)
+          # hdiutil attach rejects the CPack-produced DMG with
+          # "attach canceled" on macOS 15 runners. Try three strategies:
+          #  A: explicit mountpoint, default verify   (3 tries, backoff)
+          #  B: explicit mountpoint, -noverify        (2 tries)
+          #  C: default /Volumes mount, -noverify     (MountPoint parsed
+          #     from the -plist output)
+          #  D: default /Volumes mount, bare defaults (Finder-equivalent
+          #     invocation: no -nobrowse/-readonly/-noverify)
+          # If none attach, dump UDIF verify + verbose attach diagnostics.
+          attached=0
+          for attempt in 1 2 3; do
+            if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
+              attached=1
+              break
+            fi
+            echo "attach strategy A attempt $attempt failed" >&2
+            sleep $((attempt * 2))
+          done
+          if [ "$attached" != "1" ]; then
+            for attempt in 1 2; do
+              if hdiutil attach "$dmg" -noverify -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
+                attached=1
+                break
+              fi
+              echo "attach strategy B attempt $attempt failed" >&2
+              sleep 1
+            done
+          fi
+          if [ "$attached" != "1" ]; then
+            for spec in C D; do
+              attach_plist=$(mktemp /tmp/attachplist.XXXXXX)
+              hdi_ok=0
+              if [ "$spec" = "C" ]; then
+                if hdiutil attach "$dmg" -noverify -nobrowse -readonly -plist > "$attach_plist" 2> "$attach_plist.err"; then
+                  hdi_ok=1
+                fi
+              else
+                if hdiutil attach "$dmg" -plist > "$attach_plist" 2> "$attach_plist.err"; then
+                  hdi_ok=1
+                fi
+              fi
+              if [ "$hdi_ok" = "1" ]; then
+                mnt=$(python3 - "$attach_plist" <<'PY'
+        import plistlib, sys
+        with open(sys.argv[1], "rb") as fh:
+            entities = plistlib.load(fh)
+        print(next((e.get("MountPoint", "") for e in entities if e.get("MountPoint")), ""))
+        PY
+              )
+                if [ -n "$mnt" ]; then
+                  attached=2
+                  echo "attach strategy $spec ok (default mount at $mnt)"
+                  rm -f "$attach_plist" "$attach_plist.err"
+                  break
+                fi
+                echo "attach strategy $spec attached but MountPoint empty" >&2
+              else
+                echo "attach strategy $spec failed:" >&2
+                cat "$attach_plist.err" >&2 || true
+              fi
+              rm -f "$attach_plist" "$attach_plist.err"
+            done
+          fi
+          if [ "$attached" = "0" ]; then
+            echo "hdiutil attach failed for $dmg; diagnostics:" >&2
+            echo "--- hdiutil verify (UDIF checksum):" >&2
+            hdiutil verify "$dmg" >&2 || echo "UDIF verify FAILED" >&2
+            echo "--- hdiutil attach -verbose:" >&2
+            hdiutil attach "$dmg" -verbose -nobrowse -readonly -mountpoint "$mnt" || true
+            ls -la "$dmg" >&2 || true
+            hdiutil imageinfo "$dmg" >&2 || true
+            hdiutil info >&2 || true
+            mount >&2 || true
+            exit 1
+          fi
+          if [ -n "$app" ]; then
+            test -d "$mnt/$(basename "$app")"
+            echo "DMG mounts and contains $(basename "$app")"
+          else
+            test -f "$mnt/bin/projectcli"
+            echo "DMG mounts and contains bin/projectcli"
+          fi
+          detached=0
+          for d in 1 2 3; do
+            if hdiutil detach "$mnt" >/dev/null 2>&1 || hdiutil detach "$mnt" -force >/dev/null 2>&1; then
+              detached=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$detached" != "1" ]; then
+            echo "warning: could not detach $mnt (best-effort; job cleanup will unmount)" >&2
+          fi
+        else
+          echo "no .dmg produced for this leg (best-effort) -- skipping mount check"
+        fi
+        # --- USEFUL-4: runtime report from the FINAL extracted payload -------
+        scripts/runtime_deps_macos.sh --root verify-macos --out "verify-artifacts/runtime-deps-$PREFIX.json"
+        # --- CORE-1/USEFUL-5: bounded GUI launch (8s window) -----------------
+        if [ "${EXPECTED_GUI}" = "1" ]; then
+          "$bin" &
+          gui_pid=$!
+          sleep 8
+          if kill -0 "$gui_pid" 2>/dev/null; then
+            kill -9 "$gui_pid" 2>/dev/null || true
+            echo "bounded launch OK: GUI alive after 8s, killed"
+          else
+            rc=0
+            wait "$gui_pid" || rc=$?
+            echo "GUI exited rc=$rc"
+            test "$rc" -eq 0
+          fi
+        else
+          echo "GUI launch skipped (BUILD_PROJECTWX=OFF leg)"
+        fi
+
     - name: Upload package artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: release-${{ matrix.name }}
         path: project/release-assets/*
+        if-no-files-found: error
+    - name: Upload runtime dependency report
+      if: runner.os == 'Windows' || runner.os == 'macOS'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: runtime-deps-${{ matrix.name }}
+        path: project/verify-artifacts/*.json
         if-no-files-found: error

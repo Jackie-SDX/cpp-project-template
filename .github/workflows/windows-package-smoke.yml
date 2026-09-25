@@ -23,9 +23,16 @@ name: Windows Package Smoke
 on:
   pull_request:
     branches: [ main ]
+    types: [ opened, synchronize, reopened, labeled ]
 
 permissions:
   contents: read
+
+# Pinned inputs shared with ci.yml / release.yml / vcpkg-cache-warmup.yml so the
+# smoke builds with the same vcpkg revision and overlay triplets (ADR 006).
+env:
+  VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+  MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
 
 jobs:
   windows-package-smoke:
@@ -42,6 +49,29 @@ jobs:
           submodules: true
           fetch-depth: 0
           path: project
+      - name: Setup MSYS2 MinGW
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        with:
+          msystem: MINGW64
+          update: false
+          path-type: minimal
+          install: mingw-w64-x86_64-toolchain
+      - name: Add MSYS2 compiler to PATH
+        shell: pwsh
+        run: |
+          $msysRoot = "${{ steps.msys2.outputs.msys2-location }}"
+          if (-not $msysRoot) { throw "MSYS2 location output was empty" }
+          $bin = Join-Path $msysRoot "mingw64\bin"
+          if (-not (Test-Path $bin)) { throw "MSYS2 compiler directory not found: $bin" }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Assert MinGW target architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          got=$(gcc -dumpmachine | tr '[:upper:]' '[:lower:]')
+          echo "gcc -dumpmachine = $got (expected x86_64-w64-mingw32)"
+          test "$got" = "x86_64-w64-mingw32"
       - name: Install packaging dependencies
         run: |
           choco install ninja ccache nsis 7zip -y --no-progress
@@ -50,15 +80,28 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: Neumann-A/my-vcpkg-triplets
+          ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
           path: my-vcpkg-triplets
+          fetch-depth: 1
+      # ADR 006: the smoke owns its own cache family (windows-smoke-*) so a
+      # label-gated PR run can never write into the release cache, and falls
+      # back to the warmup MinGW seed when its inputs match.
+      - name: Resolve vcpkg cache key
+        shell: bash
+        run: |
+          bash project/scripts/vcpkg_cache_key.sh github-env \
+            --family smoke \
+            --toolchain mingw \
+            --arch x64 \
+            --build-type Release \
+            --manifest project/vcpkg.json
       - name: Restore GitLab-style vcpkg binary cache
         id: vcpkg-binary-cache-restore
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-x64-mingw-dynamic-Release-${{ hashFiles('project/vcpkg.json') }}
-          restore-keys: |
-            windows-a1cae005c39be7b18ba319fced856b68d7276271-x64-mingw-dynamic-Release-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
       - name: vcpkg
         uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
         env:
@@ -70,14 +113,14 @@ jobs:
           extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
           cache-key: windows-package-smoke-mingw-x64
           disable-cache: true
-          revision: a1cae005c39be7b18ba319fced856b68d7276271
+          revision: ${{ env.VCPKG_GIT_REF }}
           token: ${{ github.token }}
       - name: Save GitLab-style vcpkg binary cache
         if: success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-x64-mingw-dynamic-Release-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ env.VCPKG_CACHE_KEY }}
       - name: Configure
         working-directory: project
         env:
@@ -132,7 +175,9 @@ jobs:
           BASE: ${{ steps.package_name.outputs.base }}
         run: |
           New-Item -ItemType Directory -Force release-assets | Out-Null
-          Compress-Archive -Path instdir\* -DestinationPath "release-assets\windows-mingw-x64.zip" -Force
+          $epoch = (git log -1 --format=%ct)
+          if (-not $epoch) { throw "git log failed; cannot derive SOURCE_DATE_EPOCH" }
+          & .\scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets\$env:BASE.zip" -Epoch ([int]$epoch)
           Push-Location build
           cpack --config CPackConfig.cmake -C Release -G NSIS64
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) {
@@ -142,28 +187,170 @@ jobs:
             }
             throw "NSIS package generation failed"
           }
-          Copy-Item "package\$env:BASE.exe" "..\release-assets\windows-mingw-x64.exe" -Force
+          Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:BASE}_nsis.exe" -Force
           # Standalone archive policy (2026-09-23): Windows ships .zip only. The
           # historical .7z alternative is retained here as a documented, disabled
           # block; uncomment the three lines below to restore it (requires the
           # 7zip tool installed on the runner):
           # cpack --config CPackConfig.cmake -C Release -G 7Z
           # if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
-          # Copy-Item "package\$env:BASE.7z" "..\release-assets\windows-mingw-x64.7z" -Force
+          # Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:BASE.7z" -Force
           cpack --config CPackConfig.cmake -C Release -G WIX
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
-          Copy-Item "package\$env:BASE.msi" "..\release-assets\windows-mingw-x64.msi" -Force
+          Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:BASE}_wix.msi" -Force
           Pop-Location
           Get-ChildItem release-assets
+      - name: Verify ZIP payload closure and run packaged CLI
+        working-directory: project
+        shell: pwsh
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force verify-artifacts | Out-Null
+          if (Test-Path verify-zip) { Remove-Item -Recurse -Force verify-zip }
+          Expand-Archive -Path "release-assets\$env:BASE.zip" -DestinationPath verify-zip -Force
+          # CORE-1: every imported DLL must be inside the payload or a
+          # Windows system DLL; wrong-architecture PEs fail the check too.
+          & cmake\windows\Resolve-WindowsRuntimeDeps.ps1 -Root verify-zip -ExpectedArch x86_64 -Report "verify-artifacts\runtime-deps-$env:BASE.json"
+          # CORE-1: the CLI must run straight from the extracted payload,
+          # loading its DLLs from the payload -- no dev environment on PATH.
+          & verify-zip\bin\projectcli.exe -v
+          if ($LASTEXITCODE -ne 0) { throw "projectcli -v failed from extracted ZIP (exit $LASTEXITCODE)" }
+          Write-Host "ZIP closure verified and CLI ran from payload."
+      - name: Bounded GUI runtime smoke
+        working-directory: project
+        shell: pwsh
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
+        run: |
+          # CORE-1 "safe bounded GUI/runtime smoke": start the GUI from the
+          # extracted payload, give it a fixed 8-second window, then either
+          # accept a clean early exit or kill it. Never waits on interaction.
+          $ErrorActionPreference = 'Stop'
+          $gui = "verify-zip\bin\projectwx.exe"
+          if (-not (Test-Path $gui)) { throw "GUI binary missing from payload: $gui" }
+          $proc = Start-Process -FilePath (Resolve-Path $gui).Path -PassThru
+          Start-Sleep -Seconds 8
+          if ($proc.HasExited) {
+            if ($proc.ExitCode -ne 0) { throw "projectwx exited with $($proc.ExitCode) within the window (missing runtime DLL or crash?)" }
+            Write-Host "projectwx exited cleanly within the window."
+          } else {
+            Stop-Process -Id $proc.Id -Force
+            Write-Host "projectwx stayed alive for 8s -- bounded GUI smoke OK."
+          }
+      - name: NSIS silent install, run, uninstall (CORE-2)
+        working-directory: project
+        shell: pwsh
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installDir = 'C:\SmokeNsist'
+          $installer = (Resolve-Path "release-assets\${env:BASE}_nsis.exe").Path
+          # /S = silent; /D= must be last and unquoted (NSIS contract).
+          $p = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "NSIS silent install failed: exit $($p.ExitCode)" }
+          $cli = Join-Path $installDir 'bin\projectcli.exe'
+          if (-not (Test-Path $cli)) { throw "NSIS payload missing installed CLI: $cli" }
+          & $cli -v
+          if ($LASTEXITCODE -ne 0) { throw "installed projectcli -v failed: exit $LASTEXITCODE" }
+          $un = Join-Path $installDir 'Uninstall.exe'
+          if (-not (Test-Path $un)) { throw "NSIS uninstaller missing: $un" }
+          # _?= runs the uninstaller in place instead of a temp copy.
+          $u = Start-Process -FilePath $un -ArgumentList @('/S', "_?=$installDir") -Wait -PassThru
+          if ($u.ExitCode -ne 0) { throw "NSIS silent uninstall failed: exit $($u.ExitCode)" }
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Test-Path $cli) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+          if (Test-Path $cli) { throw "CLI still present after NSIS uninstall: $cli" }
+          Write-Host "NSIS lifecycle OK: install -> run -> uninstall -> payload removal verified."
+      - name: MSI silent install, run, uninstall (CORE-2)
+        working-directory: project
+        shell: pwsh
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force verify-artifacts | Out-Null
+          $msi = (Resolve-Path "release-assets\${env:BASE}_wix.msi").Path
+          $installLog = "verify-artifacts\msi-install.log"
+          # INSTALL_ROOT is the directory property CPack's WiX template
+          # exposes (WIXUI_INSTALLDIR); /l*v captures the full log either way.
+          $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/l*v', "`"$installLog`"", 'INSTALL_ROOT=C:\SmokeMsi') -Wait -PassThru
+          if ($p.ExitCode -notin 0, 3010) { throw "MSI silent install failed: exit $($p.ExitCode) (see $installLog)" }
+          $dir = 'C:\SmokeMsi'
+          $cli = Join-Path $dir 'bin\projectcli.exe'
+          if (-not (Test-Path $cli)) {
+            # Fallback: trust the MSI's own resolved folder record over our
+            # property guess, so a property-name drift can't fake a failure.
+            $folder = Select-String -Path $installLog -Pattern 'Folder: INSTALL_ROOT = (.+)$' | Select-Object -Last 1
+            if ($folder) { $dir = $folder.Matches[0].Groups[1].Value.Trim() }
+            $cli = Join-Path $dir 'bin\projectcli.exe'
+          }
+          if (-not (Test-Path $cli)) { throw "MSI payload missing installed CLI (see $installLog)" }
+          & $cli -v
+          if ($LASTEXITCODE -ne 0) { throw "installed projectcli -v failed: exit $LASTEXITCODE" }
+          $xlog = "verify-artifacts\msi-uninstall.log"
+          $u = Start-Process msiexec.exe -ArgumentList @('/x', "`"$msi`"", '/qn', '/norestart', '/l*v', "`"$xlog`"", 'INSTALL_ROOT=C:\SmokeMsi') -Wait -PassThru
+          if ($u.ExitCode -notin 0, 3010) { throw "MSI silent uninstall failed: exit $($u.ExitCode) (see $xlog)" }
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Test-Path $cli) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+          if (Test-Path $cli) { throw "CLI still present after MSI uninstall: $cli" }
+          Write-Host "MSI lifecycle OK: install -> run -> uninstall -> payload removal verified."
+      - name: N-1 to N upgrade smoke (USEFUL-5)
+        working-directory: project
+        shell: pwsh
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installDir = 'C:\SmokeN1'
+          New-Item -ItemType Directory -Force n1 | Out-Null
+          # N-1 = the last published release (v0.0.9). NSIS is used for the
+          # upgrade chain because CPack's WiX template refuses downgrades and
+          # HEAD's default version (0.0.1.0) is below N-1 anyway.
+          gh release download v0.0.9 --repo "$env:GITHUB_REPOSITORY" --pattern '*_windows-msvc-x86_64_nsis.exe' --dir n1
+          if ($LASTEXITCODE -ne 0) { throw "failed to download N-1 (v0.0.9) NSIS installer" }
+          $old = Get-ChildItem n1 -Filter '*_nsis.exe' | Select-Object -First 1
+          if (-not $old) { throw 'N-1 installer not found after download' }
+          $p = Start-Process -FilePath $old.FullName -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "N-1 silent install failed: exit $($p.ExitCode)" }
+          $cli = Join-Path $installDir 'bin\projectcli.exe'
+          if (-not (Test-Path $cli)) { throw "N-1 CLI missing: $cli" }
+          & $cli -v
+          if ($LASTEXITCODE -ne 0) { throw "N-1 CLI run failed: exit $LASTEXITCODE" }
+          # N over N-1: same package identity, same install dir; files are
+          # replaced in place and the product must still run.
+          $new = (Resolve-Path "release-assets\${env:BASE}_nsis.exe").Path
+          $p2 = Start-Process -FilePath $new -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($p2.ExitCode -ne 0) { throw "N install over N-1 failed: exit $($p2.ExitCode)" }
+          & $cli -v
+          if ($LASTEXITCODE -ne 0) { throw "N CLI after upgrade failed: exit $LASTEXITCODE" }
+          Write-Host "N-1 -> N upgrade OK: v0.0.9 installed, current built over it, CLI runs."
+          $un = Join-Path $installDir 'Uninstall.exe'
+          if (Test-Path $un) {
+            $u = Start-Process -FilePath $un -ArgumentList @('/S', "_?=$installDir") -Wait -PassThru
+            if ($u.ExitCode -ne 0) { throw "cleanup uninstall failed: exit $($u.ExitCode)" }
+          }
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-package-smoke-evidence
+          path: project/verify-artifacts/**
+          if-no-files-found: warn
       - name: Verify exact artifacts and checksums
         working-directory: project
         shell: bash
+        env:
+          BASE: ${{ steps.package_name.outputs.base }}
         run: |
           set -euo pipefail
           for f in \
-            windows-mingw-x64.zip \
-            windows-mingw-x64.exe \
-            windows-mingw-x64.msi; do
+            "$BASE.zip" \
+            "${BASE}_nsis.exe" \
+            "${BASE}_wix.msi"; do
             test -f "release-assets/$f"
           done
           sha256sum release-assets/* > release-assets/SHA256SUMS

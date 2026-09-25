@@ -34,6 +34,13 @@ on:
 permissions:
   contents: read
 
+# This smoke runs vcpkg in manifest mode, so its ports tree is the
+# builtin-baseline recorded in vcpkg.json. Mirror it here so the cache key
+# (ADR 006) reflects the revision the job actually builds with. No overlay
+# triplet repository is used: the builtin arm64-windows triplet is built in.
+env:
+  VCPKG_GIT_REF: a1cae005c39be7b18ba319fced856b68d7276271
+
 jobs:
   windows-arm64-package-smoke:
     name: Windows MSVC ARM64 packaging smoke
@@ -91,14 +98,26 @@ jobs:
           "ENVIRONMENT_SCRIPT=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Using $vsDevCmd"
 
+      # ADR 006: the ARM64 smoke owns its own cache family
+      # (windows-arm64-smoke-*) and falls back to the legacy windows-arm64-*
+      # entries written before the contract existed.
+      - name: Resolve vcpkg cache key
+        shell: bash
+        run: |
+          bash project/scripts/vcpkg_cache_key.sh github-env \
+            --family arm64-smoke \
+            --toolchain msvc \
+            --arch arm64 \
+            --build-type Release \
+            --triplets-ref none \
+            --manifest project/vcpkg.json
       - name: Restore GitLab-style vcpkg binary cache
         id: vcpkg-binary-cache-restore
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-arm64-${{ hashFiles('project/vcpkg.json') }}-Release
-          restore-keys: |
-            windows-arm64-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
 
       - name: Bootstrap and install vcpkg
         working-directory: project
@@ -122,10 +141,10 @@ jobs:
 
       - name: Save GitLab-style vcpkg binary cache
         if: success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-arm64-${{ hashFiles('project/vcpkg.json') }}-Release
+          key: ${{ env.VCPKG_CACHE_KEY }}
 
       - name: Configure
         working-directory: project
@@ -172,13 +191,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force release-assets | Out-Null
-          Compress-Archive -Path instdir\* -DestinationPath release-assets\windows-msvc-arm64.zip -Force
           $base = (Select-String -Path build\CPackConfig.cmake -Pattern 'CPACK_PACKAGE_FILE_NAME "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
           if (-not $base) { throw 'Could not determine canonical CPack package name' }
+          $epoch = (git log -1 --format=%ct)
+          if (-not $epoch) { throw 'git log failed; cannot derive SOURCE_DATE_EPOCH' }
+          & .\scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets\$base.zip" -Epoch ([int]$epoch)
           Push-Location build
           cpack --config CPackConfig.cmake -C Release -G NSIS64
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.exe")) { throw 'NSIS64 package generation failed' }
-          Copy-Item "package\$base.exe" "..\release-assets\windows-msvc-arm64.exe" -Force
+          Copy-Item "package\$base.exe" "..\release-assets\${base}_nsis.exe" -Force
           # Standalone archive policy (2026-09-23): Windows ships .zip only. The
           # historical .7z alternative is retained here as a documented, disabled
           # block; uncomment the three lines below to restore it (requires the
@@ -188,26 +209,51 @@ jobs:
           # Copy-Item "package\$base.7z" "..\release-assets\windows-msvc-arm64.7z" -Force
           cpack --config CPackConfig.cmake -C Release -G WIX
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$base.msi")) { throw 'MSI package generation failed' }
-          Copy-Item "package\$base.msi" "..\release-assets\windows-msvc-arm64.msi" -Force
+          Copy-Item "package\$base.msi" "..\release-assets\${base}_wix.msi" -Force
           Pop-Location
           Get-ChildItem release-assets
 
+      - name: Verify ZIP payload closure and run packaged CLI
+        working-directory: project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force verify-artifacts | Out-Null
+          $base = (Select-String -Path build\CPackConfig.cmake -Pattern 'CPACK_PACKAGE_FILE_NAME "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if (-not $base) { throw 'Could not determine canonical CPack package name' }
+          if (Test-Path verify-zip) { Remove-Item -Recurse -Force verify-zip }
+          Expand-Archive -Path "release-assets\$base.zip" -DestinationPath verify-zip -Force
+          # CORE-1: closure + arch proof on the ARM64 payload.
+          & cmake\windows\Resolve-WindowsRuntimeDeps.ps1 -Root verify-zip -ExpectedArch arm64 -Report "verify-artifacts\runtime-deps-$base.json"
+          & verify-zip\bin\projectcli.exe -v
+          if ($LASTEXITCODE -ne 0) { throw "projectcli -v failed from extracted ZIP (exit $LASTEXITCODE)" }
+          Write-Host "ARM64 ZIP closure verified and CLI ran from payload."
       - name: Verify exact artifacts and checksums
         working-directory: project
         run: |
           $ErrorActionPreference = 'Stop'
+          $base = (Select-String -Path build\CPackConfig.cmake -Pattern 'CPACK_PACKAGE_FILE_NAME "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if (-not $base) { throw 'Could not determine canonical CPack package name' }
           $expected = @(
-            'windows-msvc-arm64.zip',
-            'windows-msvc-arm64.exe',
-            'windows-msvc-arm64.msi'
+            "$base.zip",
+            "${base}_nsis.exe",
+            "${base}_wix.msi"
           )
           foreach ($file in $expected) {
             if (-not (Test-Path "release-assets\$file")) { throw "Missing release artifact: $file" }
           }
-          Get-FileHash release-assets\*.zip,release-assets\*.exe,release-assets\*.msi -Algorithm SHA256 |
-            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLowerInvariant(), $_.Path.Replace((Get-Location).Path + '\', '').Replace('\', '/') } |
+          Get-ChildItem release-assets -File | Where-Object Name -ne 'SHA256SUMS' |
+            Sort-Object Name |
+            ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name } |
             Set-Content release-assets\SHA256SUMS
           Get-ChildItem release-assets
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-arm64-package-smoke-evidence
+          path: project/verify-artifacts/**
+          if-no-files-found: warn
 
       - name: Upload smoke artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -1,29 +1,17 @@
 # CPack configuration shared by GitLab and GitHub release pipelines.
 # Package identity is intentionally explicit: OS + toolchain + architecture.
 
-include(InstallRequiredSystemLibraries)
-
-set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
-set(CPACK_PACKAGE_DESCRIPTION ${PROJECT_DESCRIPTION})
-set(CPACK_PACKAGE_VERSION_MAJOR ${CMAKE_PROJECT_VERSION_MAJOR})
-set(CPACK_PACKAGE_VERSION_MINOR ${CMAKE_PROJECT_VERSION_MINOR})
-set(CPACK_PACKAGE_VERSION_PATCH ${CMAKE_PROJECT_VERSION_PATCH})
-set(CPACK_PACKAGE_ICON "${PACKAGING_DIR}/apple/icon.png")
-set(CPACK_OUTPUT_FILE_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/package")
-set(CPACK_PACKAGE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-string(TOLOWER "${CMAKE_SYSTEM_NAME}" _sys)
-string(TOLOWER "${PROJECT_NAME}" _project_lower)
-
-# Determine the target architecture. Visual Studio exposes the target through
-# CMAKE_VS_PLATFORM_NAME; Ninja/vcvars32 does not, so pointer size is used as
-# the final correction for a 32-bit target on a 64-bit Windows host.
+# Canonical architecture vocabulary (CORE-8): x86_64, i686, arm64. CPack, the
+# release workflows (both providers), the smoke jobs, the manifests and the
+# validation scripts all use exactly these strings; "x64" and "x86" never
+# appear in artifact names. Keep this block before
+# InstallRequiredSystemLibraries so the MSVC redist selection uses the same
+# architecture as the package name.
+set(_arch_raw "unknown")
 if(MSVC AND CMAKE_VS_PLATFORM_NAME)
     set(_arch_raw "${CMAKE_VS_PLATFORM_NAME}")
 elseif(CMAKE_SYSTEM_PROCESSOR)
     set(_arch_raw "${CMAKE_SYSTEM_PROCESSOR}")
-else()
-    set(_arch_raw "unknown")
 endif()
 string(TOLOWER "${_arch_raw}" _arch)
 if(_arch MATCHES "^(x64|amd64|x86_64)$")
@@ -37,10 +25,37 @@ if(_arch STREQUAL "x86_64" AND DEFINED CMAKE_SIZEOF_VOID_P AND CMAKE_SIZEOF_VOID
     set(_arch "i686")
 endif()
 
-set(_arch_display "${_arch}")
-if(_arch_display STREQUAL "i686")
-    set(_arch_display "x86")
+# Select the matching MSVC redistributable directory (x64/x86/arm64). Without
+# an explicit value CMake falls back to pointer size for Ninja builds, which
+# put an x64 vcruntime140_1.dll into ARM64 packages.
+if(MSVC)
+    if(_arch STREQUAL "x86_64")
+        set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_ARCH "x64")
+    elseif(_arch STREQUAL "i686")
+        set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_ARCH "x86")
+    elseif(_arch STREQUAL "arm64")
+        set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_ARCH "arm64")
+    endif()
 endif()
+
+include(InstallRequiredSystemLibraries)
+
+set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
+set(CPACK_PACKAGE_DESCRIPTION ${PROJECT_DESCRIPTION})
+# CPackRPM does NOT read CPACK_PACKAGE_DESCRIPTION: it reads
+# CPACK_PACKAGE_DESCRIPTION_FILE, whose default is CMake's generic
+# "DESCRIPTION ============" template -- shipping that as the RPM
+# %description is a product-identity defect (CORE-3). Pin it explicitly.
+set(CPACK_RPM_PACKAGE_DESCRIPTION ${PROJECT_DESCRIPTION})
+set(CPACK_PACKAGE_VERSION_MAJOR ${CMAKE_PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${CMAKE_PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${CMAKE_PROJECT_VERSION_PATCH})
+set(CPACK_PACKAGE_ICON "${PACKAGING_DIR}/apple/icon.png")
+set(CPACK_OUTPUT_FILE_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/package")
+set(CPACK_PACKAGE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" _sys)
+string(TOLOWER "${PROJECT_NAME}" _project_lower)
 
 # WiX can produce a native ARM64 MSI. Keep the installer architecture aligned
 # with the payload instead of letting CPack default the Windows ARM package to x64.
@@ -56,10 +71,10 @@ if(DEFINED PACKAGE_TOOLCHAIN AND NOT PACKAGE_TOOLCHAIN STREQUAL "")
     set(_toolchain_suffix "${PACKAGE_TOOLCHAIN}")
 endif()
 
-set(CPACK_PACKAGE_FILE_NAME "${_project_lower}_${PROJECT_VERSION}_${_sys}-${_toolchain_suffix}-${_arch_display}")
+set(CPACK_PACKAGE_FILE_NAME "${_project_lower}_${PROJECT_VERSION}_${_sys}-${_toolchain_suffix}-${_arch}")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME "${_project_lower}_${PROJECT_VERSION}_source")
 
-message(STATUS "-- CPack package target: ${_sys}-${_toolchain_suffix}-${_arch_display}")
+message(STATUS "-- CPack package target: ${_sys}-${_toolchain_suffix}-${_arch}")
 
 # The GitLab pipeline's packaging jobs read the resolved package base name
 # back from this plain file instead of reverse-parsing it out of CMake's own
@@ -132,24 +147,53 @@ if(WIN32)
     set(CPACK_WIX_UI_DIALOG "${_wix_dialog}")
 
 elseif(APPLE)
-    set(MACOSX_BUNDLE_BUNDLE_NAME ${CPACK_PACKAGE_NAME})
-    set(MACOSX_BUNDLE_ICON_FILE "${PACKAGING_DIR}/apple/icon.icns")
-    set_source_files_properties("${PACKAGING_DIR}/apple/icon.icns" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
-    set(CPACK_DMG_VOLUME_NAME "${PROJECT_NAME}")
-    set(CPACK_DMG_BACKGROUND_IMAGE "${PACKAGING_DIR}/apple/icon.png")
+	# MACOSX_BUNDLE_* variables and the .icns Resources entry live in
+	# src/projectwx/src/CMakeLists.txt (they must be set before
+	# add_executable() creates the target, in the target's own directory
+	# scope). Only CPack-facing settings belong here.
+	set(CPACK_DMG_VOLUME_NAME "${PROJECT_NAME}")
+	set(CPACK_DMG_BACKGROUND_IMAGE "${PACKAGING_DIR}/apple/icon.png")
+
+	# Under CMP0133-OLD (cmake_minimum_required < 3.31), the CPack module
+	# defaults CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE to ON whenever a
+	# custom CPACK_RESOURCE_FILE_LICENSE is set, and the DragNDrop
+	# generator then embeds it as an interactive software-license agreement
+	# on the image. hdiutil attach presents that SLA before mounting; on
+	# headless hosts (CI verification, verify_release.sh, scripted
+	# consumers) there is no UI to accept it, so the attach aborts with
+	# "Error 111 (user canceled operation)" / "hdiutil: attach canceled".
+	# The NSIS/WiX EULA pages are unaffected (interactive installers, and
+	# silent /S|/quiet modes skip them); only the DMG SLA is disabled so
+	# the image can be mounted programmatically.
+	set(CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE OFF)
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(RPMBUILD_PATH rpmbuild)
     if(RPMBUILD_PATH)
         message(STATUS "Found rpmbuild: ${RPMBUILD_PATH}")
     endif()
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.32), libstdc++6 (>= 12)")
+
+    # Debian metadata (CORE-3 / CORE-10):
+    #  * Maintainer comes from CPACK_PACKAGE_CONTACT, which is a
+    #    "Name <address>" pair (mandatory for Debian, and required to be the
+    #    repository maintainer identity rather than a stale one).
+    #  * Homepage follows project(HOMEPAGE_URL).
+    #  * Runtime dependencies are discovered by dpkg-shlibdeps from the ELF
+    #    DT_NEEDED entries of the shipped binaries instead of being
+    #    hand-maintained; the previous value shipped a *development* package
+    #    as a fallback dependency, which Debian does not accept as a runtime
+    #    dependency. Requires dpkg-dev on the packaging host.
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
+    set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CMAKE_PROJECT_HOMEPAGE_URL}")
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
+
     set(CPACK_RPM_PACKAGE_REQUIRES "glibc >= 2.32, libstdc++ >= 12")
     set(CPACK_RPM_PACKAGE_LICENSE "MIT")
     set(CPACK_RPM_PACKAGE_URL "${CMAKE_PROJECT_HOMEPAGE_URL}")
+    set(CPACK_RPM_PACKAGE_PACKAGER "${CPACK_PACKAGE_CONTACT}")
 
     if(BUILD_PROJECTWX)
-        set(CPACK_DEBIAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}, libwxgtk3.2-1 | libwxgtk3.2-dev")
         set(CPACK_RPM_PACKAGE_REQUIRES "${CPACK_RPM_PACKAGE_REQUIRES}, wxGTK3")
         configure_file("${PACKAGING_DIR}/linux/template.desktop.in" "${PROJECT_WX_NAME}.desktop")
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_WX_NAME}.desktop" DESTINATION share/applications/ PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)

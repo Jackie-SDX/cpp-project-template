@@ -1,6 +1,33 @@
+# ============================================================================
+# CircleCI status reporting is retired as of this file (issue CORE-9).
+#
+# This configuration is retained for history only. CircleCI is an obsolete,
+# unsupported signal for this repository: on the same SHA it reported 8 of 12
+# jobs failing while the authoritative CI was green, and we have no CircleCI
+# account/token with which to repair it or prove it green. The authoritative
+# CI for this repository is GitHub Actions; see .github/workflows/.
+#
+# Every workflow in this file is switched off with a workflow-level
+# `when: false` clause, so CircleCI publishes no status check on any branch or
+# any tag (including release tags) anymore. The jobs below are deliberately
+# kept rather than deleted, as historical record -- none of them run, and the
+# retained `tags: only: /^v.*/` filters are unreachable while the workflow is
+# disabled.
+#
+# To re-enable CircleCI, all of the following must be true first:
+#   1. A CircleCI account and API token are provisioned with access to this
+#      repository.
+#   2. The `when: false` line under the workflow below is removed, and the
+#      retired legacy image reference in the executors section is replaced
+#      with an image that is known to exist.
+#   3. A full run is proven green, and GitHub Actions on the same SHA is
+#      green -- this config must never again publish a status that
+#      contradicts the authoritative CI.
+# ============================================================================
 version: 2.1
 
 # ============================================================================
+# Historical rationale (predates the retirement notice above).
 # This mirrors .gitlab/.gitlab-ci.yml for pre-flight validation on CircleCI
 # before spending GitLab compute minutes. Rewritten from scratch rather than
 # patched -- the previous draft had several breaking errors, listed at the
@@ -32,7 +59,13 @@ version: 2.1
 executors:
   linux-builder:
     docker:
-      - image: registry.gitlab.com/xemypandas/cpp-project-template/build_gcc_deb:latest
+      # The original image was a prebuilt upstream image from the template's
+      # previous owner's GitLab registry; that path is not ours and is not
+      # maintained for this repository, so it has been replaced with this
+      # public CircleCI convenience image. It is only ever referenced by the
+      # disabled workflows below, so nothing is claimed to work -- none of
+      # these jobs run while `when: false` is in place.
+      - image: cimg/base:current
     environment:
       DEBIAN_FRONTEND: noninteractive
       VCPKG_DISABLE_METRICS: "1"
@@ -290,7 +323,9 @@ jobs:
             cp -a docs/doxygen/build/html/. doxygen-html/
 
   # ==========================================================================
-  # OPTIONAL -- not wired into the workflow below by default.
+  # OPTIONAL -- retired; never wired into any workflow, and the only workflow
+  # in this file is switched off with `when: false` (see the header comment
+  # for the conditions under which anything here may be re-enabled).
   #
   # This would let CircleCI publish directly to your GitLab Releases page
   # using `glab`, so you asked directly whether that's possible: yes, it is.
@@ -304,7 +339,8 @@ jobs:
   #      $CI_JOB_TOKEN, which GitLab auto-issues, auto-scopes to this project
   #      only, and auto-revokes when the job ends -- no token to create,
   #      store, or rotate by hand.
-  # If you still want this, uncomment the job below, add it to the workflow
+  # If the header's re-enable conditions are ever met and you still want
+  # this, uncomment the job below, add it to the workflow
   # with a `tags: only: /^v.*/` + `branches: ignore: /.*/` filter (note the
   # correct `.*` -- a bare `.` only matches a single character and would
   # silently fail to ignore normal branches), and set a GITLAB_ACCESS_TOKEN
@@ -322,16 +358,21 @@ jobs:
   #           sudo apt-get update && sudo apt-get install -y glab
   #           export GITLAB_TOKEN="${GITLAB_ACCESS_TOKEN}"
   #           glab release create "${CIRCLE_TAG}" \
-  #             --repo "xemypandas/cpp-project-template" \
+  #             --repo "Jackie-SDX/cpp-project-template" \
   #             --name "Release ${CIRCLE_TAG}" \
   #             --notes "Built and validated via CircleCI."
   #           for f in projectcli-*.zip projectcli-*.tar.gz; do
-  #             [ -f "$f" ] && glab release upload "${CIRCLE_TAG}" "$f" --repo "xemypandas/cpp-project-template"
+  #             [ -f "$f" ] && glab release upload "${CIRCLE_TAG}" "$f" --repo "Jackie-SDX/cpp-project-template"
   #           done
 
 workflows:
   version: 2
   pipeline:
+    # Disabled: see the retirement notice at the top of this file. With this
+    # clause the workflow never runs, so no CircleCI status check is
+    # published on any branch or tag. Remove this line only if the
+    # re-enable conditions in the header comment have all been met.
+    when: false
     jobs:
       - clang-tidy:
           filters:
@@ -419,8 +460,10 @@ workflows:
 # ============================================================================
 # What was wrong with the previous draft (so nothing here is a mystery fix):
 #   - `image: $CI_REGISTRY_IMAGE/build_gcc_deb:latest` -- that's a GitLab CI
-#     variable, meaningless inside CircleCI. Replaced with the actual public
-#     GitLab Container Registry path for this project.
+#     variable, meaningless inside CircleCI. Replaced first with the previous
+#     owner's public GitLab Container Registry path, and now (at retirement)
+#     with a public CircleCI convenience image, since that legacy path is not
+#     ours to rely on and the workflows are disabled anyway.
 #   - `git clone https://github.com vcpkg` -- missing the repo path entirely;
 #     that clones the GitHub homepage, not a repository. Fixed to
 #     https://github.com/microsoft/vcpkg.git.

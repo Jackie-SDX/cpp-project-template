@@ -544,6 +544,7 @@ build:linux:matrix:
       -D CMAKE_BUILD_TYPE=$BUILD_TYPE
       -D CMAKE_C_COMPILER_LAUNCHER=ccache
       -D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+      -D PACKAGE_TOOLCHAIN=$COMPILER
       -D CPP_PROJECT_TEMPLATE_VERSION=$RESOLVED_VERSION
     - cmake --build build
     - cd build && ctest -C $BUILD_TYPE --output-on-failure && cd ..
@@ -596,6 +597,7 @@ build:linux:arm64:
       -D CMAKE_BUILD_TYPE=Release
       -D CMAKE_C_COMPILER_LAUNCHER=ccache
       -D CMAKE_CXX_COMPILER_LAUNCHER=ccache
+      -D PACKAGE_TOOLCHAIN=gcc
       -D CPP_PROJECT_TEMPLATE_VERSION=$RESOLVED_VERSION
     - cmake --build build
     - cd build && ctest -C Release --output-on-failure && cd ..
@@ -1727,7 +1729,7 @@ build:windows:mingw:arm64:
         -G "$env:CMAKE_GENERATOR" `
         -D CMAKE_BUILD_TYPE=$env:BUILD_TYPE `
         -D PACKAGE_MANAGER=vcpkg `
-        -D PACKAGE_TOOLCHAIN=mingw `
+        -D PACKAGE_TOOLCHAIN=clangarm64 `
         -D VCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET `
         -D VCPKG_MANIFEST_MODE=ON `
         -D CMAKE_TOOLCHAIN_FILE="$toolchainFile" `
@@ -1783,6 +1785,7 @@ build:macos:
       -G Ninja
       -D CMAKE_MAKE_PROGRAM=ninja
       -D CMAKE_BUILD_TYPE=$BUILD_TYPE
+      -D PACKAGE_TOOLCHAIN=apple-clang
       -D CPP_PROJECT_TEMPLATE_VERSION=$RESOLVED_VERSION
     - cmake --build build --config $BUILD_TYPE
     - cd build && ctest -C $BUILD_TYPE --output-on-failure && cd ..
@@ -2013,10 +2016,11 @@ clear_cache:
 # referenced identically everywhere, matching "do not duplicate ... logic
 # across every job").
 #
-# ZIP is still built with Compress-Archive, not `cpack -G ZIP` -- unchanged
-# from before, just given the canonical filename now instead of the old
-# fixed "$RELEASE_ARCHIVE_PREFIX-windows-<arch>.zip" pattern that had no
-# version or toolchain in it at all.
+# ZIP is built by scripts/make_deterministic_zip.ps1 -- the same builder
+# every other leg uses (USEFUL-2/P0-14 convergence). The previous
+# Compress-Archive call carried non-reproducible entry timestamps; it is
+# gone. The canonical filename comes from build\canonical_package_name.txt
+# exactly as before.
 #
 # The canonical base name is read from build\canonical_package_name.txt, a
 # plain file cpack_module.cmake writes during the build job's own cmake
@@ -2046,7 +2050,13 @@ clear_cache:
     if (-not (Get-ChildItem -Recurse -File instdir | Select-Object -First 1)) {
       throw "cmake --install produced an empty instdir -- refusing to publish an empty archive."
     }
-    Compress-Archive -Path instdir\* -DestinationPath "$canonicalBase.zip" -Force
+    # SOURCE_DATE_EPOCH: the tagged commit's %ct, same epoch the tarballs
+    # and GitHub legs use, so a rebuilt tree with identical content yields
+    # an identical zip for a fixed runner/.NET version (documented limit).
+    $epoch = (git log -1 --format=%ct)
+    if (-not $epoch) { throw "git log failed; cannot derive SOURCE_DATE_EPOCH for the deterministic zip." }
+    $env:SOURCE_DATE_EPOCH = "$epoch"
+    & scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "$canonicalBase.zip" -Epoch ([int]$epoch)
 
     Push-Location build
     cpack -C Release -G $env:NSIS_GENERATOR
@@ -2367,12 +2377,13 @@ package_linux_x64_release:
       fi
     - *check_attestation_bash
     - apt-get update
-    - apt-get install -y rpm binutils
+    - apt-get install -y rpm binutils dpkg-dev
     - cmake --install build --prefix instdir --strip
     - test -n "$(find instdir -type f -print -quit)"
     - mkdir -p release-assets
     - *read_canonical_base_bash
-    - tar -C instdir -czf "release-assets/${CANONICAL_BASE}.tar.gz" .
+    - export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" && test -n "$SOURCE_DATE_EPOCH"
+    - scripts/make_deterministic_tarball.sh --epoch "$SOURCE_DATE_EPOCH" --input instdir --output "release-assets/${CANONICAL_BASE}.tar.gz"
     - cd build
     # 2026-09-13 fix: these were previously chained with && under
     # set -euo pipefail -- a DEB failure would short-circuit RPM entirely
@@ -2419,12 +2430,13 @@ package_linux_arm64_release:
       fi
     - *check_attestation_bash
     - apt-get update
-    - apt-get install -y cmake binutils rpm
+    - apt-get install -y cmake binutils rpm dpkg-dev libwxgtk3.2-dev
     - cmake --install build --prefix instdir --strip
     - test -n "$(find instdir -type f -print -quit)"
     - mkdir -p release-assets
     - *read_canonical_base_bash
-    - tar -C instdir -czf "release-assets/${CANONICAL_BASE}.tar.gz" .
+    - export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" && test -n "$SOURCE_DATE_EPOCH"
+    - scripts/make_deterministic_tarball.sh --epoch "$SOURCE_DATE_EPOCH" --input instdir --output "release-assets/${CANONICAL_BASE}.tar.gz"
     - cd build
     # 2026-09-13: DEB/RPM are new for this leg (previously tar.gz only).
     # Same as x64: each format is independent, a failure here is logged, not
@@ -2489,9 +2501,24 @@ package_macos_release:
     # the manually-built .tar.gz convenience archive is not generated on the
     # macOS leg (the .zip comes from the CPack ZIP generator below).
     - cpack -C Release -G DragNDrop || echo "DragNDrop packaging failed -- shipping without the .dmg for this platform."
-    - cpack -C Release -G ZIP || echo "ZIP packaging failed."
     - cd ..
-    - cp build/package/*.dmg build/package/*.zip release-assets/ 2>/dev/null || true
+    - |
+      # Deterministic zip via the shared builder (USEFUL-2) when pwsh is on
+      # this runner; otherwise fall back to cpack -G ZIP and say so loudly --
+      # shipping a non-deterministic zip beats shipping none, but it must not
+      # pretend to be reproducible.
+      if command -v pwsh >/dev/null 2>&1; then
+        if ! pwsh -NoProfile -File scripts/make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets/${CANONICAL_BASE}.zip" -Epoch "$(git log -1 --format=%ct)"; then
+          echo "Deterministic zip failed; falling back to non-deterministic cpack -G ZIP."
+          (cd build && cpack -C Release -G ZIP) || echo "ZIP packaging failed."
+          cp build/package/*.zip release-assets/ 2>/dev/null || true
+        fi
+      else
+        echo "pwsh unavailable on this runner: using non-deterministic cpack -G ZIP (documented limitation for USEFUL-2)."
+        (cd build && cpack -C Release -G ZIP) || echo "ZIP packaging failed."
+        cp build/package/*.zip release-assets/ 2>/dev/null || true
+      fi
+      cp build/package/*.dmg release-assets/ 2>/dev/null || true
     - ls -la release-assets
   artifacts:
     when: always
@@ -2598,6 +2625,15 @@ create_release:
     - (cd all-assets && sha256sum * > SHA256SUMS)
     - ls -la all-assets
     - cat all-assets/SHA256SUMS
+    - |
+      # CORE-7 completeness floor, enforced mechanically right before
+      # publication: every gitlab=auto contract asset present, every leg
+      # that produced anything produced its whole format set, no filename
+      # diverging from packaging/release-contract.tsv. Plain `sh` on purpose
+      # -- this job's Alpine image has ash/busybox, not bash (see the
+      # set -eu note above).
+      sh scripts/release_contract.sh check --dir all-assets --version "$RESOLVED_VERSION" --scope gitlab-floor
+      sh scripts/release_contract.sh check-forbidden --dir all-assets
     - |
       glab release create "$CI_COMMIT_TAG" \
         --name "Release $CI_COMMIT_TAG" \

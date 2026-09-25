@@ -89,17 +89,42 @@ endif()
 project (cpp-project-template
 	VERSION ${CPP_PROJECT_TEMPLATE_VERSION}
 	DESCRIPTION "C++ Project Template"
-	HOMEPAGE_URL "https://github.com/NaylaCruz/cpp-project-template"
+	HOMEPAGE_URL "https://github.com/Jackie-SDX/cpp-project-template"
 	LANGUAGES ${PROJECT_LANGUAGES})
 
 # Global variables
-set(AUTHOR_NAME "NaylaCruz")
-set(ORGANIZATION "NaylaCruz")
+#
+# Identity provenance (documentation, not invention): the repository is owned
+# by the GitHub organization Jackie-SDX (see the HOMEPAGE_URL above), and the
+# maintainer identity used below is the repository's own git author identity
+# (`git log --format='%an <%ae>'` -> "Jackie <omonzejieelijah@gmail.com>").
+# Debian requires a `Maintainer: Name <address>` pair, which is why an address
+# is recorded here instead of a bare name. Packaging metadata (DEB Maintainer,
+# RPM packager, NSIS/WiX contacts) is derived from these two variables by
+# cmake/cpack_module.cmake.
+set(AUTHOR_NAME "Jackie")
+set(AUTHOR_EMAIL "omonzejieelijah@gmail.com")
+set(ORGANIZATION "Jackie-SDX")
 set(CPACK_PACKAGE_VENDOR "${ORGANIZATION}")
-set(CPACK_PACKAGE_CONTACT "${AUTHOR_NAME}")
+set(CPACK_PACKAGE_CONTACT "${AUTHOR_NAME} <${AUTHOR_EMAIL}>")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(PROJECT_LANGUAGE_NEUTRAL 0) # if 0, language will be set to English in version.rc, otherwise neutral
+
+# version.rc FILEVERSION/PRODUCTVERSION require exactly four comma-separated
+# WORDs. Release versions are 3-component (X.Y.Z), which leaves
+# CMAKE_PROJECT_VERSION_TWEAK empty; the template then rendered "0,0,9,"
+# and rc.exe failed with RC2127 ("version WORDs separated by commas
+# expected"). Compute padded numeric and dotted forms once here so both
+# 3- and 4-component project versions produce a valid VERSIONINFO block.
+set(_project_version_tweak "${CMAKE_PROJECT_VERSION_TWEAK}")
+if(_project_version_tweak STREQUAL "")
+	set(_project_version_tweak 0)
+endif()
+set(PROJECT_RC_VERSION_WORDS
+	"${CMAKE_PROJECT_VERSION_MAJOR},${CMAKE_PROJECT_VERSION_MINOR},${CMAKE_PROJECT_VERSION_PATCH},${_project_version_tweak}")
+set(PROJECT_RC_VERSION_DOTS
+	"${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.${CMAKE_PROJECT_VERSION_PATCH}.${_project_version_tweak}")
 string(TIMESTAMP COPYRIGHT_YEAR "%Y")
 set(CPACK_PACKAGE_COPYRIGHT "© ${COPYRIGHT_YEAR} ${CPACK_PACKAGE_VENDOR}")
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -213,9 +238,17 @@ if(${BUILD_SOURCE})
 	# See: https://cmake.org/cmake/help/latest/guide/tutorial/Installing%20and%20Testing.html
 	install(TARGETS ${PROJECT_CLI_NAME} DESTINATION bin)
 	if(BUILD_PROJECTWX)
-		install(TARGETS ${PROJECT_WX_NAME} DESTINATION bin)
+		# BUNDLE DESTINATION .: on macOS projectwx is a MACOSX_BUNDLE, so the
+		# install tree (and therefore the ZIP/DMG payload) contains
+		# projectwx.app/ at its root instead of a bare binary in bin/.
+		install(TARGETS ${PROJECT_WX_NAME} RUNTIME DESTINATION bin BUNDLE DESTINATION .)
 	endif()
 	install(DIRECTORY "${ASSETS_DIR}/images" DESTINATION ".")
 
 	include(cmake/cpack_module.cmake)
+
+	# Must run after every install(...) rule above (it appends the last
+	# install step): deploys and verifies the Windows runtime DLL closure and
+	# writes the JSON report consumed by CI. See cmake/WindowsRuntimeDeps.cmake.
+	include(cmake/WindowsRuntimeDeps.cmake)
 endif()

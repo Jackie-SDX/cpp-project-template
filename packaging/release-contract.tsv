@@ -1,0 +1,76 @@
+# cpp-project-template release contract (USEFUL-3, CORE-5, CORE-7, CORE-8).
+# Single source of truth for the published inventory. Consumed by
+# scripts/release_contract.sh (GitHub validate/publish and GitLab floor).
+# Fields: os arch toolchain profile format filename validations gitlab support_baseline
+#   profile:      gui  = product includes projectwx (MACOSX_BUNDLE on macOS)
+#                 cli  = projectwx disabled for this leg
+#   filename:     ${V} is replaced with the release version (X.Y.Z)
+#   validations:  semicolon-separated checks required of this artifact
+#   gitlab:       auto    = produced automatically on every GitLab tag release (floor)
+#                 manual  = GitLab job exists but is manual/dormant (best effort)
+#                 blocked = GitLab job exists but no runner entitlement yet
+#                 none    = GitHub-only leg
+#   unsupported combinations are absent: no Linux .zip, no macOS .tar.gz, no .7z/.msix/
+#     AppImage/Flatpak/Snap (CORE-5). 54 package rows + 2 source rows.
+os	arch	toolchain	profile	format	filename	validations	gitlab	support_baseline
+windows	x86_64	msvc	gui	zip	cpp-project-template_${V}_windows-msvc-x86_64.zip	pe-arch;pe-closure;extract-run	auto	windows-server-2025 (CI)
+windows	x86_64	msvc	gui	nsis	cpp-project-template_${V}_windows-msvc-x86_64_nsis.exe	pe-arch;installer-lifecycle	auto	windows-server-2025 (CI)
+windows	x86_64	msvc	gui	wix	cpp-project-template_${V}_windows-msvc-x86_64_wix.msi	pe-arch;installer-lifecycle	auto	windows-server-2025 (CI)
+windows	i686	msvc	gui	zip	cpp-project-template_${V}_windows-msvc-i686.zip	pe-arch;pe-closure;extract-run	auto	windows-server-2025 (CI)
+windows	i686	msvc	gui	nsis	cpp-project-template_${V}_windows-msvc-i686_nsis.exe	pe-arch;installer-lifecycle	auto	windows-server-2025 (CI)
+windows	i686	msvc	gui	wix	cpp-project-template_${V}_windows-msvc-i686_wix.msi	pe-arch;installer-lifecycle	auto	windows-server-2025 (CI)
+windows	arm64	msvc	gui	zip	cpp-project-template_${V}_windows-msvc-arm64.zip	pe-arch;pe-closure;extract-run	manual	windows-server-2025 (CI)
+windows	arm64	msvc	gui	nsis	cpp-project-template_${V}_windows-msvc-arm64_nsis.exe	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	arm64	msvc	gui	wix	cpp-project-template_${V}_windows-msvc-arm64_wix.msi	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	x86_64	mingw	gui	zip	cpp-project-template_${V}_windows-mingw-x86_64.zip	pe-arch;pe-closure;extract-run	manual	windows-server-2025 (CI)
+windows	x86_64	mingw	gui	nsis	cpp-project-template_${V}_windows-mingw-x86_64_nsis.exe	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	x86_64	mingw	gui	wix	cpp-project-template_${V}_windows-mingw-x86_64_wix.msi	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	i686	mingw	gui	zip	cpp-project-template_${V}_windows-mingw-i686.zip	pe-arch;pe-closure;extract-run	manual	windows-server-2025 (CI)
+windows	i686	mingw	gui	nsis	cpp-project-template_${V}_windows-mingw-i686_nsis.exe	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	i686	mingw	gui	wix	cpp-project-template_${V}_windows-mingw-i686_wix.msi	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	arm64	clangarm64	gui	zip	cpp-project-template_${V}_windows-clangarm64-arm64.zip	pe-arch;pe-closure;extract-run	manual	windows-server-2025 (CI)
+windows	arm64	clangarm64	gui	nsis	cpp-project-template_${V}_windows-clangarm64-arm64_nsis.exe	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	arm64	clangarm64	gui	wix	cpp-project-template_${V}_windows-clangarm64-arm64_wix.msi	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	x86_64	llvm	gui	zip	cpp-project-template_${V}_windows-llvm-x86_64.zip	pe-arch;pe-closure;extract-run	manual	windows-server-2025 (CI)
+windows	x86_64	llvm	gui	nsis	cpp-project-template_${V}_windows-llvm-x86_64_nsis.exe	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	x86_64	llvm	gui	wix	cpp-project-template_${V}_windows-llvm-x86_64_wix.msi	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	i686	llvm	gui	zip	cpp-project-template_${V}_windows-llvm-i686.zip	pe-arch;pe-closure;extract-run	manual	windows-server-2025 (CI)
+windows	i686	llvm	gui	nsis	cpp-project-template_${V}_windows-llvm-i686_nsis.exe	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	i686	llvm	gui	wix	cpp-project-template_${V}_windows-llvm-i686_wix.msi	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	arm64	llvm	gui	zip	cpp-project-template_${V}_windows-llvm-arm64.zip	pe-arch;pe-closure;extract-run	manual	windows-server-2025 (CI)
+windows	arm64	llvm	gui	nsis	cpp-project-template_${V}_windows-llvm-arm64_nsis.exe	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+windows	arm64	llvm	gui	wix	cpp-project-template_${V}_windows-llvm-arm64_wix.msi	pe-arch;installer-lifecycle	manual	windows-server-2025 (CI)
+linux	x86_64	gcc	gui	tgz	cpp-project-template_${V}_linux-gcc-x86_64.tar.gz	elf-closure;extract-run	auto	ubuntu-24.04 (CI)
+linux	x86_64	gcc	gui	deb	cpp-project-template_${V}_linux-gcc-x86_64.deb	pkg-meta;install-lifecycle	auto	ubuntu-24.04 (CI)
+linux	x86_64	gcc	gui	rpm	cpp-project-template_${V}_linux-gcc-x86_64.rpm	pkg-meta;install-lifecycle	auto	ubuntu-24.04 (CI)
+linux	i686	gcc	gui	tgz	cpp-project-template_${V}_linux-gcc-i686.tar.gz	elf-closure;extract-run	manual	ubuntu-24.04 (CI)
+linux	i686	gcc	gui	deb	cpp-project-template_${V}_linux-gcc-i686.deb	pkg-meta;install-lifecycle	manual	ubuntu-24.04 (CI)
+linux	i686	gcc	gui	rpm	cpp-project-template_${V}_linux-gcc-i686.rpm	pkg-meta;install-lifecycle	manual	ubuntu-24.04 (CI)
+linux	arm64	gcc	gui	tgz	cpp-project-template_${V}_linux-gcc-arm64.tar.gz	elf-closure;extract-run	auto	ubuntu-24.04 (CI)
+linux	arm64	gcc	gui	deb	cpp-project-template_${V}_linux-gcc-arm64.deb	pkg-meta;install-lifecycle	auto	ubuntu-24.04 (CI)
+linux	arm64	gcc	gui	rpm	cpp-project-template_${V}_linux-gcc-arm64.rpm	pkg-meta;install-lifecycle	auto	ubuntu-24.04 (CI)
+linux	x86_64	clang	gui	tgz	cpp-project-template_${V}_linux-clang-x86_64.tar.gz	elf-closure;extract-run	none	ubuntu-24.04 (CI)
+linux	x86_64	clang	gui	deb	cpp-project-template_${V}_linux-clang-x86_64.deb	pkg-meta;install-lifecycle	none	ubuntu-24.04 (CI)
+linux	x86_64	clang	gui	rpm	cpp-project-template_${V}_linux-clang-x86_64.rpm	pkg-meta;install-lifecycle	none	ubuntu-24.04 (CI)
+linux	arm64	clang	gui	tgz	cpp-project-template_${V}_linux-clang-arm64.tar.gz	elf-closure;extract-run	none	ubuntu-24.04 (CI)
+linux	arm64	clang	gui	deb	cpp-project-template_${V}_linux-clang-arm64.deb	pkg-meta;install-lifecycle	none	ubuntu-24.04 (CI)
+linux	arm64	clang	gui	rpm	cpp-project-template_${V}_linux-clang-arm64.rpm	pkg-meta;install-lifecycle	none	ubuntu-24.04 (CI)
+macos	arm64	apple-clang	gui	zip	cpp-project-template_${V}_macos-apple-clang-arm64.zip	macho-arch;app-structure;extract-run	blocked	macos-15 (CI)
+macos	arm64	apple-clang	gui	dmg	cpp-project-template_${V}_macos-apple-clang-arm64.dmg	app-structure;dmg-mount	blocked	macos-15 (CI)
+macos	x86_64	apple-clang	gui	zip	cpp-project-template_${V}_macos-apple-clang-x86_64.zip	macho-arch;app-structure;extract-run	none	macos-15 (CI)
+macos	x86_64	apple-clang	gui	dmg	cpp-project-template_${V}_macos-apple-clang-x86_64.dmg	app-structure;dmg-mount	none	macos-15 (CI)
+macos	x86_64	gcc	cli	zip	cpp-project-template_${V}_macos-gcc-x86_64.zip	macho-arch;app-structure;extract-run	none	macos-15 (CI)
+macos	x86_64	gcc	cli	dmg	cpp-project-template_${V}_macos-gcc-x86_64.dmg	app-structure;dmg-mount	none	macos-15 (CI)
+macos	arm64	gcc	cli	zip	cpp-project-template_${V}_macos-gcc-arm64.zip	macho-arch;app-structure;extract-run	none	macos-15 (CI)
+macos	arm64	gcc	cli	dmg	cpp-project-template_${V}_macos-gcc-arm64.dmg	app-structure;dmg-mount	none	macos-15 (CI)
+macos	x86_64	llvm	gui	zip	cpp-project-template_${V}_macos-llvm-x86_64.zip	macho-arch;app-structure;extract-run	none	macos-15 (CI)
+macos	x86_64	llvm	gui	dmg	cpp-project-template_${V}_macos-llvm-x86_64.dmg	app-structure;dmg-mount	none	macos-15 (CI)
+macos	arm64	llvm	gui	zip	cpp-project-template_${V}_macos-llvm-arm64.zip	macho-arch;app-structure;extract-run	none	macos-15 (CI)
+macos	arm64	llvm	gui	dmg	cpp-project-template_${V}_macos-llvm-arm64.dmg	app-structure;dmg-mount	none	macos-15 (CI)
+source	n/a	git	source	zip	cpp-project-template_${V}_source.zip	member-scan	auto	any
+source	n/a	git	source	tgz	cpp-project-template_${V}_source.tar.gz	member-scan	auto	any
+meta	n/a	n/a	n/a	sha256sums	SHA256SUMS	checksum-coverage	auto	any
+meta	n/a	n/a	n/a	contract	release-contract.tsv	presence	none	any
+meta	n/a	n/a	n/a	evidence	release-evidence.json	presence	none	any
+meta	n/a	n/a	n/a	sbom	release-sbom.spdx.json	presence	none	any
+meta	n/a	n/a	n/a	verifier	verify-release.sh	presence	none	any
