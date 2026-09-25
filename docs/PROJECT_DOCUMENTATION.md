@@ -947,6 +947,153 @@ complete diff before publication.
 
 ---
 
+## 16. CI cache and release publication repair (2026-09-25)
+
+**Point in time:** `main` = `aa063e7` (2026-09-25);
+tag `v0.0.10` = `aa063e7`;
+release [`v0.0.10`](https://github.com/Jackie-SDX/cpp-project-template/releases/tag/v0.0.10)
+published 2026-09-25T19:14:50Z with **61 assets**.
+Tracked as issue #138 ("CPP distribution hardening benchmark — Core + Useful
+implementation") on the controlling fork, `Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot`.
+
+### 16.1 What was reported
+
+Tag `v0.0.10` was pushed together with PR #11 (`3072b4d`, squash-merged 2026-09-25T16:39:36Z).
+Four symptoms followed:
+
+1. the `Release vcpkg cache warmup` workflow failed on `main`;
+2. the `Release` workflow for `v0.0.10` failed;
+3. no `windows-master-*` (release) cache had ever existed in the repository;
+4. CI on `main` took 35 minutes, with the MinGW legs alone at 28–34 minutes.
+
+### 16.2 Root causes and evidence
+
+| # | Root cause | Evidence |
+|---|---|---|
+| A | `scripts/vcpkg_cache_gate.sh` rejected an empty `--hit` with a **usage error (exit 2)**. `actions/cache` documents exactly three `cache-hit` states — `true`, `false` and `''` — and `''` means "no cache found at all", so a never-seeded key died before the cold-start rules could run. | Release run [`36167681510`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36167681510) (17:31:40→17:32:32, 52 s, **7 of 7** gate jobs failed): `--hit "" \` → `usage: vcpkg_cache_gate.sh --key K --hit true\|false …` → `##[error]Process completed with exit code 2.` |
+| B | `vcpkg-cache-warmup.yml` counted restored entries with `find project/vcpkg_cache … \| wc -l`. On a cold start the directory does not exist, `find` exits 1, and the step ran under `bash … -e -o pipefail` — so the step aborted **before** `Save release vcpkg binary cache` could ever execute. | Warmup run [`36162164904`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36162164904) (16:39:39→16:42:28, 2 m 49 s, **7 of 8** jobs failed): `Cache not found for input keys: windows-master-arm64-Release-…` immediately followed by `Run before="$(find project/vcpkg_cache …)"` → `Process completed with exit code 1`. The neighbouring `ci.yml` already guarded this with `mkdir -p project/vcpkg_cache`; the warmup did not. |
+| C | The repository cache budget was **10.657 GB across 86 entries against GitHub's 10 GB per-repository limit**, so GitHub evicted least-recently-accessed entries. **40 of them (7.20 GB) were `refs/pull/11/merge` caches**, which are unreachable from `main` and from any future PR (a new PR gets a new merge ref). The release-family seeds were evicted with them. | `gh api --paginate "repos/Jackie-SDX/cpp-project-template/actions/caches?per_page=100"` → `7.20 GB n=40 refs/pull/11/merge`, `3.28 GB n=40 refs/heads/main`, `0.17 GB n=6 refs/heads/oc/remote-…`; **0** release-family keys on any ref. ADR 006 § 5 reserves deletion as an operator action — this was that action. |
+| D | Slow CI was cold caches plus runner-image churn: the same run carried two image fingerprints (`316d8c5c` and `ccfd597b`) for `windows-latest`, splitting every image-scoped key in half. | CI run [`36162165228`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36162165228) = 16:39:39→17:14:53 (**35 m 14 s**); per-job: MinGW x64 Debug 34.3 min, MinGW x64 Release 34.4 min, MinGW i686 Release 28.4 min. Cache keys observed on `main` for the same leg with `-316d8c5c-` and `-ccfd597b-`. |
+| E | *(found only after A–D were fixed)* the shipped consumer verifier `verify_release.sh` compared a **NSIS installer's own PE header** with the contract architecture. NSIS always emits a 32-bit i386 stub regardless of payload. | Release run [`36175060932`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36175060932) published 61 assets, then `[FAIL] arch … machine 0x014C != 0x8664 / != 0xAA64` on **6 of 9** NSIS installers → `verify-release: 1 check(s) FAILED`. |
+
+### 16.3 Changes made
+
+Two commits, pushed directly to `main` (the branch is unprotected — no rulesets, no branch
+protection — and direct pushes were authorised for this task):
+
+| Commit | Files | Change |
+|---|---|---|
+| `3eb6f13` | `scripts/vcpkg_cache_gate.sh`, `.github/workflows/release.yml`, `.github/workflows/vcpkg-cache-warmup.yml` | **A** — `--hit` now uses an `__unset__` sentinel so an *empty* value normalises to a miss while an *omitted* `--hit` is still a usage error; three new selftest cases. **B** — both `find` count sites treat an absent `project/vcpkg_cache` as zero entries. **coalesce** — `release.yml` passes `cache-hit \|\| 'false'` for both restore steps so the rendered command is explicit. |
+| `aa063e7` | `scripts/verify_release.sh` | **E** — `*_nsis.exe` is now asserted against the i386 stub it always is (with the reason in-line); every other file keeps the contract expectation. Payload architecture is still covered: the sibling contract `.zip` row is checked by this script, and `scripts/validate_release_artifacts.sh` *unpacks* the installer during the tag run (17–22 payload PE members per installer). |
+
+Nothing else was touched: no workflow semantics, no contract rows, no packaging behaviour.
+
+### 16.4 Operator action: cache budget
+
+The 40 orphaned `refs/pull/11/merge` caches were deleted through the Actions cache API
+(`DELETE /repos/Jackie-SDX/cpp-project-template/actions/caches/{id}`), **40 succeeded, 0 failed**.
+
+| | entries | size |
+|---|---|---|
+| before | 86 | **10.657 GB** (over the 10 GB limit → LRU eviction) |
+| after deletion | 46 | 3.45 GB |
+| after the seeds were written | 84 | 7.82 GB (2.18 GB headroom) |
+
+### 16.5 Release re-cut procedure
+
+`release.yml`'s publish job carries a **CORE-6 immutability guard**: it refuses to run if
+`gh release view "$GITHUB_REF_NAME"` already succeeds. The tag therefore had to be re-cut.
+
+1. The pre-existing `v0.0.10` release (created 16:39:35Z, **0 assets**, `main` = `3072b4d`) was
+   deleted together with its tag, and `v0.0.10` was re-created at `3eb6f13` — without this the
+   guard would have blocked publication of any assets at all.
+2. That run published 61 assets but failed `verify-release.sh` (root cause E). The release that
+   existed afterwards shipped the **buggy** `verify-release.sh`, so it could not stand as the
+   deliverable: the release and tag were deleted a second time and `v0.0.10` re-created at
+   `aa063e7`.
+
+Both deletions were of releases that had to be replaced to reach the acceptance criteria; no
+history was rewritten, nothing was force-pushed, and the release URL is unchanged.
+
+### 16.6 Results
+
+| Surface | Before | After |
+|---|---|---|
+| `Release vcpkg cache warmup` | [`36162164904`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36162164904) **failure**, 7/8 jobs, 2 m 49 s | [`36170640084`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36170640084) **success**, 8/8 jobs, 34 m 00 s (first real cold build) |
+| release-family caches | **0** on any ref | **7** seeded on `refs/heads/main` (`windows-master-{x64,x86,arm64}`, `windows-llvm-master-{x64,x86}`, `windows-mingw-master-{x64,x86}`) + 7 `vcpkg-seed-*` records |
+| `CI` on `main` | [`36162165228`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36162165228) **35 m 14 s** | [`36177436812`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36177436812) **10 m 57 s** (worst job 10.9 min; MinGW x64 Release 34.4 min → 4.1 min) |
+| `Release` run 1 | [`36167681510`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36167681510) **failure**, 52 s, 7 gate failures | — |
+| `Release` run 2 | [`36175060932`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36175060932) **failure**, 15 m 32 s, published assets then `verify-release` arch FAIL | — |
+| `Release` run 3 | — | [`36177462008`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36177462008) **success**, 16 m 43 s |
+| check-runs at `aa063e7` | 7 failures | **52 success, 1 skipped (PR-only smoke), 0 failure** |
+
+Cache visibility across refs was confirmed first-party: a run triggered on the tag restores from
+its own ref scope and then falls back to the default branch ("*the `cache` action retries the same
+steps on the default branch*"). The gate log for run `36177462008` shows the exact-hit chain:
+
+```
+Cache restored from key: vcpkg-seed-windows-master-x64-Release-…-36170640084-1   ← seeded on main
+--hit "true" / --tool-hit "true"
+```
+
+so the tag run was warm, not merely permissive.
+
+### 16.7 Validation performed
+
+| Check | Command | Result |
+|---|---|---|
+| gate contract | `bash scripts/vcpkg_cache_gate.sh --selftest` | **18/18** (was 14/14; +3 for the empty-`--hit` states) |
+| key contract | `bash scripts/vcpkg_cache_key.sh selftest` | **22/22** |
+| shell lint | `shellcheck -S warning scripts/verify_release.sh scripts/vcpkg_cache_gate.sh scripts/vcpkg_cache_key.sh` | clean |
+| workflow lint | `rhysd/actionlint:1.7.12 -color -shellcheck= -pyflakes=` | clean (0 lines) |
+| YAML | `yaml.safe_load` over `.github/workflows/*.yml` | 11/11 parse |
+| whitespace | `git diff --check` | clean |
+| old-vs-new verifier against the **published** assets | `verify_release.sh --dir … --version 0.0.10 --partial --no-attest` | before → `arch FAIL`, `rc=1`; after → **all checks PASS, `rc=0`** |
+| mutated non-i386 NSIS stub | same harness | still `FAIL` (detection retained) |
+| mutated contract arch on a Windows `.zip` payload | same harness | still `FAIL` (detection retained) |
+| end-to-end publish | run `36177462008` | `verify-release: all performed checks passed for version 0.0.10`; `arch … checked=184`; 49 attestations verified; 61/61 membership |
+
+### 16.8 Residual risks and honest limits
+
+- **Runner-image churn still splits keys.** `image_fp` is part of every key, so a mid-flight
+  `ImageVersion` roll still forces a partial restore. Nothing was changed here: coarsening the
+  fingerprint would weaken the ABI-safety guarantee of ADR 006.
+- **`verify_release.sh` does not verify MSI or NSIS payload architecture itself.** An `.msi` starts
+  with the OLE signature `D0CF11E0…`, so `pe_machine()` returns `None` and the row is counted as
+  `checked` but never compared; NSIS payloads need `7z` to unpack, which a consumer machine may not
+  have. Both are covered during the tag run by `scripts/validate_release_artifacts.sh`, which
+  unpacks installers and fails closed without `7z`. Verified directly against
+  `cpp-project-template_0.0.10_windows-msvc-x86_64_wix.msi` (`first 8 bytes: d0cf11e0a1b11ae1`).
+- **The two release deletions in § 16.5 were necessary but not free.** Anything that referenced a
+  published asset digest from the intermediate 16:39Z or 18:50Z publications is stale; the
+  authoritative digests are those of the final `v0.0.10`.
+- **Cache thrashing returns if the budget is exceeded again.** 7.82 GB of 10 GB is comfortable, but
+  `refs/pull/*/merge` caches accumulate ~7 GB per merged PR and are never reclaimed automatically.
+  Worth a scheduled cleanup or a size cap; not implemented here.
+- **GitLab parity is untested** (unchanged by this work): the GitLab pipeline cannot be triggered
+  from this repository (see § 10 and the P0-10 row of `docs/distribution-hardening-evidence.md`).
+- The evidence-ledger rows in `docs/distribution-hardening-evidence.md` that were marked
+  *"end-to-end proof needs a tag publish"* (P0-11, P0-15) are now satisfied by run `36177462008`;
+  those rows were left unedited.
+
+### 16.9 Evidence ledger
+
+| Claim | Exact source | Observed | State |
+|---|---|---|---|
+| gate failed on empty `--hit` | run `36167681510`, job log line `--hit "" \` → `exit code 2` | 7/7 gate jobs failed | verified |
+| warmup aborted before saving | run `36162164904`, job log `find … \| wc -l` → `exit code 1` | 7/8 jobs failed at ~35 s | verified |
+| no release cache ever existed | `gh api …/actions/caches` | 0 `windows-master-*` entries | verified |
+| budget exceeded | same | 10.657 GB / 86 entries vs 10 GB limit | verified |
+| orphaned PR caches deleted | `DELETE …/actions/caches/{id}` × 40 | `deleted=40 failed=0` | verified |
+| warmup fix works | run `36170640084`, `restored zip entries: 0 (exact hit: )` then `Cache saved with key: windows-master-x64-Release-…` | 8/8 success | verified |
+| tag run sees main's caches | run `36177462008` gate log: `Cache restored from key: vcpkg-seed-…-36170640084-1`, `--hit "true"` | warm exact hit | verified |
+| NSIS stub is i386 by design | `docs/AUDIT.md` *installer PE Machine 0x14c (Intel 386) — this describes the installer stub, not the bundled application payload*; `validate_release_artifacts.sh` 201 PASS / 0 FAIL | consistent | verified |
+| shipped verifier now passes | publish log: `verify-release: all performed checks passed for version 0.0.10` | `rc=0` | verified |
+| release complete | `gh release view v0.0.10` | 61 assets, `isDraft=false`, `publishedAt=2026-09-25T19:14:50Z` | verified |
+| CI green at head | `gh api …/commits/aa063e7/check-runs` | 52 success, 1 skipped, 0 failure | verified |
+
+---
+
 *This document was generated from verified repository state; all hashes, counts, asset lists, and run
 results were read directly from the three Git repositories and the GitHub API. Any later change to
 `main` supersedes the exact figures above.*
