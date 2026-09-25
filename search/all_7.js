@@ -1,0 +1,28 @@
+var searchData=
+[
+  ['7_201_20d1_20—_20absorb_20the_20divergent_20github_20gitlab_20copies_20into_20one_20repo_0',['7.1 D1 — Absorb the divergent GitHub/GitLab copies into one repo',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md129',1,'']]],
+  ['7_2010_20d10_20—_20static_20vs_20dynamic_20crt_20on_20windows_1',['7.10 D10 — Static vs dynamic CRT on Windows',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md138',1,'']]],
+  ['7_2011_20d11_20—_20opt_20in_20cdash_20instead_20of_20upstream_20submission_2',['7.11 D11 — Opt-in CDash instead of upstream submission',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md139',1,'']]],
+  ['7_2012_20d12_20—_20single_20version_20resolution_20anchor_3',['7.12 D12 — Single version resolution anchor',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md140',1,'']]],
+  ['7_2013_20d13_20—_20windows_20arm64_20native_20installers_4',['7.13 D13 — Windows ARM64 native installers',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md141',1,'']]],
+  ['7_2014_20d14_20—_20experimental_20staging_20lane_5',['7.14 D14 — Experimental staging lane',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md142',1,'']]],
+  ['7_2015_20d15_20—_20opencode_20automations_20on_20the_20repo_20itself_6',['7.15 D15 — OpenCode automations on the repo itself',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md143',1,'']]],
+  ['7_202_20d2_20—_20strict_20separation_20of_20release_20workflows_20adr_20005_20ci_20yml_7',['7.2 D2 — Strict separation of release workflows (&lt;span class=&quot;tt&quot;&gt;ADR 005&lt;/span&gt; + &lt;span class=&quot;tt&quot;&gt;ci.yml&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md130',1,'']]],
+  ['7_203_20d3_20—_20release_20inventory_20manifests_20must_20never_20leak_20into_20uploads_8',['7.3 D3 — Release inventory manifests must never leak into uploads',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md131',1,'']]],
+  ['7_204_20d4_20—_20remove_20android_20ndk_20entirely_9',['7.4 D4 — Remove Android/NDK entirely',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md132',1,'']]],
+  ['7_205_20d5_20—_20deterministic_20cache_20keys_20adr_20002_10',['7.5 D5 — Deterministic cache keys (&lt;span class=&quot;tt&quot;&gt;ADR 002&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md133',1,'']]],
+  ['7_206_20d6_20—_20pin_20third_20party_20actions_20to_20commit_20shas_20adr_20003_11',['7.6 D6 — Pin third-party actions to commit SHAs (&lt;span class=&quot;tt&quot;&gt;ADR 003&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md134',1,'']]],
+  ['7_207_20d7_20—_20cmakepresets_20as_20the_20single_20source_20of_20build_20truth_20adr_20001_12',['7.7 D7 — CMakePresets as the single source of build truth (&lt;span class=&quot;tt&quot;&gt;ADR 001&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md135',1,'']]],
+  ['7_208_20d8_20—_20manual_20coverity_20adr_20004_13',['7.8 D8 — Manual Coverity (&lt;span class=&quot;tt&quot;&gt;ADR 004&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md136',1,'']]],
+  ['7_209_20d9_20—_20dual_20package_20manager_20vcpkg_20default_20packagemanager_20cmake_20d9_20rationale_14',['7.9 D9 — Dual package manager, vcpkg default (&lt;span class=&quot;tt&quot;&gt;PackageManager.cmake&lt;/span&gt; + D9 rationale)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md137',1,'']]],
+  ['7_20d7_20—_20cmakepresets_20as_20the_20single_20source_20of_20build_20truth_20adr_20001_15',['7.7 D7 — CMakePresets as the single source of build truth (&lt;span class=&quot;tt&quot;&gt;ADR 001&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md135',1,'']]],
+  ['7_20decisions_20taken_20with_20the_20alternatives_20considered_16',['7. Decisions Taken (with the alternatives considered)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md128',1,'']]],
+  ['7_20release_20critical_20ci_20failure_20semantics_17',['7. Release-critical CI failure semantics',['../md_docs_2TASKS.html#autotoc_md216',1,'']]],
+  ['7_20release_20evidence_20—_20v0_200_2010_18',['17.7 Release evidence — &lt;span class=&quot;tt&quot;&gt;v0.0.10&lt;/span&gt;',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md199',1,'']]],
+  ['7_20residual_20follow_20ups_20carried_20over_20from_20bugs_20txt_19',['13.7 Residual follow-ups (carried over from &lt;span class=&quot;tt&quot;&gt;BUGS.txt&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md174',1,'']]],
+  ['7_20validation_20performed_20',['16.7 Validation performed',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md188',1,'']]],
+  ['7_20windows_20assessment_21',['7. Windows assessment',['../md_docs_2AUDIT.html#autotoc_md17',1,'']]],
+  ['71cae18_20→_20current_2096240c0_22',['6.1 File inventory delta (original &lt;span class=&quot;tt&quot;&gt;71cae18&lt;/span&gt; → current &lt;span class=&quot;tt&quot;&gt;96240c0&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md122',1,'']]],
+  ['7z_23',['Windows .7z',['../md_docs_2AUDIT.html#autotoc_md15',1,'']]],
+  ['7z_20—_20remove_20from_20publishing_20keep_20disabled_20historical_20block_20only_24',['Windows .7z — REMOVE FROM PUBLISHING / KEEP DISABLED HISTORICAL BLOCK ONLY',['../md_docs_2AUDIT.html#autotoc_md21',1,'']]]
+];

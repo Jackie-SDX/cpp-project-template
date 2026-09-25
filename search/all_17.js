@@ -1,0 +1,28 @@
+var searchData=
+[
+  ['names_20the_20best_20i686_20x86_5f64_20arm64_0',['11.2 Q: Are the architecture names the best? (i686, x86_64, arm64)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md157',1,'']]],
+  ['native_20installers_1',['7.13 D13 — Windows ARM64 native installers',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md141',1,'']]],
+  ['naylacruz_20522bc3a_2',['5.2 Changes owned by the current fork (relative to NaylaCruz &lt;span class=&quot;tt&quot;&gt;522bc3a&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md119',1,'']]],
+  ['naylacruz_20cpp_20project_20template_3',['4. The Intermediate Fork: &lt;span class=&quot;tt&quot;&gt;NaylaCruz/cpp-project-template&lt;/span&gt;',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md112',1,'']]],
+  ['naylacruz_20s_20pass_20introduced_20the_20durable_20core_4',['4.1 What NaylaCruz&apos;s pass introduced (the durable core)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md113',1,'']]],
+  ['ndk_20entirely_5',['7.4 D4 — Remove Android/NDK entirely',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md132',1,'']]],
+  ['network_20behavior_6',['34. Offline and restricted-network behavior',['../md_docs_2TASKS.html#autotoc_md261',1,'']]],
+  ['never_20leak_20into_20uploads_7',['7.3 D3 — Release inventory manifests must never leak into uploads',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md131',1,'']]],
+  ['new_20files_8',['Deliverables (new files)',['../md_docs_2distribution-hardening-evidence.html#autotoc_md329',1,'']]],
+  ['new_20policy_20current_20v0_200_209_9',['13.2 New policy (current, &lt;span class=&quot;tt&quot;&gt;v0.0.9&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md169',1,'']]],
+  ['new_20release_20manifest_20evidence_20contract_10',['New release manifest/evidence contract',['../md_docs_2AUDIT.html#autotoc_md61',1,'']]],
+  ['not_20advised_11',['19. Changes deliberately NOT advised',['../md_docs_2AUDIT.html#autotoc_md62',1,'']]],
+  ['not_20block_12',['Deferred (per issue §7, must not block)',['../md_docs_2distribution-hardening-evidence.html#autotoc_md326',1,'']]],
+  ['not_20changed_13',['12.5 Pre-existing items intentionally not changed',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md165',1,'']]],
+  ['not_20prove_14',['What Round 2 still does not prove',['../md_docs_2AUDIT.html#autotoc_md71',1,'']]],
+  ['not_20recommended_20prefer_20vcpkg_15',['not recommended prefer vcpkg',['../md_docs_2install.html#autotoc_md352',1,'Google Test (manual install not recommended, prefer vcpkg)'],['../md_docs_2install.html#autotoc_md351',1,'wxWidgets (manual install not recommended, prefer vcpkg)']]],
+  ['not_20uniform_16',['Architecture verification is not uniform',['../md_docs_2AUDIT.html#autotoc_md34',1,'']]],
+  ['notarization_17',['14. Developer ID, Hardened Runtime, notarization',['../md_docs_2TASKS.html#autotoc_md227',1,'']]],
+  ['note_18',['13.8 Team / evidence note',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md175',1,'']]],
+  ['notes_20and_20migration_19',['39. Release notes and migration',['../md_docs_2TASKS.html#autotoc_md268',1,'']]],
+  ['notes_3a_20github_20copy_20gitlab_20copy_20',['12. Merge Notes: GitHub Copy + GitLab Copy',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md160',1,'']]],
+  ['now_20operational_20view_21',['8. How the Project Works Now (Operational View)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md145',1,'']]],
+  ['nsis_22',['NSIS',['../md_docs_2install.html#autotoc_md361',1,'']]],
+  ['nsis_20—_20keep_20harden_23',['Windows NSIS — KEEP / HARDEN',['../md_docs_2AUDIT.html#autotoc_md19',1,'']]],
+  ['nsis_20lifecycle_24',['10. NSIS lifecycle',['../md_docs_2TASKS.html#autotoc_md221',1,'']]]
+];
