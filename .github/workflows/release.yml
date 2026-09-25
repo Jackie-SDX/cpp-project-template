@@ -289,7 +289,11 @@ jobs:
         if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
           version="${GITHUB_REF_NAME#v}"
         else
-          version="$(git describe --tags --always --dirty | sed 's/^v//')"
+          # Non-tag runs (workflow_dispatch/PR validation): nearest release tag
+          # only -- CMake project(VERSION) rejects describe output with commit
+          # counts (0.0.9-13-g...), so it must never reach configure.
+          version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+          version="${version:-0.0.0}"
         fi
         epoch="$(git log -1 --format=%ct)"
         case "${{ runner.os }}" in
@@ -861,12 +865,16 @@ jobs:
     - name: Resolve version
       working-directory: project
       shell: bash
-      run: 'if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then version="${GITHUB_REF_NAME#v}"; else version="$(git describe --tags
-        --always --dirty | sed ''s/^v//'')"; fi
-
+      run: |
+        set -euo pipefail
+        if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+          version="${GITHUB_REF_NAME#v}"
+        else
+          version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+          version="${version:-0.0.0}"
+        fi
         echo "VERSION=$version" >> "$GITHUB_ENV"
-
-        '
+        echo "resolved version: $version"
     - name: Create source archives
       working-directory: project
       run: 'mkdir -p ../source-assets
@@ -925,7 +933,11 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="$(git describe --tags --always --dirty | sed 's/^v//')"
+            # Non-tag runs (workflow_dispatch/PR validation): nearest release tag
+            # only -- CMake project(VERSION) rejects describe output with commit
+            # counts (0.0.9-13-g...), so it must never reach configure.
+            version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+            version="${version:-0.0.0}"
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "resolved version: $version"
@@ -1311,7 +1323,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        fetch-depth: 1
+        fetch-depth: 0
         submodules: false
         path: project
         show-progress: false
@@ -1325,7 +1337,11 @@ jobs:
         if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
           version="${GITHUB_REF_NAME#v}"
         else
-          version="$(git describe --tags --always --dirty | sed 's/^v//')"
+          # Non-tag runs (workflow_dispatch/PR validation): nearest release tag
+          # only -- CMake project(VERSION) rejects describe output with commit
+          # counts (0.0.9-13-g...), so it must never reach configure.
+          version="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+          version="${version:-0.0.0}"
         fi
         epoch="$(git log -1 --format=%ct)"
         case "${{ runner.os }}" in
