@@ -54,12 +54,17 @@ Do **not** add `.7z`, MSIX, AppImage, Flatpak, Snap, Arch packages, or other for
 
 ## 4. Release cache correctness
 
-- [ ] Remove the stale GitHub repository-name condition that currently bypasses cache-miss enforcement for the canonical repository.
-- [ ] Define cache keys over OS, architecture, compiler, compiler version, vcpkg triplet, dependency manifest, toolchain revision, build profile, CMake/tool version, and relevant build scripts.
-- [ ] Ensure a cache hit cannot satisfy a different ABI/toolchain/profile.
-- [ ] Add cache-miss diagnostics explaining why a cache was invalidated.
-- [ ] Require the release path to seed or restore every required cache deterministically.
-- [ ] Exercise cold-cache and warm-cache releases as separate acceptance tests.
+- [x] Remove the stale GitHub repository-name condition that currently bypasses cache-miss enforcement for the canonical repository.
+  - `release.yml` now gates through `scripts/vcpkg_cache_gate.sh` against `Jackie-SDX/cpp-project-template` (block upstream non-PR runs, warn on forks/PRs); ADR 006.
+- [x] Define cache keys over OS, architecture, compiler, compiler version, vcpkg triplet, dependency manifest, toolchain revision, build profile, CMake/tool version, and relevant build scripts.
+  - `scripts/vcpkg_cache_key.sh`: `image_fp` (runner image ⇒ OS + VS/MSYS2/CMake/Ninja), arch, toolchain token, `vcpkg_fp`, `triplets_fp`, manifest (CRLF-folded double SHA-256), build type, CI compiler fingerprint; triplet fixed per (family, toolchain, arch). ADR 006.
+- [x] Ensure a cache hit cannot satisfy a different ABI/toolchain/profile.
+  - Family namespaces (release / ci / smoke / arm64-smoke / experimental) + key segments; restore-keys are `-`-suffixed prefixes only. `vcpkg_cache_key.sh selftest` asserts distinctness and drift re-keying.
+- [x] Add cache-miss diagnostics explaining why a cache was invalidated.
+  - `github-env` prints `inputs: family=… image=… vcpkg-ref=… triplets-ref=… extra-fp=… manifest=…`; the gate reports hit/record state to the step log and job summary.
+- [x] Require the release path to seed or restore every required cache deterministically.
+  - Warmup always installs (verifies seeds) and writes `vcpkg-seed-*` records; release restores by canonical key with legacy-prefix fallbacks; the gate blocks an upstream miss a fresh seed should have covered.
+- [ ] Exercise cold-cache and warm-cache releases as separate acceptance tests. *(pending live dispatch evidence — warmup cold, then warm release)*
 
 ## 5. Immutable release publication
 

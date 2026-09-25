@@ -86,9 +86,12 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_COMPILERCHECK: content
 jobs:
-  # cache-gate: warms/proves the vcpkg + compiler caches used by every
-  # downstream package job and fails fast on tag runs when the upstream
-  # release cache contract is not satisfiable.
+  # cache-gate: proves the vcpkg binary cache contract (ADR 006) before any
+  # package job starts. It fails a tag/dispatch run only when vcpkg-cache-warmup
+  # recorded a seed for this exact key recently and the cache is nevertheless
+  # gone; a cold start (fork, first run, key change, expired record) always
+  # proceeds and lets the package job build slowly, because a cache miss must
+  # never fail a release.
 
   cache-gate:
     name: Windows release cache gate (${{ matrix.name }})
@@ -97,6 +100,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # One leg per Windows vcpkg consumer of this workflow: the six package
+        # legs below and the MSVC ARM64 expanded-package leg. (No LLVM ARM64
+        # vcpkg build exists, so there is no LLVM ARM64 seed to gate.)
         include:
           - name: Windows MSVC x64
             compiler: msvc
@@ -123,11 +129,6 @@ jobs:
             compiler: llvm
             arch: x86
             tool_arch: X64
-          - name: Windows LLVM ARM64
-            os: windows-11-arm
-            compiler: llvm
-            arch: arm64
-            tool_arch: ARM64
           - name: Windows MinGW x64
             compiler: mingw
             os: windows-latest
@@ -142,24 +143,31 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { path: project }
-      - name: Resolve cache prefix
+      - name: Resolve release cache key
         shell: bash
         run: |
-          case "${{ matrix.compiler }}" in
-            msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-            mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-            llvm) if [ "${{ matrix.arch }}" = "arm64" ]; then echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-arm64-Release" >> "$GITHUB_ENV"; else echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV"; fi ;;
-            *) echo "Unsupported cache compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
-          esac
+          bash project/scripts/vcpkg_cache_key.sh github-env \
+            --family release \
+            --toolchain "${{ matrix.compiler }}" \
+            --arch "${{ matrix.arch }}" \
+            --build-type Release \
+            --manifest project/vcpkg.json
       - name: Restore release package cache
         id: package-cache
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: project/vcpkg_cache
-          key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
-          restore-keys: |
-            ${{ env.VCPKG_CACHE_PREFIX }}-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
           lookup-only: true
+      - name: Restore vcpkg cache seed record
+        id: seed-record
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: .vcpkg-seed/record
+          key: vcpkg-seed-${{ env.VCPKG_CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-seed-${{ env.VCPKG_CACHE_KEY }}-
       - name: Checkout vcpkg
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -177,9 +185,14 @@ jobs:
             vcpkg-tool-windows-${{ matrix.tool_arch }}-${{ env.VCPKG_GIT_REF }}-
           lookup-only: true
       - name: Enforce upstream release cache contract
-        if: github.repository == 'Jackie-SDX/cpp-project-template' && (steps.package-cache.outputs.cache-hit != 'true' || steps.vcpkg-tool-cache.outputs.cache-hit != 'true')
-        shell: pwsh
-        run: throw "Release cache gate failed for ${{ matrix.name }}. Package cache hit=${{ steps.package-cache.outputs.cache-hit }}, vcpkg tool cache hit=${{ steps.vcpkg-tool-cache.outputs.cache-hit }}. Seed the release vcpkg caches with vcpkg-cache-warmup before tagging."
+        shell: bash
+        run: |
+          bash project/scripts/vcpkg_cache_gate.sh \
+            --key "${VCPKG_CACHE_KEY}" \
+            --hit "${{ steps.package-cache.outputs.cache-hit }}" \
+            --tool-hit "${{ steps.vcpkg-tool-cache.outputs.cache-hit }}" \
+            --record-file .vcpkg-seed/record \
+            --label "${{ matrix.name }} vcpkg package cache"
   # package: core 10-config desktop matrix (Windows MSVC/MinGW/LLVM, Linux GCC,
   # macOS Clang). Skipped on plain PRs unless the full-release-test label is set.
 
@@ -394,20 +407,21 @@ jobs:
     - name: Resolve GitLab-style vcpkg cache key
       if: runner.os == 'Windows'
       shell: bash
-      run: "case \"${{ matrix.toolchain }}\" in\n  msvc) cache_prefix=\"windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  mingw) cache_prefix=\"\
-        windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release\" ;;\n  llvm) cache_prefix=\"windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{\
-        \ matrix.arch }}-Release\" ;;\n  *) echo \"Unsupported Windows cache toolchain: ${{ matrix.toolchain }}\" >&2; exit 1 ;;\nesac\necho \"VCPKG_CACHE_PREFIX=${cache_prefix}\"\
-        \ >> \"$GITHUB_ENV\"\n"
+      run: |
+        bash project/scripts/vcpkg_cache_key.sh github-env \
+          --family release \
+          --toolchain "${{ matrix.toolchain }}" \
+          --arch "${{ matrix.arch }}" \
+          --build-type Release \
+          --manifest project/vcpkg.json
     - name: Restore GitLab-style vcpkg binary cache
       if: runner.os == 'Windows'
       id: vcpkg-binary-cache-restore
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
-        restore-keys: '${{ env.VCPKG_CACHE_PREFIX }}-
-
-          '
+        key: ${{ env.VCPKG_CACHE_KEY }}
+        restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
     - name: Checkout Windows vcpkg
       if: runner.os == 'Windows'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -442,9 +456,9 @@ jobs:
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
         restore-keys: |
-          vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
+          vcpkg-downloads-windows-${{ runner.arch }}-
     - name: vcpkg
       if: runner.os == 'Windows'
       shell: pwsh
@@ -471,7 +485,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.toolchain }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
     - name: Save Windows vcpkg tool cache
       if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -483,7 +497,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        key: ${{ env.VCPKG_CACHE_KEY }}
     - name: Configure
       working-directory: project
       env:
@@ -1572,22 +1586,20 @@ jobs:
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
       shell: bash
       run: |
-        case "${{ matrix.compiler }}" in
-          msvc) echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-          mingw) echo "VCPKG_CACHE_PREFIX=windows-mingw-${VCPKG_CACHE_NAMESPACE}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV" ;;
-          llvm) if [ "${{ matrix.arch }}" = "arm64" ]; then echo "VCPKG_CACHE_PREFIX=windows-${VCPKG_CACHE_NAMESPACE}-arm64-Release" >> "$GITHUB_ENV"; else echo "VCPKG_CACHE_PREFIX=windows-llvm-${VCPKG_CACHE_NAMESPACE}-${MY_VCPKG_TRIPLETS_COMMIT}-${{ matrix.arch }}-Release" >> "$GITHUB_ENV"; fi ;;
-          *) echo "Unsupported Windows vcpkg compiler: ${{ matrix.compiler }}" >&2; exit 1 ;;
-        esac
+        bash project/scripts/vcpkg_cache_key.sh github-env \
+          --family release \
+          --toolchain "${{ matrix.compiler }}" \
+          --arch "${{ matrix.arch }}" \
+          --build-type Release \
+          --manifest project/vcpkg.json
     - name: Restore Windows vcpkg binary cache
       id: vcpkg-cache-restore
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX  }}-${{ hashFiles('project/vcpkg.json')  }}
-        restore-keys: |
-          ${{ env.VCPKG_CACHE_PREFIX  }}-
-          vcpkg-experimental-${{ matrix.cache_id  }}-${{ env.VCPKG_GIT_REF  }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT  }}-${{ matrix.vcpkg_triplet  }}-
+        key: ${{ env.VCPKG_CACHE_KEY }}
+        restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
 
     - name: Checkout Windows vcpkg
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
@@ -1623,9 +1635,9 @@ jobs:
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.compiler }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
         restore-keys: |
-          vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
+          vcpkg-downloads-windows-${{ runner.arch }}-
     - name: vcpkg
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
       shell: pwsh
@@ -1655,7 +1667,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
-        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ matrix.compiler }}-${{ matrix.arch }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
+        key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
     - name: Save Windows vcpkg tool cache
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -1667,7 +1679,7 @@ jobs:
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
-        key: ${{ env.VCPKG_CACHE_PREFIX }}-${{ hashFiles('project/vcpkg.json') }}
+        key: ${{ env.VCPKG_CACHE_KEY }}
     - name: Configure
       working-directory: project
       env:

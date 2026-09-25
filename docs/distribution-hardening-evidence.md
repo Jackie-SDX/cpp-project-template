@@ -124,4 +124,80 @@ Everything below was executed in this workspace; nothing is inferred.
   tag publish.
 - GitLab floor live run (no token; documented limitation).
 - USEFUL-9 docs sync (PROJECT_DOCUMENTATION.md, install.md) after CI is green.
+- vcpkg cache cold/warm acceptance (TASKS §4 last item) → warmup + release
+  dispatch observation, after this PR lands.
+
+---
+
+## PASS 4 — vcpkg binary-cache contract (ADR 006, 2026-09-25)
+
+### Findings (re-proven from this HEAD before editing)
+
+| ID | Finding | Evidence |
+|---|---|---|
+| P4-1 | Five divergent cache-key layouts; no shared fallback | `grep -n 'key:' .github/workflows/*.yml` → release MSVC `windows-<arch>-<bt>-<hashFiles>`, release MinGW/LLVM `windows[-llvm\|-mingw]-…`, CI `windows[-mingw\|-llvm]-…-<extra>-…`, x64 smoke `windows-a1cae005…`, ARM64 smoke `windows-arm64-…-<bt>`, experimental `vcpkg-experimental-<cache_id>-…` |
+| P4-2 | Windows `hashFiles()` hashes CRLF bytes, so the manifest segment was unreproducible off-runner | `hashFiles` implementation (actions/runner) writes LF; a CRLF `vcpkg.json` hashes to `b6664340…` vs LF `c99d7648…` |
+| P4-3 | Release cache gate was a dead condition (stale repository name) | `release.yml` gate keyed on `github.repository == 'NaylaCruz/cpp-project-template'` (pre-edit) |
+| P4-4 | Warmup omitted MSYS2 setup that the MinGW release legs use, and never re-verified seeds | `vcpkg-cache-warmup.yml` matrix/steps (pre-edit) vs `release.yml` MinGW legs |
+| P4-5 | Downloads cache duplicated per workflow | 8 distinct `vcpkg-downloads-*` keys (~2.6 GB) in `gh cache list` |
+
+### Deliverables
+
+- `scripts/vcpkg_cache_key.sh` — sole key authority (`hash-manifest`, `prefix`,
+  `key`, `restore-keys`, `record-key`, `github-env`, `selftest`); key =
+  `<family_prefix>-<build_type>-<image_fp>-<vcpkg_fp>-<triplets_fp>-<extra_fp>-<manifest_hash>`.
+- `scripts/vcpkg_cache_gate.sh` — release gate (`--selftest`); exact hit ⇒
+  pass, no/expired record ⇒ pass+notice (miss never fails fast), fresh record
+  + miss ⇒ block upstream non-PR / warn elsewhere, tool-cache miss ⇒ warning
+  only. No `gh cache delete`, no `actions: write`.
+- `.github/workflows/vcpkg-cache-warmup.yml` — MSYS2 parity with release,
+  canonical key, install runs unconditionally (seed verification), stale-seed
+  warning, `vcpkg-seed-*` record write+save.
+- `.github/workflows/release.yml` — 7-leg cache gate + gate script; package
+  and expanded-package jobs restore/save the canonical key; downloads deduped.
+- `.github/workflows/ci.yml` — own `windows-ci-*` family (compiler
+  fingerprint kept in the key), legacy prefixes preserved.
+- `.github/workflows/windows-package-smoke.yml` — `windows-smoke-*` family;
+  vcpkg revision and overlay-triplet commit now pinned to the values every
+  other workflow uses (was: floating triplet checkout + differing vcpkg ref).
+- `.github/workflows/windows-arm64-package-smoke.yml` — `windows-arm64-smoke-*`
+  family; floating `actions/cache@v5` tags pinned to the v5.0.1 SHA used
+  elsewhere.
+- `.github/workflows/experimental-platform-matrix.yml` — `windows-exp-*`
+  family with per-leg legacy restore keys.
+- `docs/architecture/decisions/006-vcpkg-binary-cache-key-contract.md`.
+
+### Validation (commands → actual result)
+
+- `bash scripts/vcpkg_cache_key.sh selftest` → **22/22 ok, exit 0**
+  (manifest hash vs reference incl. CRLF folding; image/vcpkg/triplet/manifest/
+  extra drift re-keys; prefix stability; primary + legacy restore-keys,
+  dedupe; four-family distinctness; per-leg experimental legacy; inputs
+  diagnostics line).
+- `bash scripts/vcpkg_cache_gate.sh --selftest` → **14/14 ok, exit 0**
+  (cold/no-record passes, fresh+miss blocks upstream & warns on forks/PRs,
+  stale record passes, corrupt/foreign record never blocks, tool miss never
+  blocks, usage errors exit 2).
+- `shellcheck -S warning scripts/vcpkg_cache_key.sh scripts/vcpkg_cache_gate.sh`
+  → clean; `bash -n` → clean.
+- `actionlint -shellcheck= -pyflakes= .github/workflows/*.yml` (v1.7.12,
+  same invocation as `workflow-lint.yml`) → **exit 0**.
+- Every `github-env` call site executed locally with runner-like env
+  (`ImageVersion`, `VCPKG_GIT_REF`, `MY_VCPKG_TRIPLETS_COMMIT`) →
+  **8/8 call sites, 0 problems**: key shape, primary restore key equals
+  `<prefix>-<build>-`, `-`-suffixed and de-duplicated restore keys, no raw
+  `${{ }}`/`hashFiles` leaking into the env file (multiline
+  `VCPKG_CACHE_RESTORE_KEYS` heredoc parsed).
+- Leftover scan: `grep -rn "hashFiles('project/vcpkg.json')" .github/workflows/`
+  → none; `grep -rn "gh cache delete"` → none; `git diff --check` → clean.
+- Verified from first-party source: `actions/cache` v6.0.0 and v5.0.1 both set
+  `cache-hit` on **exact** match only (prefix hits → `false`), so save-on-miss
+  conditions stay correct.
+
+### Gap
+
+Live cold/warm observation (warmup dispatch → release restore → seed records)
+must run after the PR lands; until then TASKS §4's last item stays open.
+
+---
 

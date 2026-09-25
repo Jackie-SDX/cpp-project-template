@@ -386,15 +386,29 @@ jobs:
           path: my-vcpkg-triplets
           fetch-depth: 1
 
+      # ADR 006: one key contract for every workflow. The experimental family
+      # (windows-exp-*) is its own namespace, and cache_id
+      # (windows-<toolchain>-<arch>) is preserved as the legacy restore prefix
+      # so the entries written before the contract are still found.
+      - name: Resolve Windows vcpkg cache key
+        if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+        shell: bash
+        run: |
+          bash project/scripts/vcpkg_cache_key.sh github-env \
+            --family experimental \
+            --toolchain "${{ matrix.compiler }}" \
+            --arch "${{ matrix.arch }}" \
+            --build-type Release \
+            --manifest project/vcpkg.json
+
       - name: Restore Windows vcpkg binary cache
         id: vcpkg-cache-restore
         if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
-          key: vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-${{ hashFiles('project/vcpkg.json') }}
-          restore-keys: |
-            vcpkg-experimental-${{ matrix.cache_id }}-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
 
       - name: Bootstrap and install vcpkg
         if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
@@ -424,7 +438,7 @@ jobs:
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: project/vcpkg_cache
-          key: vcpkg-experimental-${{ matrix.cache_id }}-${{ env.VCPKG_GIT_REF }}-${{ env.MY_VCPKG_TRIPLETS_COMMIT }}-${{ matrix.vcpkg_triplet }}-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ env.VCPKG_CACHE_KEY }}
 
       - name: Configure
         working-directory: project

@@ -28,6 +28,12 @@ on:
 permissions:
   contents: read
 
+# Pinned inputs shared with ci.yml / release.yml / vcpkg-cache-warmup.yml so the
+# smoke builds with the same vcpkg revision and overlay triplets (ADR 006).
+env:
+  VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
+  MY_VCPKG_TRIPLETS_COMMIT: e5f3f2d06430fa475feccbb34a5d61023807b854
+
 jobs:
   windows-package-smoke:
     name: Windows MinGW x64 packaging smoke
@@ -74,15 +80,28 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           repository: Neumann-A/my-vcpkg-triplets
+          ref: ${{ env.MY_VCPKG_TRIPLETS_COMMIT }}
           path: my-vcpkg-triplets
+          fetch-depth: 1
+      # ADR 006: the smoke owns its own cache family (windows-smoke-*) so a
+      # label-gated PR run can never write into the release cache, and falls
+      # back to the warmup MinGW seed when its inputs match.
+      - name: Resolve vcpkg cache key
+        shell: bash
+        run: |
+          bash project/scripts/vcpkg_cache_key.sh github-env \
+            --family smoke \
+            --toolchain mingw \
+            --arch x64 \
+            --build-type Release \
+            --manifest project/vcpkg.json
       - name: Restore GitLab-style vcpkg binary cache
         id: vcpkg-binary-cache-restore
         uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-x64-mingw-dynamic-Release-${{ hashFiles('project/vcpkg.json') }}
-          restore-keys: |
-            windows-a1cae005c39be7b18ba319fced856b68d7276271-x64-mingw-dynamic-Release-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
       - name: vcpkg
         uses: johnwason/vcpkg-action@7c4b562bb35ef5a01d9d728acc90100b107dee4d # v6
         env:
@@ -94,14 +113,14 @@ jobs:
           extra-args: --overlay-triplets=${{ github.workspace }}/my-vcpkg-triplets
           cache-key: windows-package-smoke-mingw-x64
           disable-cache: true
-          revision: a1cae005c39be7b18ba319fced856b68d7276271
+          revision: ${{ env.VCPKG_GIT_REF }}
           token: ${{ github.token }}
       - name: Save GitLab-style vcpkg binary cache
         if: success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-a1cae005c39be7b18ba319fced856b68d7276271-x64-mingw-dynamic-Release-${{ hashFiles('project/vcpkg.json') }}
+          key: ${{ env.VCPKG_CACHE_KEY }}
       - name: Configure
         working-directory: project
         env:

@@ -34,6 +34,13 @@ on:
 permissions:
   contents: read
 
+# This smoke runs vcpkg in manifest mode, so its ports tree is the
+# builtin-baseline recorded in vcpkg.json. Mirror it here so the cache key
+# (ADR 006) reflects the revision the job actually builds with. No overlay
+# triplet repository is used: the builtin arm64-windows triplet is built in.
+env:
+  VCPKG_GIT_REF: a1cae005c39be7b18ba319fced856b68d7276271
+
 jobs:
   windows-arm64-package-smoke:
     name: Windows MSVC ARM64 packaging smoke
@@ -91,14 +98,26 @@ jobs:
           "ENVIRONMENT_SCRIPT=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Using $vsDevCmd"
 
+      # ADR 006: the ARM64 smoke owns its own cache family
+      # (windows-arm64-smoke-*) and falls back to the legacy windows-arm64-*
+      # entries written before the contract existed.
+      - name: Resolve vcpkg cache key
+        shell: bash
+        run: |
+          bash project/scripts/vcpkg_cache_key.sh github-env \
+            --family arm64-smoke \
+            --toolchain msvc \
+            --arch arm64 \
+            --build-type Release \
+            --triplets-ref none \
+            --manifest project/vcpkg.json
       - name: Restore GitLab-style vcpkg binary cache
         id: vcpkg-binary-cache-restore
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-arm64-${{ hashFiles('project/vcpkg.json') }}-Release
-          restore-keys: |
-            windows-arm64-
+          key: ${{ env.VCPKG_CACHE_KEY }}
+          restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
 
       - name: Bootstrap and install vcpkg
         working-directory: project
@@ -122,10 +141,10 @@ jobs:
 
       - name: Save GitLab-style vcpkg binary cache
         if: success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
           path: project/vcpkg_cache
-          key: windows-arm64-${{ hashFiles('project/vcpkg.json') }}-Release
+          key: ${{ env.VCPKG_CACHE_KEY }}
 
       - name: Configure
         working-directory: project
