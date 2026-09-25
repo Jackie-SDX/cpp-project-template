@@ -219,10 +219,15 @@ if (-not (Test-Path -LiteralPath $Root)) {
 $Root = (Resolve-Path -LiteralPath $Root).Path
 
 $searchPaths = [System.Collections.Generic.List[string]]::new()
-foreach ($s in $SearchDir) {
-    if ($s -and (Test-Path -LiteralPath $s)) {
-        $rp = (Resolve-Path -LiteralPath $s).Path
-        if (-not $searchPaths.Contains($rp)) { $searchPaths.Add($rp) }
+# Each $SearchDir element may itself be a '|'-joined list of directories
+# (cmake/WindowsRuntimeDeps.cmake.in passes the whole list as one argument
+# because PowerShell rejects a repeated -SearchDir parameter).
+foreach ($raw in $SearchDir) {
+    foreach ($s in ($raw -split '\|')) {
+        if ($s -and (Test-Path -LiteralPath $s)) {
+            $rp = (Resolve-Path -LiteralPath $s).Path
+            if (-not $searchPaths.Contains($rp)) { $searchPaths.Add($rp) }
+        }
     }
 }
 # Always search the process PATH too (covers MSYS2 prefixes added by CI).

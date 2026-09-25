@@ -37,9 +37,11 @@ set(_wrt_args
 	-Deploy
 	-Report "${_wrt_report}"
 )
-foreach(_dir IN LISTS _wrt_search_dirs)
-	list(APPEND _wrt_args -SearchDir "${_dir}")
-endforeach()
+# PowerShell rejects a repeated -SearchDir parameter ("specified more than
+# once"), so the entire list is passed as one '|'-joined argument ('|' is
+# illegal in Windows path names) and split by the script.
+string(REPLACE ";" "|" _wrt_search_dirs_joined "${_wrt_search_dirs}")
+list(APPEND _wrt_args -SearchDir "${_wrt_search_dirs_joined}")
 
 execute_process(
 	COMMAND "${_wrt_host}" ${_wrt_args}

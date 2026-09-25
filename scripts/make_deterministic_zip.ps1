@@ -8,7 +8,11 @@
     * every entry timestamp is fixed to the release epoch (SOURCE_DATE_EPOCH,
       normally the tagged commit's %ct)
     * paths are stored with forward slashes, no top-level directory is added
-    * the archive comment, entry comments and external attributes are cleared
+    * the archive comment and entry comments are cleared, and external
+      attributes are normalized to deterministic unix modes (0100644 /
+      0100755 in the high 16 bits, Info-ZIP layout) so extraction on
+      macOS/Linux yields readable files -- zeroed attributes extract as
+      mode 0000 ("Permission denied")
 
   Used by both the GitHub and the GitLab Windows packaging jobs so the two
   pipelines converge on one ZIP implementation (Compress-Archive embeds
@@ -72,6 +76,23 @@ $files = @(Get-ChildItem -LiteralPath $inputRoot -Recurse -File |
 
 if (-not $files) { throw "make_deterministic_zip: no files found under $InputDir" }
 
+# The high 16 bits of an entry's external attributes hold the unix mode
+# (Info-ZIP layout): regular file 0100644, executable 0100755. The mode is
+# read from the source file on unix (deterministic for a fixed runner);
+# Windows has no unix modes, so a fixed extension map is used there.
+function Get-EntryExternalAttributes {
+    param([string]$Path)
+    $exec = $false
+    try {
+        $mode = [System.IO.File]::GetUnixFileMode($Path)
+        $exec = (($mode -band [System.IO.UnixFileMode]::UserExecute) -ne 0)
+    } catch {
+        $exec = ($Path -match '\.(?:exe|com|bat|cmd|sh|ps1)$')
+    }
+    if ($exec) { return 0x81ED -shl 16 }   # 0100755
+    return 0x81A4 -shl 16                  # 0100644
+}
+
 $tmp = "$OutputPath.tmp"
 if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force }
 
@@ -80,7 +101,7 @@ try {
     foreach ($f in $files) {
         $entry = $zip.CreateEntry($f.Rel, [System.IO.Compression.CompressionLevel]::Optimal)
         $entry.LastWriteTime = $stamp
-        $entry.ExternalAttributes = 0
+        $entry.ExternalAttributes = Get-EntryExternalAttributes $f.Src
         $entry.Comment = ''
         $src = [System.IO.File]::OpenRead($f.Src)
         try {
