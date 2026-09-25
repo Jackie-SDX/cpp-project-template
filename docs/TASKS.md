@@ -64,7 +64,25 @@ Do **not** add `.7z`, MSIX, AppImage, Flatpak, Snap, Arch packages, or other for
   - `github-env` prints `inputs: family=… image=… vcpkg-ref=… triplets-ref=… extra-fp=… manifest=…`; the gate reports hit/record state to the step log and job summary.
 - [x] Require the release path to seed or restore every required cache deterministically.
   - Warmup always installs (verifies seeds) and writes `vcpkg-seed-*` records; release restores by canonical key with legacy-prefix fallbacks; the gate blocks an upstream miss a fresh seed should have covered.
-- [ ] Exercise cold-cache and warm-cache releases as separate acceptance tests. *(pending live dispatch evidence — warmup cold, then warm release)*
+- [x] Exercise cold-cache and warm-cache releases as separate acceptance tests.
+  - Cold: release dispatch **36126509057** @ `1f967ba` — all 7 cache-gate legs
+    passed with `No seed record … (cold start …)` notices; package legs saved
+    the canonical ADR-006 keys (`Cache saved with key:
+    windows-master-x64-Release-ccfd597b-…-c99d7648…`); `Validate release
+    inventory` failed only at USEFUL-4 (host oracle gap → P4-6, fixed in
+    `1bab366`).
+  - Warmup: dispatch **36130351966** @ `1f967ba` — 8/8 legs success; exact
+    canonical hit (`Cache hit for: windows-mingw-master-x86-Release-ccfd597b-…`,
+    327 MB restored, `Restored 16 package(s) … in 4 s`); every leg wrote and
+    saved a `vcpkg-seed-*-36130351966-1` record; MinGW x64 seeded the freshly
+    rolled runner image `316d8c5c` (live proof of image-drift re-keying).
+  - Warm: release dispatch **36133067564** @ `1bab366` — **success**; 7/7 gate
+    legs report `Exact … vcpkg package cache hit …; restoring the saved cache.`,
+    seed records restored via `vcpkg-seed-…-` restore prefixes (6/7 at gate
+    time; MinGW x64's record landed with warmup completion and that leg passed
+    via the exact-hit branch); `Validate release inventory` green including
+    USEFUL-4 (`total=112 … missing=0`, coverage `found=15 expected=15`);
+    `Publish release` skipped as designed (workflow_dispatch, no tag).
 
 ## 5. Immutable release publication
 

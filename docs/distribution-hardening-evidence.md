@@ -194,10 +194,49 @@ Everything below was executed in this workspace; nothing is inferred.
   `cache-hit` on **exact** match only (prefix hits → `false`), so save-on-miss
   conditions stay correct.
 
-### Gap
+### Live acceptance evidence (target-repo dispatches, 2026-09-25)
 
-Live cold/warm observation (warmup dispatch → release restore → seed records)
-must run after the PR lands; until then TASKS §4's last item stays open.
+| Run | Kind | Head | Result | Key evidence |
+|---|---|---|---|---|
+| 36126509057 | cold release | `1f967ba` | everything green except USEFUL-4 | 7/7 gate legs `##[notice]No seed record … (cold start …) → Proceeding`; package legs restored legacy keys and saved canonical ones (`Cache saved with key: windows-master-x64-Release-ccfd597b-e0a6b857-e5f3f2d0-none-c99d7648…`); `runtime_deps_elf: total=112 bundled=0 system=68 missing=24 host-only=20` → step exit 1 (finding P4-6) |
+| 36130351966 | warmup | `1f967ba` | success, 8/8 legs | MinGW x86 exact canonical hit (`Cache hit for: windows-mingw-master-x86-Release-ccfd597b-…`, 327 MB, `Restored 16 package(s) … in 4 s`); every leg wrote+saved `vcpkg-seed-…-36130351966-1`; MinGW x64 ran on the newly rolled image `316d8c5c`, rebuilt cold and seeded *that* image's key — live proof of ADR 006 image-drift re-keying |
+| 36133067564 | warm release | `1bab366` | **success** | 7/7 gate legs `Exact … vcpkg package cache hit …; restoring the saved cache.`; seed records restored through `restore-keys: vcpkg-seed-…-` (6/7 at gate time; MinGW x64's record arrived with warmup completion minutes later and its gate passed via the exact-hit branch); `Validate release inventory` **success** (all 17 steps); `Publish release` skipped — workflow_dispatch without a tag does not publish |
+
+### P4-6 (found in run 36126509057, fixed in `1bab366`) — USEFUL-4 was host-dependent
+
+- Every Linux artifact `DT_NEEDED`s `libwx_gtk3u_core-3.2.so.0` and
+  `libwx_baseu-3.2.so.0`, but the hosted validation runner ships no wxGTK
+  runtime → 18 entries classified `missing` although the debs *declare*
+  `libwxgtk3.2-1t64`/`libwxbase3.2-1t64` and the container install test proves
+  closure.
+- Cross-arch platform loaders (`ld-linux-aarch64.so.1` DT_NEEDED in arm64
+  binaries) can never resolve on the x64 report host → 6 further `missing`
+  entries.
+- The classifier itself was non-deterministic: `ldconfig -p | grep -q` under
+  `set -o pipefail` lets the early-exiting grep SIGPIPE ldconfig mid-stream, so
+  the same soname flipped between `system` and `missing` (observed 6 of 96
+  entries across consecutive local runs); `find | grep -q` had the same shape.
+- **Fix**: provision `libwxgtk3.2-1t64` in the validate job (the script's
+  contract is "resolves on a *supported host*"); classify `ld-linux*`,
+  `ld64.so*`, `ld.so*` sonames as `host-only`; cache `ldconfig -p` once and
+  grep the file; `find -print -quit` for the bundled probe; rewrite the usage
+  guard (SC2015).
+- **Validation**: docker `ubuntu:24.04` over the real release artifacts —
+  phase 1 (runner-like, no wx) reproduces CI (`missing=18`, exit 1), phase 2
+  after `apt-get install libwxgtk3.2-1t64` → `total=96 … missing=0`, exit 0;
+  three consecutive local runs produce byte-identical summaries; live run
+  36133067564 → `runtime_deps_elf: total=112 bundled=0 system=88 missing=0
+  host-only=24` and `runtime dependency reports: found=15 expected=15`,
+  step conclusions all success.
+
+### Remaining gaps
+
+- `windows-latest` was mid-image-rollout during these runs: warmup MinGW x64
+  was scheduled to image `20260922.246.2` (`image_fp=316d8c5c`) while release
+  legs used `20260907.229.1` (`ccfd597b`). Per-image bags keep this safe (a
+  missing record never blocks; cold notices only) but a gate leg and its
+  package leg can transiently evaluate keys for different images until the
+  rollout settles; the contract re-keys automatically, so no action is needed.
 
 ---
 
