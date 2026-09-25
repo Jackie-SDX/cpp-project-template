@@ -743,7 +743,26 @@ jobs:
         dmg=$(ls release-assets/*.dmg 2>/dev/null | head -1 || true)
         if [ -n "$dmg" ]; then
           mnt=$(mktemp -d /tmp/dmgmnt.XXXXXX)
-          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null
+          # hdiutil attach on runner images is racy right after CPack's own
+          # attach/detach cycle (diskarbitration settles slowly and cancels
+          # the attach); retry, and dump diagnostics if it still refuses.
+          attached=0
+          for attempt in 1 2 3; do
+            if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
+              attached=1
+              break
+            fi
+            echo "hdiutil attach attempt $attempt failed" >&2
+            sleep $((attempt * 2))
+          done
+          if [ "$attached" != "1" ]; then
+            echo "hdiutil attach failed for $dmg; diagnostics:" >&2
+            ls -la "$dmg" >&2 || true
+            hdiutil imageinfo "$dmg" >&2 || true
+            hdiutil info >&2 || true
+            mount >&2 || true
+            exit 1
+          fi
           if [ -n "$app" ]; then
             test -d "$mnt/$(basename "$app")"
             echo "DMG mounts and contains $(basename "$app")"
@@ -751,7 +770,17 @@ jobs:
             test -f "$mnt/bin/projectcli"
             echo "DMG mounts and contains bin/projectcli"
           fi
-          hdiutil detach "$mnt" >/dev/null || hdiutil detach "$mnt" -force >/dev/null
+          detached=0
+          for d in 1 2 3; do
+            if hdiutil detach "$mnt" >/dev/null 2>&1 || hdiutil detach "$mnt" -force >/dev/null 2>&1; then
+              detached=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$detached" != "1" ]; then
+            echo "warning: could not detach $mnt (best-effort; job cleanup will unmount)" >&2
+          fi
         else
           echo "no .dmg produced for this leg (best-effort) -- skipping mount check"
         fi
@@ -1851,7 +1880,26 @@ jobs:
         dmg=$(ls release-assets/*.dmg 2>/dev/null | head -1 || true)
         if [ -n "$dmg" ]; then
           mnt=$(mktemp -d /tmp/dmgmnt.XXXXXX)
-          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null
+          # hdiutil attach on runner images is racy right after CPack's own
+          # attach/detach cycle (diskarbitration settles slowly and cancels
+          # the attach); retry, and dump diagnostics if it still refuses.
+          attached=0
+          for attempt in 1 2 3; do
+            if hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null; then
+              attached=1
+              break
+            fi
+            echo "hdiutil attach attempt $attempt failed" >&2
+            sleep $((attempt * 2))
+          done
+          if [ "$attached" != "1" ]; then
+            echo "hdiutil attach failed for $dmg; diagnostics:" >&2
+            ls -la "$dmg" >&2 || true
+            hdiutil imageinfo "$dmg" >&2 || true
+            hdiutil info >&2 || true
+            mount >&2 || true
+            exit 1
+          fi
           if [ -n "$app" ]; then
             test -d "$mnt/$(basename "$app")"
             echo "DMG mounts and contains $(basename "$app")"
@@ -1859,7 +1907,17 @@ jobs:
             test -f "$mnt/bin/projectcli"
             echo "DMG mounts and contains bin/projectcli"
           fi
-          hdiutil detach "$mnt" >/dev/null || hdiutil detach "$mnt" -force >/dev/null
+          detached=0
+          for d in 1 2 3; do
+            if hdiutil detach "$mnt" >/dev/null 2>&1 || hdiutil detach "$mnt" -force >/dev/null 2>&1; then
+              detached=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$detached" != "1" ]; then
+            echo "warning: could not detach $mnt (best-effort; job cleanup will unmount)" >&2
+          fi
         else
           echo "no .dmg produced for this leg (best-effort) -- skipping mount check"
         fi
