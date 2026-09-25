@@ -1094,6 +1094,318 @@ so the tag run was warm, not merely permissive.
 
 ---
 
+## 17. Complete dated A→Z record of the distribution-hardening benchmark (2026-09-24 → 2026-09-25)
+
+**Added 2026-09-25** on the operator's instruction: *"append the documentation with date of everything
+you did and implemented from A-Z, don't leave anything out, bugs encountered, fixes applied etc,
+decisions and everything"* — and *"document everything in MAIN"*. This section is purely additive:
+Sections 1–16 above are untouched. Every statement below was read from the controller issue history
+(#138), this repository's git history, the GitHub Actions / Releases / branch APIs, or a command run
+in the 2026-09-25 session workspace. Anything that could not be re-verified is recorded as a gap in
+§ 17.9 rather than claimed as done.
+
+### 17.1 Authoritative task, inputs and operating rules
+
+| Item | Value (verified) |
+|---|---|
+| Task | Controller issue #138 — *CPP distribution hardening benchmark — Core + Useful implementation* |
+| Opened | 2026-09-24T23:15:55Z by `@Jackie-SDX` |
+| Target | `Jackie-SDX/cpp-project-template`, base `main` |
+| Scope accepted | CORE-1 … CORE-10 and USEFUL-1 … USEFUL-9, across the issue's PASS 0 → PASS 6 stages. PASS 0–4 are recorded line-by-line in `docs/distribution-hardening-evidence.md`; PASS 5 (independent research: first-party docs + advisory reviews) and PASS 6 (final verification: tag run, shipped verifier, exact-SHA check-runs) are recorded in § 16 and § 17.6 of this document |
+| Baseline HEAD at PASS 0 | `b40c7e900eac533bdf12f06985c4bd88710863d8` (recorded as P0-1 in `docs/distribution-hardening-evidence.md`) |
+| Baseline release inspected | `v0.0.9` (57 assets) |
+| Supplied audits (treated as evidence, not authority) | `OpenCode2.md` at `83ed040` (2026-09-24) and `docs/AUDIT.md` at `11d1726` (2026-09-23) |
+| Explicitly deferred (issue § 7, never claimed) | Authenticode signing/timestamping; Apple Developer ID + notarization/stapling; Linux package signing keys; WiX major-version migration; new package formats; auto-update; unrelated refactors; external publishing |
+| Forbidden additions (CORE-5) | `.7z`, MSIX, AppImage, Flatpak, Snap, duplicate convenience archives — none were added |
+| Evidence rule | A claim is only "done" when a command, CI run, artifact inspection or source state produced it; audits and advisory output are inputs, current HEAD wins |
+| Advisory policy | Gemini → Groq → OpenRouter, fail-open; GitHub Copilot explicitly not used for this benchmark |
+| Publications policy | Commit/push/merge/tag/branch-deletion only on explicit operator instruction |
+
+Controller-side session runs for this issue (all in `Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot`):
+
+| Run | Started | Ended | Outcome |
+|---|---|---|---|
+| [`36071854809`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36071854809) | 2026-09-24T23:16Z | checkpoint 2026-09-25T05:14:22Z | reached the 350-minute agent budget; recoverable timeout, **no completion claimed** |
+| [`36100641992`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36100641992) | 2026-09-25T05:56Z | 07:34:34Z | vcpkg binary-cache contract designed + first advisory adjudicated; diff kept uncommitted |
+| [`36114198094`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36114198094) | 2026-09-25T08:40Z | 08:51:51Z | status answer: PR #11 open, 4 blockers listed, cache-scope explained |
+| [`36115616911`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36115616911) | 2026-09-25T08:56Z | 14:12:21Z | advisory adjudicated; PR-branch commits landed; live dispatches observed |
+| [`36150184105`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36150184105) | 2026-09-25T14:50Z | 14:59:59Z | locked publication sequence published to the issue |
+| [`36152230833`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36152230833) | 2026-09-25T15:09Z | 15:27:35Z | execution order + full branch-cleanup list |
+| [`36154575486`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36154575486) | 2026-09-25T15:30Z | 15:36:45Z | approval consumed; three pending commits planned (they never landed — see § 17.5 D9) |
+| [`36157220474`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36157220474) | 2026-09-25T15:53Z | 15:57:17Z | verified no release/tag existed yet; refused to invent a link |
+| [`36168637497`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36168637497) | 2026-09-25T17:41Z | 19:59:58Z | the cache/release repair (§ 16) and the final advisory adjudication |
+| [`36184563779`](https://github.com/Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot/actions/runs/36184563779) | 2026-09-25T20:14Z | this section | dated A→Z documentation, stale-branch cleanup |
+
+Target-repository workflow volume for the benchmark window (API query
+`actions/runs?created=>2026-09-24`, 2026-09-25T01:58:26Z → 19:31:52Z): **110 runs** — 60 success,
+25 cancelled (superseded pushes), 16 skipped (label-gated/publish-only), **9 failure** (all nine are
+listed in § 17.4).
+
+### 17.2 Dated timeline, A → Z
+
+| When (UTC) | What happened | Evidence |
+|---|---|---|
+| 2026-09-24 23:15:55 | Issue #138 opened with the full Core + Useful specification | issue metadata |
+| 2026-09-24 23:16:00 | First `/oc` directive: execute PASS 0 → PASS 6 against `Jackie-SDX/cpp-project-template` @ `main` | comment `5823831961` |
+| 2026-09-24 23:16 → 2026-09-25 05:14 | **Run 1.** PASS 0 reconnaissance, evidence ledger created, and the first implementation wave: **14 commits** pushed between 01:58 and 04:35 (`d30c572` … `accde08`) covering the contract/validation suite, end-to-end pipeline hardening, identity/version fixes, runtime closure, DMG verification and macOS GUI legs. Run reached the 350-minute budget and stopped with a clean tree and an honest checkpoint. | issue comment `5827185160`; `git log` on the PR branch |
+| 2026-09-25 01:58:26 | First push of the hardening wave: **run 36084299254 failed with 0 jobs** — `windows-arm64-package-smoke.yml` was rejected at load time | Actions API (0 jobs) |
+| 2026-09-25 01:59:11 | **Run 36084349525 (Workflow Lint) failed**; actionlint pinpointed `key "if-no-files-found" is duplicated … line 244 / 245` in the same file | run 36084349525 log |
+| 2026-09-25 02:01 | Fix `38a14fc` *ci: remove duplicated if-no-files-found key in ARM64 smoke upload* | `git log` |
+| 2026-09-25 02:01:44 | **Run 36084534712 (Windows ARM64 Package Smoke) failed** at its `Configure` step — version propagation on non-tag runs | Actions API job steps |
+| 2026-09-25 02:07 → 02:23 | Fixes `dd85f2b` (PR-labelled smoke trigger), `a51f6af` (*resolve numeric versions on non-tag release runs*), `fc018fe` (*3-component version RC and GUI-disabled macOS legs*) | `git log` |
+| 2026-09-25 02:38 | `4b27c95` fixes two latent runner-only defects: repeated `-SearchDir` PowerShell parameter broke `cmake --install` on **every** Windows leg, and `make_deterministic_zip.ps1` wrote unix mode 0000 so Info-ZIP extraction produced unreadable bundles | commit body of `4b27c95` |
+| 2026-09-25 02:52 → 03:25 | DMG verification hardened against real-runner `hdiutil` behaviour: retry (`fdac2bd`), multi-strategy attach (`4cdce38`, `91b103c`), SLA disabled so `hdiutil attach` works headlessly (`d2ecae7`) | `git log` |
+| 2026-09-25 03:40:36 | **Run 36091319542 (Release dispatch) failed** — Windows MinGW x86 leg died in `cmake --install` (runtime-closure deploy) | Actions API: failed step = `Install` |
+| 2026-09-25 03:40 → 04:35 | `6f1e645` restores executable bits on the new scripts; `accde08` *add toolchain bin dirs to the runtime closure search pool* — its body names the exact miss (`libstdc++-6.dll`, `libwinpthread-1.dll` from `mingw32\bin`) | commit body of `accde08` |
+| 2026-09-25 04:40:59 | **Run 36095424933 (Release dispatch)**: 32 jobs — 29 green (every Windows/Linux/macOS package leg), `Validate release inventory` **failed with 17 assertions**, publish correctly skipped | Actions API job list |
+| 2026-09-25 05:14:22 | Run 1 checkpoint posted (timeout ≠ success); `/oc continue` requested at 05:55 with the hint *"harden the Vcpkg caching so you don't have to wait 31 mins per build"* | comments `5827185160`, `5827571877` |
+| 2026-09-25 05:56 → 07:34 | **Run 2.** PASS 4: the vcpkg binary-cache contract was re-proven from HEAD (five divergent key layouts, CRLF `hashFiles`, dead cache gate, warmup MSYS2 gap, duplicated downloads caches → P4-1…P4-5), designed `scripts/vcpkg_cache_key.sh` + `scripts/vcpkg_cache_gate.sh` + `vcpkg-cache-warmup.yml` + **ADR 006**; second Gemini advisory adjudicated (RC2 diagnosed as unrelated packaging-metadata failures). Kept uncommitted — publication not yet requested. | comment `5828689947` |
+| 2026-09-25 08:40 → 08:51 | **Run 3.** Answered the merge-readiness question with live state: PR #11 open with 14 commits / 25 files, 4 blockers, and the per-repository cache-scope explanation for a fork's cold first run | comment `5829642518` |
+| 2026-09-25 09:16 → 12:46 | **Run 4 (continuing from 08:56).** Four commits landed on the PR branch: `667e39f` (installer **payload** architecture + two false-positive fixes), `1f967ba` (vcpkg cache-key contract, ADR 006), `1bab366` (USEFUL-4 host-accurate deterministic ELF report), `8a2b704` (cold/warm acceptance evidence recorded) | `git log` |
+| 2026-09-25 10:54:32 | **Run 36126509057 failed** — USEFUL-4 ELF report reported 24 `missing` host-only wxGTK/loader entries (defect **P4-6**) | ledger row P4-6 |
+| 2026-09-25 11:46 | **Run 36130351966 (warmup) success 8/8** — MinGW x86 exact canonical hit restored 327 MB in 4 s; live proof of ADR 006 image-drift re-keying | ledger, PASS 4 table |
+| 2026-09-25 12:06 | **Run 36133067564 (release dispatch) success** — 7/7 cache gates exact-hit, `Validate release inventory` green (all 17 steps), publish skipped because no tag | ledger, PASS 4 table |
+| 2026-09-25 12:46 | PR-head checks green on `8a2b704` (CI, Workflow Lint, Release, Windows Package Smoke) | Actions API |
+| 2026-09-25 14:12 → 15:57 | **Run 4's closing report plus runs 5–8:** publication sequence published to the issue; PR state re-verified before every step; a request for a release link was answered with *no release exists yet* instead of an invented URL | comments `5833840413` (14:12), `5834559979` (14:59), `5834957125` (15:27), `5835089090` (15:36), `5835383692` (15:57) |
+| 2026-09-25 **16:39:36** | **PR #11 squash-merged into `main` by the operator** → `main` = `3072b4d` (18 commits, 31 files, +5 238/−380) | PR #11 API |
+| 2026-09-25 16:39:39 | Post-merge: warmup **failed** (36162164904, `find … \| wc -l` abort) and CI took **35 m 14 s** (36162165228) | § 16.2 root causes B, D |
+| 2026-09-25 17:31:40 | Release run **36167681510 failed in 52 s** — all 7 cache gates died on `--hit ""` (root cause A) | § 16.2 |
+| 2026-09-25 17:40:50 | Operator: tag `v0.0.10` was created and is failing; *"fix the cache … the workflow still takes very long … when the assets are published and the whole CI is green, send me the link, then append everything you've done so far in the project documentation.md … You're working directly on main now"* | comment `5836799354` |
+| 2026-09-25 17:41 → 19:59 | **Run 9.** The repair recorded in § 16: root causes A–E, commits `3eb6f13` + `aa063e7`, the cache-budget operator action, two controlled release re-cuts, green CI, 61 published assets, and § 16 added to this document in `c1f2eac` | § 16 |
+| 2026-09-25 18:00:11 | `3eb6f13` pushed → warmup **36170640084 success 8/8** (34 m, first real cold build) and CI **36170640276 success 34 m 09 s** | Actions API |
+| 2026-09-25 18:41:50 | Release **36175060932** published 61 assets, then failed in the shipped verifier on NSIS stub architecture (root cause E) → release + tag deleted and re-cut | § 16.5 |
+| 2026-09-25 19:04:37 → 19:15:34 | `aa063e7` pushed → CI **36177436812 success 10 m 57 s** (MinGW x64 Release 34.4 min → 4.1 min) | Actions API |
+| 2026-09-25 19:04:53 → 19:21:36 | Release **36177462008 success 16 m 43 s** — `verify-release: all performed checks passed for version 0.0.10`, 49 attestations verified, 61/61 membership | Actions API + § 16.7 |
+| 2026-09-25 **19:14:50** | **Release `v0.0.10` published — 61 assets**, tag `v0.0.10` = `aa063e7` | Releases API |
+| 2026-09-25 19:31:24 → 19:36:34 | `c1f2eac` (§ 16) pushed → CI **36180202378 success 5 m 06 s**; 20/20 check-runs green at `c1f2eac`, **0 commit statuses** (no stale CircleCI signal) | Actions/Checks API |
+| 2026-09-25 19:59:58 | Final Gemini advisory adjudicated (`proceed` / `high`, 0 critical findings); its *commit-and-push* recommendation was **deferred** because publication was not yet requested | comment `5838726143` |
+| 2026-09-25 20:14:25 | Operator directive that this section answers: dated A→Z documentation, **the release works — no optional follow-ups**, delete all stale branches except `gh-pages`, document everything in `main` | comment `5838918695` |
+| 2026-09-25 (this session) | Stale-branch cleanup executed (§ 17.8) and this section written, validated, committed and pushed to `main` | § 17.6, § 17.8 |
+
+### 17.3 What was implemented, item by item
+
+Every row was built in PR #11 (squash commit `3072b4d`) or the two post-merge fixes, and is proven
+in `docs/distribution-hardening-evidence.md` unless another pointer is given.
+
+| Item | What was implemented | Primary artefacts |
+|---|---|---|
+| CORE-1 Windows runtime closure | CMake-native resolver that computes the non-system DLL closure from the built binaries, deploys it at `cmake --install`, verifies it on final install/ZIP/NSIS/MSI trees, rejects wrong-architecture DLLs, and searches build/toolchain/vcpkg/link-dir/MSVC pools | `cmake/WindowsRuntimeDeps.cmake{,.in}`, `cmake/windows/Resolve-WindowsRuntimeDeps.ps1` (437 lines) |
+| CORE-2 real Windows smoke | Windows Package Smoke extracts the ZIP, runs the CLI, silent-installs and uninstalls NSIS and MSI, checks exit codes, bounded, no GUI hangs | `.github/workflows/windows-package-smoke.yml`, `windows-arm64-package-smoke.yml` |
+| CORE-3 Debian correctness | `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` enabled (runtime-only closure, no `-dev` fallback), maintainer/homepage sourced from real identity, clean-container install/upgrade/uninstall tested | `cmake/cpack_module.cmake`, `CMakeLists.txt` |
+| CORE-4 macOS bundle | `MACOSX_BUNDLE` + `Info.plist` (`com.github.jackiesdx.cppprojecttemplate`), version metadata, `.app`/`Contents/MacOS` assertions, `lipo`/`otool` scans, DMG mount, bounded 8 s GUI launch — all on real macOS runners | `src/projectwx/src/CMakeLists.txt`, release workflow verify steps |
+| CORE-5 release formats preserved | Exactly Windows ZIP + NSIS + MSI, Linux tar.gz + DEB + RPM, macOS ZIP + DMG, plus source archives; forbidden-format check is fail-closed | `packaging/release-contract.tsv` (61 rows), `scripts/release_contract.sh` |
+| CORE-6 inventory + immutability | Publish refuses an existing release, freezes `pre-publish-digests.txt`, uploads without `overwrite_files`, then `sha256sum -c`, file-set diff, attestation loop and the shipped verifier | `.github/workflows/release.yml`, `scripts/validate_release_artifacts.sh` |
+| CORE-7 GitLab floor | `release_contract.sh check --scope gitlab-floor` (15-row minimum) before `glab release create`, portable across bash/dash/busybox ash, naming every missing artefact | `.gitlab/.gitlab-ci.yml`, `scripts/release_contract.sh` |
+| CORE-8 canonical naming | One vocabulary — `x86_64` / `i686` / `arm64` — from CPack through filenames, smoke artefacts, manifest, docs and validators | `cmake/cpack_module.cmake`, smoke workflows |
+| CORE-9 CircleCI signal integrity | Determined obsolete (no account/token, 8 of 12 commit statuses red on a SHA whose Actions CI was green); reporting switched off with workflow-level `when: false`, config **retained** with re-enable instructions | `.circleci/config.yml` header |
+| CORE-10 version + identity | Tag version resolved before configure on every path; `Version`, package versions, installer versions, bundle versions, filenames and manifest all agree; stale `NaylaCruz` identity removed | `.github/scripts/configure.cmake`, `scripts/verify_release_identity.sh` |
+| USEFUL-1 deterministic Linux archives | `--sort=name --mtime --owner/group --numeric-owner` + release-controlled `SOURCE_DATE_EPOCH`; tar.gz and DEB/RPM proven byte-identical across independent builds | `scripts/make_deterministic_tarball.sh` |
+| USEFUL-2 deterministic ZIP | PowerShell builder with normalised timestamps and unix modes (0100644/0100755), used by GitHub and GitLab; remaining cross-.NET nondeterminism measured and documented | `scripts/make_deterministic_zip.ps1` |
+| USEFUL-3 unified manifest | `packaging/release-contract.tsv` = single source for GitHub validate (56), GitHub publish (61), GitLab floor (15) | `packaging/release-contract.tsv`, `scripts/release_contract.sh` |
+| USEFUL-4 runtime reports | PE/ELF/Mach-O dependency reports generated from the **final** artefacts, classifying system/bundled/missing/host-only, uploaded as CI evidence | `scripts/runtime_deps_elf.sh`, `scripts/runtime_deps_macos.sh` |
+| USEFUL-5 lifecycle validation | Ubuntu 24.04 and Fedora 42 containers: install → launch → upgrade → remove; Windows ZIP/NSIS/MSI install-uninstall; macOS ZIP/DMG inspection; bounded `xvfb` GUI launch | ledger "Validation results" |
+| USEFUL-6 provenance + SBOM | SHA-pinned actions, SPDX SBOM, provenance bound to the exact commit/artefacts, verified during the tag run | release workflow, `release-sbom.spdx.json` |
+| USEFUL-7 integrity checks | Secret/debug/temp/stray-executable/absolute-path/traversal/symlink/coverage/manifest checks in one fail-closed validator (11 check families) | `scripts/validate_release_artifacts.sh` |
+| USEFUL-8 consumer verification | Standalone `verify-release.sh` shipped **inside the release** (SHA-256, manifest membership, filename/architecture, attestation, SBOM) — usable without the source tree | `scripts/verify_release.sh` |
+| USEFUL-9 documentation sync | § 16 (this document), `docs/install.md`, `docs/distribution-hardening-evidence.md`, ADR 006, `docs/TASKS.md` | commits `c1f2eac`, `8a2b704`, `1f967ba` |
+
+New/changed surface of PR #11: **31 files, +5 238 / −380**, including the new CMake runtime-closure
+modules, the validation/verification scripts, the deterministic builders, the release contract and
+the Windows smoke workflows (full file list in the PR diff and the ledger's *Deliverables* table).
+
+### 17.4 Bugs encountered and fixes applied
+
+**A. Baseline defects found at PASS 0 (present in `b40c7e9` / release `v0.0.9`)**
+
+| # | Bug | Evidence | Fix |
+|---|---|---|---|
+| A1 | Windows runtime DLL closure broken on **7 of 9** legs — wx/runtime DLLs in the build tree but absent from install/package trees | PE import parse of every `v0.0.9` Windows `.zip` (P0-3) | CORE-1 resolver + install-time deploy + closure verification in the release/smoke jobs |
+| A2 | Published `windows-mingw-i686.zip` contained **x86-64** executables | `file i686/bin/*.exe` (P0-4) | `gcc -dumpmachine` assertion per leg + `pe-arch` validator |
+| A3 | ARM64 legs shipped mixed-architecture payload (`vcruntime140_1.dll=x86_64`) | PE machine scan of `v0.0.9` (P0-5) | resolver `-ExpectedArch` rejects machine mismatch |
+| A4 | DEB internal `Version: 0.0.1` under a `0.0.9` filename (version resolved too late on the GitHub path) | `dpkg-deb -I` (P0-6) | tag version exported before Configure; identity assertion |
+| A5 | Stale identity: `Maintainer: NaylaCruz`, `Homepage: …/NaylaCruz/…`, cache gate keyed on the old repo name | `dpkg-deb -I`, `grep -rn NaylaCruz` (P0-7) | `verify_release_identity.sh` + metadata corrected from real sources (no invented address) |
+| A6 | Hand-maintained DEB `Depends` with a **development** fallback (`libwxgtk3.2-dev`) | `dpkg-deb -I` (P0-8) | `CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON` → dpkg-shlibdeps closure |
+| A7 | macOS GUI shipped **without** a `.app` bundle or `Info.plist` | `zipfile` listing of `v0.0.9` macOS zip (P0-9) | `MACOSX_BUNDLE` + plist + macOS verify steps |
+| A8 | GitLab release had **no completeness floor** (only `count -eq 0`) | `.gitlab-ci.yml` (P0-10) | `--scope gitlab-floor` gate, proven on synthetic inventories |
+| A9 | GitHub publish used `overwrite_files: true` (silent same-name mutation) | `release.yml:894` (P0-11) | overwrite removed; freeze → upload → post-publish digest comparison |
+| A10 | Expected inventory hard-coded twice and diverging from CPack naming (`i686` vs `x86`) | `release.yml` vs `cpack_module.cmake` (P0-12) | one contract file drives every consumer |
+| A11 | CI smoke names used `x64` while releases used `x86_64` | `ci.yml`, smoke workflows (P0-13) | canonical names everywhere |
+| A12 | Archives were not byte-deterministic across providers | no `SOURCE_DATE_EPOCH` anywhere (P0-14) | deterministic builders + measured limits |
+| A13 | No attestations, SBOM, runtime reports or consumer verifier | `grep attest\|sbom\|SPDX` → 0 hits (P0-15) | all four implemented and verified in the tag run |
+| A14 | CircleCI reported 8/12 `ci/circleci:*` statuses **red on a SHA whose Actions CI was green** | commit status API at `b40c7e9…` (P0-2) | reporting disabled (`when: false`), config retained |
+| A15 | Five divergent vcpkg cache-key layouts; unreproducible CRLF `hashFiles`; dead gate condition; warmup missing MSYS2 parity; eight duplicated downloads caches | `grep 'key:'` across workflows (P4-1…P4-5) | single key authority + gate + ADR 006 |
+
+**B. Defects found while implementing (real runs, 2026-09-25 01:58 → 12:46)**
+
+| # | Bug | Run / moment | Fix |
+|---|---|---|---|
+| B1 | Duplicate `if-no-files-found` key made `windows-arm64-package-smoke.yml` fail to load (0 jobs) and turned Workflow Lint red | 36084299254 (01:58:26), 36084349525 (01:59:11) | `38a14fc` |
+| B2 | ARM64 packaging smoke failed at `Configure` (version propagation on non-tag runs) | 36084534712 (02:01:44) | `a51f6af`, `fc018fe` — **not re-proven live** (subsequent smoke runs are label-gated; see § 17.9) |
+| B3 | Repeated `-SearchDir` PowerShell parameter failed `cmake --install` on every Windows leg | surfaced during runner validation | `4b27c95` (list passed once, split by the resolver) |
+| B4 | Deterministic ZIP zeroed `ExternalAttributes` → unix mode 0000 → `PermissionError` reading `Info.plist` after extraction | surfaced during runner validation | `4b27c95` (deterministic 0100644/0100755 modes) |
+| B5 | `hdiutil attach` flaky/headless-hostile on macOS release legs | macOS verify steps | `fdac2bd` retry, `4cdce38`/`91b103c` multi-strategy fallback, `d2ecae7` SLA disabled |
+| B6 | Missing executable bits on the new scripts broke them after checkout | 03:40 wave | `6f1e645` |
+| B7 | MinGW x86 runtime closure missed `libstdc++-6.dll` / `libwinpthread-1.dll` living in `mingw32\bin` → install failed | 36091319542 (03:40:36), named in the commit body | `accde08` (compiler bin + `$MINGW_PREFIX\bin` + `$MSYSTEM_PREFIX\bin` added to the pool) |
+| B8 | Release inventory gate asserted the **installer header** architecture: 9 MSI (OLE, no PE header) + 6 NSIS (always 32-bit stub) = **15 false positives**, plus `source.tar.gz` exec-surface and `source.zip` self-matching absolute-path pattern → **17 failures** | 36095424933 (04:40:59) | `667e39f` — unpack installers with 7z and assert **payload** PEs; source archives compared against the git index; path pattern assembled from fragments, placeholders filtered |
+| B9 | USEFUL-4 ELF report was host-dependent and non-deterministic (`ldconfig -p \| grep -q` SIGPIPE under `pipefail` flipped `system`/`missing`) | 36126509057 (10:54:32), 24 `missing` | `1bab366` — provision wxGTK on the validation host, classify loaders as `host-only`, cache `ldconfig -p`, `find -print -quit` |
+| B10 | Runtime-deps report scripts joined JSON incorrectly | local validation | fixed in both report scripts (ledger P0-15) |
+| B11 | RPM `%description` came from a generic CMake template | local `rpm -qip` | `CPACK_RPM_PACKAGE_DESCRIPTION` |
+| B12 | Forbidden-format detection was case-sensitive | floor mutation test | case-insensitive match |
+| B13 | `set -o pipefail` is not portable: `release_contract.sh` broke under dash/busybox ash | floor test across three shells | portable pipefail guard |
+
+**C. Post-merge / release defects (2026-09-25 16:39 → 19:14)** — full detail in § 16
+
+| # | Bug | Run | Fix |
+|---|---|---|---|
+| C1 | Cache gate rejected an **empty** `cache-hit` with a usage error (exit 2) → 7/7 gate jobs failed in 52 s | 36167681510 (17:31:40) | `3eb6f13` — `__unset__` sentinel; empty normalises to *miss* |
+| C2 | Warmup aborted on `find project/vcpkg_cache … \| wc -l` when the directory did not exist, **before** the save step | 36162164904 (16:39:39) | `3eb6f13` — absent directory counts as 0 |
+| C3 | Cache budget **10.657 GB / 86 entries** exceeded GitHub's 10 GB cap → LRU evicted the release seeds (40 orphaned `refs/pull/11/merge` entries = 7.20 GB) | cache API | operator deletion of the 40 orphaned entries (40 succeeded / 0 failed) |
+| C4 | Cold `windows-latest` image rollout split every image-scoped key (two fingerprints in one run) → 35-minute CI | 36162165228 | documented limit; per-image keys keep it safe (§ 16.8) |
+| C5 | Shipped `verify_release.sh` compared the **NSIS stub** header (i386) with the contract arch → 6 of 9 installers reported FAIL after a successful publish | 36175060932 (18:41:50) | `aa063e7` — NSIS rows assert the stub they always are; payload arch stays covered by `validate_release_artifacts.sh`, which unpacks the installers |
+| C6 | `release.yml` still passed a raw (possibly empty) `cache-hit` into the gate in one path | session analysis | `3eb6f13` — `cache-hit \|\| 'false'` coalescing for both restore steps |
+| C7 | (Found 2026-09-25, this session) `validate_release_artifacts.sh` contains an unreachable top-level `*_source.zip\|*_source.tar.gz` branch — shellcheck SC2221/SC2222 | `shellcheck -S warning scripts/*.sh` | **No functional impact** (proven): source archives are handled by the *nested* cases inside `*.zip)` and `*.tar.gz)` which do run. Left unchanged — this task is documentation-only, and CI's actionlint runs with shellcheck disabled |
+
+### 17.5 Decisions taken (and the alternatives rejected)
+
+| # | Decision | Why / alternative rejected |
+|---|---|---|
+| D1 | Treat `OpenCode2.md` and `docs/AUDIT.md` as **leads, not truth**; re-prove every claim against live HEAD (`b40c7e9`) and real artefacts | The audits are historical snapshots (2026-09-23/24); several of their claims were stale or, like the NSIS header assertion, wrong in both directions |
+| D2 | Keep exactly the accepted formats; add nothing | `.7z`/MSIX/AppImage/Flatpak/Snap would add artifact count, not safety (CORE-5) |
+| D3 | CircleCI: **disable reporting, keep the file** | Repairing it needs an account/token that does not exist; deleting the config would destroy history. `when: false` makes it stop lying while remaining re-enableable |
+| D4 | One machine-readable contract (`release-contract.tsv`) instead of two hard-coded inventories | Two copies had already diverged (`x86` vs `i686`); one file now drives GH validate, GH publish and the GitLab floor |
+| D5 | Canonical architecture vocabulary `x86_64`/`i686`/`arm64` | `x64`/`x86`/`i686` mixes caused wrong-name and wrong-arch reports |
+| D6 | Determinism via `SOURCE_DATE_EPOCH` + normalised ordering/ownership; **document** the remaining nondeterminism rather than pretend | Full byte identity across .NET majors/NSIS/WiX/DMG is not achievable without risky changes |
+| D7 | vcpkg binary cache: **exact-key contract + fail-open miss, fail-closed only when a fresh seed record exists and the seed is missing upstream** | A blanket "cache miss = fail" would break a fresh fork (operator explicitly rejected it); a blanket "never fail" would let a broken seed silently revert every leg to ~31-minute builds |
+| D8 | `cache-hit` is treated with its documented **three states** (`true` exact / `false` partial / `''` miss) and coalesced with `\|\| 'false'` before the gate | First-party `actions/cache` README + upstream PR #1467; the older `restore/README.md` wording claiming `false`-on-miss is stale |
+| D9 | Publication discipline: only commit/push/merge/tag/delete on explicit instruction | Consequence: three planned PR commits (cache-gate coalescing record, ledger row, `install.md` sync) were never pushed before the operator merged PR #11 at 16:39; their *content* landed instead through `3eb6f13` (coalescing), § 16 (record) and this section |
+| D10 | Two controlled release deletions + tag re-cuts for `v0.0.10` | The CORE-6 immutability guard refuses to publish into an existing release, so a broken publication cannot be patched in place; no history was rewritten and the release URL never changed |
+| D11 | Advisory models are reviewers; every material finding was checked against source/commands/docs before acceptance | Several advisory findings were rejected as stale (mid-phase review) or deferred as unauthorised (commit/push); Copilot was excluded by the specification |
+| D12 | Direct-to-`main` commits after the merge | `main` has **no branch protection and no rulesets** (API 404 / `[]`), and the operator wrote *"You're working directly on main now"*; every push was followed by exact-SHA check-run verification |
+| D13 | **2026-09-25T20:14:25Z — the release is accepted; no optional follow-ups** | The operator closed the remaining optional items (re-tag to propagate a verifier improvement, further cache sweeps, extra dispatches). § 17.9 therefore records them as *closed by decision*, not as pending work |
+| D14 | **2026-09-25 — stale-branch cleanup policy** | Target repo: delete 7, keep `main` + `gh-pages` (GitHub Pages source, API-confirmed). Controller repo: delete 8, keep `main`, `oc/session-126`, `oc/session-136` (open PRs #128/#137). Every deleted branch was verified merged, closed or superseded first (§ 17.8) |
+
+### 17.6 Validation performed
+
+| Check | Command / source | Result |
+|---|---|---|
+| Cache-gate contract | `bash scripts/vcpkg_cache_gate.sh --selftest` | **18/18 ok, rc=0** (2026-09-25 session) |
+| Cache-key contract | `bash scripts/vcpkg_cache_key.sh selftest` | **22/22 ok, rc=0** (2026-09-25 session) |
+| Workflow YAML | `yaml.safe_load` over `.github/workflows/*.yml` | **11/11 parse** |
+| Workflow lint (CI's exact invocation) | `docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color -shellcheck= -pyflakes=` | **rc=0, 0 findings** |
+| Shell lint (as cited in § 16.7) | `shellcheck -S warning scripts/verify_release.sh scripts/vcpkg_cache_gate.sh scripts/vcpkg_cache_key.sh` | **clean, rc=0** |
+| Shell lint (all scripts) | `shellcheck -S warning scripts/*.sh` | SC2221/SC2222 only, in `validate_release_artifacts.sh` — unreachable duplicate branch, **no functional impact** (B7/C7) |
+| Syntax | `bash -n scripts/*.sh` | clean |
+| Whitespace | `git diff --check` | clean |
+| Check-runs at `c1f2eac` | `gh api …/commits/c1f2eac/check-runs` | **20 success, 0 failure** |
+| Commit statuses at `c1f2eac` | `gh api …/commits/c1f2eac/status` | **0 statuses** — no stale CircleCI context |
+| Release | `gh release view v0.0.10` | 61 assets, `isDraft=false`, published 2026-09-25T19:14:50Z |
+| Cache budget | `gh api …/actions/caches` (this session) | 84 entries, **7.28 GiB** of the 10 GiB cap |
+| CI timings on `main` | Actions API | 35 m 14 s → 34 m 09 s → 10 m 57 s → **5 m 06 s** |
+| Container lifecycle (USEFUL-5) | Ubuntu 24.04 `apt`, Fedora 42 `dnf` | install → upgrade → remove all **OK** |
+| Determinism (USEFUL-1/2) | paired local builds | tar.gz `459dea97…` identical; DEB `240e97a5…` identical with epoch; RPM `386ea41b…` identical |
+| Runtime report (USEFUL-4) | `runtime_deps_elf.sh` over real artefacts | `total=112 bundled=0 system=88 missing=0 host-only=24` in run 36133067564 |
+| End-to-end publish | run `36177462008` | `verify-release: all performed checks passed for version 0.0.10`; `arch checked=184`; 49 attestations; 61/61 membership |
+
+### 17.7 Release evidence — `v0.0.10`
+
+- **Tag:** `v0.0.10` → `aa063e7ec75d41e5c251f40cb0afbd6202032a8a` (source of the published payload).
+- **Run:** [`36177462008`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36177462008) — success, 19:04:53 → 19:21:36Z.
+- **Published:** 2026-09-25T19:14:50Z, `isDraft=false`, **61 assets**:
+  54 platform packages (Windows 9 legs × {zip, `_nsis.exe`, `_wix.msi`} = 27; Linux 5 legs × {tar.gz, `.deb`, `.rpm`} = 15; macOS 6 legs × {zip, `.dmg`} = 12),
+  2 source archives, `SHA256SUMS`, `release-contract.tsv`, `release-evidence.json`, `release-sbom.spdx.json`, `verify-release.sh`.
+- **Verified in the run:** frozen pre-publish digests → upload without overwrite → post-publish `sha256sum -c` → file-set diff → attestation loop (49) → shipped verifier `rc=0`.
+- **CI after publication:** `CI` 36177436812 success (10 m 57 s), then `36180202378` success (5 m 06 s) at `c1f2eac`.
+
+### 17.8 Stale-branch cleanup (executed 2026-09-25)
+
+Before each deletion the branch was compared against `main` and its PR state was read. Local clones
+of every deleted ref were kept in the session workspace, so nothing was unrecoverable at deletion
+time.
+
+**Target repository `Jackie-SDX/cpp-project-template` — 7 deleted, 2 kept**
+
+| Branch | Pre-deletion evidence | Result |
+|---|---|---|
+| `oc/remote-Jackie-SDX-cpp-project-template-main-4de40d00448e` | PR #11 **merged** 2026-09-25T16:39:36Z (content = squash `3072b4d`) | deleted |
+| `oc/remote-Jackie-SDX-cpp-project-template-main-strict-archive-policy` | PR #9 **merged** 2026-09-23T14:56:46Z; `ahead=0` of `main` | deleted |
+| `oc/remote-Jackie-SDX-cpp-project-template-main-ef569596d2de` | Abandoned session branch; its only unique file, `FORENSIC_UPGRADE_REPORT.md`, is superseded — every anchor it cites (`86a1213`, `71cae18`, `522bc3a`, the 264-commit figure, the factorial/wordWrap fixes) already appears in §§2–6 of this document | deleted |
+| `chore/prune-dead-workflows` | PR #2 **closed** unmerged; its Android-workflow deletions were superseded by PR #5, its C++17 downgrade reverted by its own third commit | deleted |
+| `ci/circleci-github-parity` | Orphaned; CircleCI is a retired signal (CORE-9, D3) so the parity config can never run | deleted |
+| `circleci-project-setup` | 2026-08-23 leftover, **288 commits behind** | deleted |
+| `feature/phase1-consolidated-ci` | 2026-08-23 leftover, **288 commits behind** | deleted |
+| **`main`** | default branch | **kept** |
+| **`gh-pages`** | GitHub Pages source (`/repo/pages` → `source.branch=gh-pages`, site `status=built`) | **kept** |
+
+**Controller repository `Jackie-SDX/Nayla-SD-JACKIE-Fun-WhatsApp-Bot` — 8 deleted, 3 kept**
+
+| Branch | Pre-deletion evidence | Result |
+|---|---|---|
+| `docs/cpp-packaging-audit-2026-09-23` | PR #131 merged 2026-09-23T19:02:04Z | deleted |
+| `docs/cpp-packaging-audit-round2-2026-09-23` | PR #132 merged 2026-09-23T19:26:06Z | deleted |
+| `docs/cpp-packaging-audit-round3-2026-09-23` | PR #133 merged 2026-09-23T19:44:43Z | deleted |
+| `docs/cpp-distribution-tasks-2026-09-23` | PR #134 merged 2026-09-23T20:19:44Z | deleted |
+| `oc/diagnose-opencode-copilot-20260923` | PR #127 merged 2026-09-23T06:48:33Z | deleted |
+| `oc/fix-multiline-command-emission` | PR #124 merged 2026-09-23T02:33:07Z | deleted |
+| `oc/fix-session-branch-bootstrap-20260923` | PR #129 merged 2026-09-23T07:21:49Z | deleted |
+| `oc-mimo26-gemini-advisor` | PR #135 merged/squash-merged 2026-09-24T21:27:59Z | deleted |
+| **`main`** | default branch | **kept** |
+| **`oc/session-126`** | open PR #128 on an open issue | **kept** |
+| **`oc/session-136`** | open PR #137 on an open issue | **kept** |
+
+Post-cleanup branch lists (API): target = `gh-pages`, `main`; controller = `main`, `oc/session-126`,
+`oc/session-136`.
+
+### 17.9 Deferred work, honest limits and closed follow-ups
+
+Nothing below is claimed as done.
+
+**Closed by the operator's 2026-09-25T20:14:25Z decision (D13):**
+
+1. Re-tag/re-publish to propagate a `verify_release.sh` payload-arch improvement — not needed; the
+   release works and `validate_release_artifacts.sh` already enforces payload architecture
+   fail-closed inside the green tag run.
+2. Further Actions-cache sweeps — not requested; the budget is 7.28 GiB / 10 GiB today.
+3. Extra warm-up dispatches purely to re-demonstrate sub-5-minute legs — not requested.
+4. The three never-pushed PR commits of D9 — their content is delivered by `3eb6f13`, § 16 and § 17.
+
+**Still deferred by specification (issue § 7) — never claimed:**
+
+- Windows Authenticode signing and timestamping.
+- macOS Developer ID, Hardened Runtime, notarization, stapling.
+- Linux release/package signing keys.
+- WiX major-version migration (governance/licensing decision).
+- New package formats; full auto-update; unrelated product refactors; external publishing.
+
+**Open evidence gaps (honest inventory):**
+
+| Gap | Why it is open |
+|---|---|
+| Windows ARM64 packaging smoke | run 36084534712 failed at `Configure`; every later run is label-gated and was **skipped**, so the fix is not live-proven on that leg (the release-matrix `Windows MSVC ARM64` package leg itself is green) |
+| GitLab completeness floor live run | the pipeline cannot be triggered from this repository (no GitLab token); floor proven locally on synthetic inventories under three shells, plus mutation tests |
+| CircleCI green proof | no CircleCI account/token exists; instead the signal is retired (D3) and `main` carries **0** commit statuses |
+| Consumer-side `gh attestation verify` outside the repo | attestations were verified inside run `36177462008` (49); the documented consumer path is in `verify-release.sh` and `docs/install.md` |
+| Cold-start gate runs `36143304493` / `36144895796` | recorded in the session history but hosted on a scratch repository that was deleted — both IDs now return HTTP 404 here. Equivalent behaviour is proven in-repo by 36167681510 (pre-fix failure) → 36170640084 (post-fix cold success) → 36177462008 (warm exact hit) |
+| Runner-image churn splitting cache keys | intentionally not coarsened: the image fingerprint is what keeps ABI-safety honest (ADR 006); documented in § 16.8 |
+| MSI/NSIS payload arch inside the shipped `verify_release.sh` | MSI is an OLE container (no PE header) and NSIS needs `7z` on the consumer machine; covered during the tag run by `validate_release_artifacts.sh`, which fails closed |
+
+### 17.10 Evidence ledger for this section
+
+| Claim | Exact source | Observed | State |
+|---|---|---|---|
+| 14 implementation commits in the first wave | `git log --format='%h %ad %s'` on the PR branch, `b40c7e9..8a2b704` | `d30c572` 01:58 → `accde08` 04:35, then 4 more to `8a2b704` 12:46 | verified |
+| PR #11 size and merge | GitHub API | 18 commits, 31 files, +5 238/−380; merged 2026-09-25T16:39:36Z | verified |
+| 17 inventory failures and their cause | commit `667e39f` body + run 36095424933 job list | 9 MSI + 6 NSIS header false positives + 1 source-tar exec rule + 1 self-matching path pattern | verified |
+| Every listed run conclusion/duration | `gh run view <id> --json …` | see § 17.2 / § 17.6 | verified |
+| 110 target runs, 9 failures | Actions API `runs?created=>2026-09-24` (2 pages) | 60 success / 25 cancelled / 16 skipped / 9 failure | verified |
+| Release contents | `gh release view v0.0.10` | 61 assets matching the breakdown in § 17.7 | verified |
+| Pages branch | `GET /repos/…/pages` | `source.branch=gh-pages`, `status=built` | verified |
+| Branch protection absent | `GET …/branches/main/protection` → 404; `GET …/rulesets` → `[]` | unprotected | verified |
+| Post-cleanup branch lists | `GET …/branches` after deletion | target 2, controller 3 | verified |
+| Selftests/lint/YAML | commands in § 17.6, run 2026-09-25 | rc=0 / 18-18 / 22-22 / 11-11 | verified |
+| Cache budget | `GET …/actions/caches` (2 pages) | 84 entries, 7.28 GiB | verified |
+
+---
+
 *This document was generated from verified repository state; all hashes, counts, asset lists, and run
 results were read directly from the three Git repositories and the GitHub API. Any later change to
 `main` supersedes the exact figures above.*
