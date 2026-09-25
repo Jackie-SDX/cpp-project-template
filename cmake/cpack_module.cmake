@@ -154,6 +154,19 @@ elseif(APPLE)
 	set(CPACK_DMG_VOLUME_NAME "${PROJECT_NAME}")
 	set(CPACK_DMG_BACKGROUND_IMAGE "${PACKAGING_DIR}/apple/icon.png")
 
+	# Under CMP0133-OLD (cmake_minimum_required < 3.31), the CPack module
+	# defaults CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE to ON whenever a
+	# custom CPACK_RESOURCE_FILE_LICENSE is set, and the DragNDrop
+	# generator then embeds it as an interactive software-license agreement
+	# on the image. hdiutil attach presents that SLA before mounting; on
+	# headless hosts (CI verification, verify_release.sh, scripted
+	# consumers) there is no UI to accept it, so the attach aborts with
+	# "Error 111 (user canceled operation)" / "hdiutil: attach canceled".
+	# The NSIS/WiX EULA pages are unaffected (interactive installers, and
+	# silent /S|/quiet modes skip them); only the DMG SLA is disabled so
+	# the image can be mounted programmatically.
+	set(CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE OFF)
+
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_program(RPMBUILD_PATH rpmbuild)
     if(RPMBUILD_PATH)
