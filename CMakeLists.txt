@@ -110,6 +110,21 @@ set(CPACK_PACKAGE_CONTACT "${AUTHOR_NAME} <${AUTHOR_EMAIL}>")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(PROJECT_LANGUAGE_NEUTRAL 0) # if 0, language will be set to English in version.rc, otherwise neutral
+
+# version.rc FILEVERSION/PRODUCTVERSION require exactly four comma-separated
+# WORDs. Release versions are 3-component (X.Y.Z), which leaves
+# CMAKE_PROJECT_VERSION_TWEAK empty; the template then rendered "0,0,9,"
+# and rc.exe failed with RC2127 ("version WORDs separated by commas
+# expected"). Compute padded numeric and dotted forms once here so both
+# 3- and 4-component project versions produce a valid VERSIONINFO block.
+set(_project_version_tweak "${CMAKE_PROJECT_VERSION_TWEAK}")
+if(_project_version_tweak STREQUAL "")
+	set(_project_version_tweak 0)
+endif()
+set(PROJECT_RC_VERSION_WORDS
+	"${CMAKE_PROJECT_VERSION_MAJOR},${CMAKE_PROJECT_VERSION_MINOR},${CMAKE_PROJECT_VERSION_PATCH},${_project_version_tweak}")
+set(PROJECT_RC_VERSION_DOTS
+	"${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.${CMAKE_PROJECT_VERSION_PATCH}.${_project_version_tweak}")
 string(TIMESTAMP COPYRIGHT_YEAR "%Y")
 set(CPACK_PACKAGE_COPYRIGHT "© ${COPYRIGHT_YEAR} ${CPACK_PACKAGE_VENDOR}")
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)

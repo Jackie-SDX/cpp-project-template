@@ -671,6 +671,7 @@ jobs:
         PREFIX: ${{ env.RELEASE_PREFIX }}
         EXPECTED_ARCH: ${{ matrix.arch }}
         EXPECTED_VERSION: ${{ env.VERSION }}
+        EXPECTED_GUI: '1'
       run: |
         set -euo pipefail
         mkdir -p verify-artifacts
@@ -678,20 +679,21 @@ jobs:
         test -f "$zip"
         rm -rf verify-macos && mkdir verify-macos
         unzip -q "$zip" -d verify-macos
-        # --- CORE-4: .app bundle at payload root -----------------------------
-        app=$(find verify-macos -maxdepth 2 -name '*.app' -type d | head -1)
-        if [ -z "$app" ]; then
-          echo "no .app bundle in zip payload:" >&2
-          find verify-macos -maxdepth 3 >&2
-          exit 1
-        fi
-        test -d "$app/Contents/MacOS"
-        bin=$(find "$app/Contents/MacOS" -type f | head -1)
-        test -n "$bin"
-        echo "bundle: $app"
-        # --- CORE-4/CORE-10: Info.plist parses, identity + version correct --
-        test -f "$app/Contents/Info.plist"
-        python3 - "$app/Contents/Info.plist" "$EXPECTED_VERSION" <<'PY'
+        if [ "${EXPECTED_GUI}" = "1" ]; then
+          # --- CORE-4: .app bundle at payload root -------------------------
+          app=$(find verify-macos -maxdepth 2 -name '*.app' -type d | head -1)
+          if [ -z "$app" ]; then
+            echo "no .app bundle in zip payload:" >&2
+            find verify-macos -maxdepth 3 >&2
+            exit 1
+          fi
+          test -d "$app/Contents/MacOS"
+          bin=$(find "$app/Contents/MacOS" -type f | head -1)
+          test -n "$bin"
+          echo "bundle: $app"
+          # --- CORE-4/CORE-10: Info.plist parses, identity + version correct --
+          test -f "$app/Contents/Info.plist"
+          python3 - "$app/Contents/Info.plist" "$EXPECTED_VERSION" <<'PY'
         import plistlib, re, sys
         path, version = sys.argv[1], sys.argv[2]
         with open(path, "rb") as fh:
@@ -709,6 +711,18 @@ jobs:
             raise SystemExit(f"version mismatch: short={short!r} build={build!r} expected={version!r}")
         print(f"Info.plist OK: id={bid} short={short} build={build}")
         PY
+        else
+          # BUILD_PROJECTWX=OFF leg: CLI-only payload, and no stray bundle.
+          echo "GUI disabled for this leg (BUILD_PROJECTWX=OFF) -- CLI-only payload"
+          bin="verify-macos/bin/projectcli"
+          test -f "$bin"
+          if find verify-macos -maxdepth 2 -name '*.app' -type d | grep -q .; then
+            echo "unexpected .app bundle on a GUI-disabled leg:" >&2
+            find verify-macos -maxdepth 2 -name '*.app' -type d >&2
+            exit 1
+          fi
+          app=""
+        fi
         # --- CORE-4: Mach-O architecture -------------------------------------
         case "$EXPECTED_ARCH" in
           x64|x86_64) want=x86_64 ;;
@@ -725,31 +739,40 @@ jobs:
           printf '%s\n' "$loads" >&2
           exit 1
         fi
-        # --- USEFUL-5: DMG mount + .app presence -----------------------------
+        # --- USEFUL-5: DMG mount + payload check ----------------------------
         dmg=$(ls release-assets/*.dmg 2>/dev/null | head -1 || true)
         if [ -n "$dmg" ]; then
           mnt=$(mktemp -d /tmp/dmgmnt.XXXXXX)
           hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null
-          test -d "$mnt/$(basename "$app")"
+          if [ -n "$app" ]; then
+            test -d "$mnt/$(basename "$app")"
+            echo "DMG mounts and contains $(basename "$app")"
+          else
+            test -f "$mnt/bin/projectcli"
+            echo "DMG mounts and contains bin/projectcli"
+          fi
           hdiutil detach "$mnt" >/dev/null || hdiutil detach "$mnt" -force >/dev/null
-          echo "DMG mounts and contains $(basename "$app")"
         else
           echo "no .dmg produced for this leg (best-effort) -- skipping mount check"
         fi
         # --- USEFUL-4: runtime report from the FINAL extracted payload -------
         scripts/runtime_deps_macos.sh --root verify-macos --out "verify-artifacts/runtime-deps-$PREFIX.json"
         # --- CORE-1/USEFUL-5: bounded GUI launch (8s window) -----------------
-        "$bin" &
-        gui_pid=$!
-        sleep 8
-        if kill -0 "$gui_pid" 2>/dev/null; then
-          kill -9 "$gui_pid" 2>/dev/null || true
-          echo "bounded launch OK: GUI alive after 8s, killed"
+        if [ "${EXPECTED_GUI}" = "1" ]; then
+          "$bin" &
+          gui_pid=$!
+          sleep 8
+          if kill -0 "$gui_pid" 2>/dev/null; then
+            kill -9 "$gui_pid" 2>/dev/null || true
+            echo "bounded launch OK: GUI alive after 8s, killed"
+          else
+            rc=0
+            wait "$gui_pid" || rc=$?
+            echo "GUI exited rc=$rc"
+            test "$rc" -eq 0
+          fi
         else
-          rc=0
-          wait "$gui_pid" || rc=$?
-          echo "GUI exited rc=$rc"
-          test "$rc" -eq 0
+          echo "GUI launch skipped (BUILD_PROJECTWX=OFF leg)"
         fi
     - name: Upload package artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -1753,6 +1776,10 @@ jobs:
         PREFIX: ${{ env.RELEASE_PREFIX }}
         EXPECTED_ARCH: ${{ matrix.arch }}
         EXPECTED_VERSION: ${{ env.VERSION }}
+        # Matrix legs may explicitly disable the GUI (BUILD_PROJECTWX=OFF);
+        # those legitimately ship a CLI-only payload, so bundle assertions
+        # must be conditional on the leg actually building projectwx.
+        EXPECTED_GUI: ${{ matrix.build_projectwx == 'OFF' && '0' || '1' }}
       run: |
         set -euo pipefail
         mkdir -p verify-artifacts
@@ -1760,20 +1787,21 @@ jobs:
         test -f "$zip"
         rm -rf verify-macos && mkdir verify-macos
         unzip -q "$zip" -d verify-macos
-        # --- CORE-4: .app bundle at payload root -----------------------------
-        app=$(find verify-macos -maxdepth 2 -name '*.app' -type d | head -1)
-        if [ -z "$app" ]; then
-          echo "no .app bundle in zip payload:" >&2
-          find verify-macos -maxdepth 3 >&2
-          exit 1
-        fi
-        test -d "$app/Contents/MacOS"
-        bin=$(find "$app/Contents/MacOS" -type f | head -1)
-        test -n "$bin"
-        echo "bundle: $app"
-        # --- CORE-4/CORE-10: Info.plist parses, identity + version correct --
-        test -f "$app/Contents/Info.plist"
-        python3 - "$app/Contents/Info.plist" "$EXPECTED_VERSION" <<'PY'
+        if [ "${EXPECTED_GUI}" = "1" ]; then
+          # --- CORE-4: .app bundle at payload root -------------------------
+          app=$(find verify-macos -maxdepth 2 -name '*.app' -type d | head -1)
+          if [ -z "$app" ]; then
+            echo "no .app bundle in zip payload:" >&2
+            find verify-macos -maxdepth 3 >&2
+            exit 1
+          fi
+          test -d "$app/Contents/MacOS"
+          bin=$(find "$app/Contents/MacOS" -type f | head -1)
+          test -n "$bin"
+          echo "bundle: $app"
+          # --- CORE-4/CORE-10: Info.plist parses, identity + version correct --
+          test -f "$app/Contents/Info.plist"
+          python3 - "$app/Contents/Info.plist" "$EXPECTED_VERSION" <<'PY'
         import plistlib, re, sys
         path, version = sys.argv[1], sys.argv[2]
         with open(path, "rb") as fh:
@@ -1791,6 +1819,18 @@ jobs:
             raise SystemExit(f"version mismatch: short={short!r} build={build!r} expected={version!r}")
         print(f"Info.plist OK: id={bid} short={short} build={build}")
         PY
+        else
+          # BUILD_PROJECTWX=OFF leg: CLI-only payload, and no stray bundle.
+          echo "GUI disabled for this leg (BUILD_PROJECTWX=OFF) -- CLI-only payload"
+          bin="verify-macos/bin/projectcli"
+          test -f "$bin"
+          if find verify-macos -maxdepth 2 -name '*.app' -type d | grep -q .; then
+            echo "unexpected .app bundle on a GUI-disabled leg:" >&2
+            find verify-macos -maxdepth 2 -name '*.app' -type d >&2
+            exit 1
+          fi
+          app=""
+        fi
         # --- CORE-4: Mach-O architecture -------------------------------------
         case "$EXPECTED_ARCH" in
           x64|x86_64) want=x86_64 ;;
@@ -1807,31 +1847,40 @@ jobs:
           printf '%s\n' "$loads" >&2
           exit 1
         fi
-        # --- USEFUL-5: DMG mount + .app presence -----------------------------
+        # --- USEFUL-5: DMG mount + payload check ----------------------------
         dmg=$(ls release-assets/*.dmg 2>/dev/null | head -1 || true)
         if [ -n "$dmg" ]; then
           mnt=$(mktemp -d /tmp/dmgmnt.XXXXXX)
           hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null
-          test -d "$mnt/$(basename "$app")"
+          if [ -n "$app" ]; then
+            test -d "$mnt/$(basename "$app")"
+            echo "DMG mounts and contains $(basename "$app")"
+          else
+            test -f "$mnt/bin/projectcli"
+            echo "DMG mounts and contains bin/projectcli"
+          fi
           hdiutil detach "$mnt" >/dev/null || hdiutil detach "$mnt" -force >/dev/null
-          echo "DMG mounts and contains $(basename "$app")"
         else
           echo "no .dmg produced for this leg (best-effort) -- skipping mount check"
         fi
         # --- USEFUL-4: runtime report from the FINAL extracted payload -------
         scripts/runtime_deps_macos.sh --root verify-macos --out "verify-artifacts/runtime-deps-$PREFIX.json"
         # --- CORE-1/USEFUL-5: bounded GUI launch (8s window) -----------------
-        "$bin" &
-        gui_pid=$!
-        sleep 8
-        if kill -0 "$gui_pid" 2>/dev/null; then
-          kill -9 "$gui_pid" 2>/dev/null || true
-          echo "bounded launch OK: GUI alive after 8s, killed"
+        if [ "${EXPECTED_GUI}" = "1" ]; then
+          "$bin" &
+          gui_pid=$!
+          sleep 8
+          if kill -0 "$gui_pid" 2>/dev/null; then
+            kill -9 "$gui_pid" 2>/dev/null || true
+            echo "bounded launch OK: GUI alive after 8s, killed"
+          else
+            rc=0
+            wait "$gui_pid" || rc=$?
+            echo "GUI exited rc=$rc"
+            test "$rc" -eq 0
+          fi
         else
-          rc=0
-          wait "$gui_pid" || rc=$?
-          echo "GUI exited rc=$rc"
-          test "$rc" -eq 0
+          echo "GUI launch skipped (BUILD_PROJECTWX=OFF leg)"
         fi
 
     - name: Upload package artifact
