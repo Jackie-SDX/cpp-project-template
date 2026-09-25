@@ -749,6 +749,8 @@ jobs:
           #  B: explicit mountpoint, -noverify        (2 tries)
           #  C: default /Volumes mount, -noverify     (MountPoint parsed
           #     from the -plist output)
+          #  D: default /Volumes mount, bare defaults (Finder-equivalent
+          #     invocation: no -nobrowse/-readonly/-noverify)
           # If none attach, dump UDIF verify + verbose attach diagnostics.
           attached=0
           for attempt in 1 2 3; do
@@ -770,23 +772,39 @@ jobs:
             done
           fi
           if [ "$attached" != "1" ]; then
-            attach_plist=$(mktemp /tmp/attachplist.XXXXXX)
-            if hdiutil attach "$dmg" -noverify -nobrowse -readonly -plist > "$attach_plist" 2> "$attach_plist.err"; then
-              mnt=$(python3 - "$attach_plist" <<'PY'
+            for spec in C D; do
+              attach_plist=$(mktemp /tmp/attachplist.XXXXXX)
+              hdi_ok=0
+              if [ "$spec" = "C" ]; then
+                if hdiutil attach "$dmg" -noverify -nobrowse -readonly -plist > "$attach_plist" 2> "$attach_plist.err"; then
+                  hdi_ok=1
+                fi
+              else
+                if hdiutil attach "$dmg" -plist > "$attach_plist" 2> "$attach_plist.err"; then
+                  hdi_ok=1
+                fi
+              fi
+              if [ "$hdi_ok" = "1" ]; then
+                mnt=$(python3 - "$attach_plist" <<'PY'
         import plistlib, sys
         with open(sys.argv[1], "rb") as fh:
             entities = plistlib.load(fh)
         print(next((e.get("MountPoint", "") for e in entities if e.get("MountPoint")), ""))
         PY
               )
-              if [ -n "$mnt" ]; then
-                attached=2
-                echo "attach strategy C ok (default mount at $mnt)"
+                if [ -n "$mnt" ]; then
+                  attached=2
+                  echo "attach strategy $spec ok (default mount at $mnt)"
+                  rm -f "$attach_plist" "$attach_plist.err"
+                  break
+                fi
+                echo "attach strategy $spec attached but MountPoint empty" >&2
+              else
+                echo "attach strategy $spec failed:" >&2
+                cat "$attach_plist.err" >&2 || true
               fi
-            else
-              cat "$attach_plist.err" >&2 || true
-            fi
-            rm -f "$attach_plist" "$attach_plist.err"
+              rm -f "$attach_plist" "$attach_plist.err"
+            done
           fi
           if [ "$attached" = "0" ]; then
             echo "hdiutil attach failed for $dmg; diagnostics:" >&2
@@ -1923,6 +1941,8 @@ jobs:
           #  B: explicit mountpoint, -noverify        (2 tries)
           #  C: default /Volumes mount, -noverify     (MountPoint parsed
           #     from the -plist output)
+          #  D: default /Volumes mount, bare defaults (Finder-equivalent
+          #     invocation: no -nobrowse/-readonly/-noverify)
           # If none attach, dump UDIF verify + verbose attach diagnostics.
           attached=0
           for attempt in 1 2 3; do
@@ -1944,23 +1964,39 @@ jobs:
             done
           fi
           if [ "$attached" != "1" ]; then
-            attach_plist=$(mktemp /tmp/attachplist.XXXXXX)
-            if hdiutil attach "$dmg" -noverify -nobrowse -readonly -plist > "$attach_plist" 2> "$attach_plist.err"; then
-              mnt=$(python3 - "$attach_plist" <<'PY'
+            for spec in C D; do
+              attach_plist=$(mktemp /tmp/attachplist.XXXXXX)
+              hdi_ok=0
+              if [ "$spec" = "C" ]; then
+                if hdiutil attach "$dmg" -noverify -nobrowse -readonly -plist > "$attach_plist" 2> "$attach_plist.err"; then
+                  hdi_ok=1
+                fi
+              else
+                if hdiutil attach "$dmg" -plist > "$attach_plist" 2> "$attach_plist.err"; then
+                  hdi_ok=1
+                fi
+              fi
+              if [ "$hdi_ok" = "1" ]; then
+                mnt=$(python3 - "$attach_plist" <<'PY'
         import plistlib, sys
         with open(sys.argv[1], "rb") as fh:
             entities = plistlib.load(fh)
         print(next((e.get("MountPoint", "") for e in entities if e.get("MountPoint")), ""))
         PY
               )
-              if [ -n "$mnt" ]; then
-                attached=2
-                echo "attach strategy C ok (default mount at $mnt)"
+                if [ -n "$mnt" ]; then
+                  attached=2
+                  echo "attach strategy $spec ok (default mount at $mnt)"
+                  rm -f "$attach_plist" "$attach_plist.err"
+                  break
+                fi
+                echo "attach strategy $spec attached but MountPoint empty" >&2
+              else
+                echo "attach strategy $spec failed:" >&2
+                cat "$attach_plist.err" >&2 || true
               fi
-            else
-              cat "$attach_plist.err" >&2 || true
-            fi
-            rm -f "$attach_plist" "$attach_plist.err"
+              rm -f "$attach_plist" "$attach_plist.err"
+            done
           fi
           if [ "$attached" = "0" ]; then
             echo "hdiutil attach failed for $dmg; diagnostics:" >&2
