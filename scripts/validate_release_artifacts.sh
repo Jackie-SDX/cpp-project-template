@@ -14,19 +14,27 @@
 #   3. non-empty        : every expected artifact has bytes
 #   4. archive safety   : no absolute paths, no "..", no symlinks, no
 #                         __MACOSX/.DS_Store junk in .zip/.tar.gz members
-#   5. PE architecture  : windows .zip members + .exe/.msi installers match the
-#                         contract arch (CORE-4-adjacent; catches the
-#                         windows-mingw-i686-actually-x86_64 class of defect)
+#   5. PE architecture  : windows .zip members match the contract arch, and the
+#                         payload INSIDE every .exe/.msi installer matches it
+#                         too (CORE-4-adjacent; catches the
+#                         windows-mingw-i686-actually-x86_64 class of defect).
+#                         Installers are unpacked for this: an NSIS .exe is
+#                         always a 32-bit stub regardless of payload arch, and
+#                         a WiX .msi is an OLE compound file, not a PE image,
+#                         so neither installer header can answer the question.
 #   6. macOS structure  : gui legs ship projectwx.app/Contents/... (CORE-4)
 #   7. package metadata : DEB/RPM Version, Maintainer/Homepage present (CORE-3)
 #   8. checksums        : SHA256SUMS exists, covers every file, verifies (CORE-6)
 #   9. debug/temp junk  : no *.pdb/*.ilk/*~/.DS_Store/__MACOSX/...
 #  10. absolute paths   : no CI/build-home paths embedded in shipped text files
-#  11. exec surface     : executables in raw archives live under bin/ (or the
-#                         macOS bundle), nothing unexpected is executable
+#  11. exec surface     : install-tree archives are executable only under bin/;
+#                         source archives must not carry an executable the git
+#                         index does not mark executable (100755)
 #
-# Requires: bash, python3, unzip/zipinfo, tar, sha256sum, file; dpkg-deb and
-# rpm are used when present (otherwise those sub-checks report SKIP).
+# Requires: bash, python3, unzip/zipinfo, tar, sha256sum, file, 7z (7-Zip,
+# present on the ubuntu runner images this gate runs on) for installer payload
+# inspection; dpkg-deb and rpm are used when present (otherwise those sub-checks
+# report SKIP).
 set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -113,6 +121,93 @@ expected_arch() { # from contract filename column of $1
 }
 expected_profile() {
   contract_row_for "$1" | awk -F'\t' '{ print $4 }'
+}
+
+# Prints what is actually shipped inside an installer so the architecture claim
+# is checked against payload bytes instead of installer headers.
+#
+#   installer_payload_report INSTALLER WANT_ARCH
+#
+# output (one of):
+#   ok:<count>            every payload PE member has WANT_ARCH
+#   mismatch:<file>=<arch> payload PE member(s) with a different architecture
+#   error:<reason>        verification itself was impossible (fail closed)
+#
+# NSIS pseudo-directories ($PLUGINSDIR/...) hold the installer runtime plugins,
+# which are32-bit for every payload architecture and are never product code;
+# everything else (.exe/.dll) must match the contract architecture.
+installer_payload_report() {
+  local installer="$1" want="$2" tmp p rel count=0 mismatch="" mode
+  if ! command -v 7z >/dev/null 2>&1; then
+    echo "error: 7z is required to inspect the payload of $(basename "$installer")"
+    return 0
+  fi
+  if [ -z "$want" ]; then
+    echo "error: no release-contract row for $(basename "$installer")"
+    return 0
+  fi
+  tmp=$(mktemp -d)
+  if ! 7z x -y -o"$tmp" "$installer" >/dev/null 2>&1; then
+    rm -rf "$tmp"
+    echo "error: 7z could not unpack $(basename "$installer")"
+    return 0
+  fi
+  while IFS= read -r -d '' p; do
+    rel=${p#"$tmp"/}
+    # NSIS runtime pseudo-directories are installer plumbing, not payload.
+    case "${rel%%/*}" in '$'*) continue ;; esac
+    case "$rel" in *.exe|*.dll) ;; *) continue ;; esac
+    count=$((count + 1))
+    mode=$(arch_of_pe_file "$p")
+    if [ "$mode" != "$want" ]; then
+      mismatch="$mismatch ${rel}=$mode"
+    fi
+  done < <(find "$tmp" -type f -print0)
+  rm -rf "$tmp"
+  if [ "$count" -eq 0 ]; then
+    echo "error: no payload executables inside $(basename "$installer")"
+    return 0
+  fi
+  if [ -n "$mismatch" ]; then
+    echo "mismatch:$mismatch"
+    return 0
+  fi
+  echo "ok:$count"
+}
+
+# Records payload/contract agreement for one installer.
+#   record_installer_pe_arch KIND FILE WANT
+#   KIND is the noun used in the detail line (e.g. "MSI payload").
+record_installer_pe_arch() {
+  local kind="$1" f="$2" want="$3" report
+  report=$(installer_payload_report "$path" "$want")
+  case "$report" in
+    ok:*)
+      rec PASS pe-arch "$f" "$kind: ${report#ok:} payload PE members are $want"
+      ;;
+    mismatch:*)
+      rec FAIL pe-arch "$f" "expected $want; $kind mismatched:${report#mismatch:}"
+      ;;
+    *)
+      rec FAIL pe-arch "$f" "$kind: ${report#error: }"
+      ;;
+  esac
+}
+
+# Executable regular-file members of a source archive must be exactly the paths
+# the repository index marks executable (mode 100755). stdin carries the member
+# paths; $1 is the archive's top-level prefix. Prints the violations.
+source_exec_violations() {
+  local prefix="${1%/}" mem rel mode
+  while IFS= read -r mem; do
+    [ -n "$mem" ] || continue
+    rel=${mem#./}
+    rel=${rel#"$prefix"/}
+    mode=$(git -C "$REPO_ROOT" ls-files -s -- "$rel" 2>/dev/null | awk 'NR==1 { print $1 }')
+    if [ "$mode" != "100755" ]; then
+      printf '%s(%s) ' "$rel" "${mode:-not-in-index}"
+    fi
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -208,19 +303,43 @@ PY
           ;;
       esac
 
-      # absolute build paths in shipped text files + exec surface
+      # absolute build paths in shipped text members. The pattern is assembled
+      # from fragments so this script's own source can never match the pattern
+      # it greps for (the source archive contains this very file). Documented
+      # placeholder accounts such as /Users/username/ are examples, not leaked
+      # build paths, and are dropped per matched string.
       tmp=$(mktemp -d)
       unzip -qq -o "$path" -d "$tmp" 2>/dev/null || { rec FAIL extract "$f" "unzip failed"; rm -rf "$tmp"; continue; }
-      if hits=$(grep -rIlE '(/home/[a-z]+/|/Users/[A-Za-z0-9_.-]+/|/workspace/|[A-Za-z]:\\\\(a|Users|build)\\\\)' "$tmp" 2>/dev/null | head -5); then
-        if [ -n "$hits" ]; then
-          rec FAIL abs-paths "$f" "build/home paths in: $(echo "$hits" | sed "s|$tmp/||" | tr '\n' ' ')"
-        else
-          rec PASS abs-paths "$f" "no embedded build/home paths in text members"
+      abs_pat='(/home/[a-z]+/|/Users/[A-Za-z0-9_.-]+/|/worksp''ace/|[A-Za-z]:\\\\(a|Users|build)\\\\)'
+      abs_placeholder='/home/(username|user|your[_-]?name|example)/|/users/(username|user|your[_-]?name|example)/'
+      abs_bad=""
+      while IFS= read -r mem; do
+        [ -n "$mem" ] || continue
+        matches=$(grep -oE "$abs_pat" "$mem" 2>/dev/null || true)
+        [ -n "$matches" ] || continue
+        real=$(printf '%s\n' "$matches" | grep -viE "$abs_placeholder" || true)
+        if [ -n "$real" ]; then
+          abs_bad="$abs_bad ${mem#"$tmp"/}"
         fi
+      done < <(grep -rIlE "$abs_pat" "$tmp" 2>/dev/null || true)
+      if [ -n "$abs_bad" ]; then
+        rec FAIL abs-paths "$f" "build/home paths in:$abs_bad"
       else
         rec PASS abs-paths "$f" "no embedded build/home paths in text members"
       fi
       case "$f" in
+        *_source.zip)
+          # A source archive mirrors the repository tree: it may only contain
+          # executables the git index itself marks executable.
+          prefix=$(zipinfo -1 "$path" 2>/dev/null | sed -n '1p')
+          violations=$(find "$tmp" -type f -perm -u+x -printf '%P\n' 2>/dev/null \
+            | source_exec_violations "$prefix")
+          if [ -n "$violations" ]; then
+            rec FAIL exec-surface "$f" "executable but not executable in git index: $violations"
+          else
+            rec PASS exec-surface "$f" "executable members match the git index"
+          fi
+          ;;
         *_linux-*|*_macos-*)
           stray=$(find "$tmp" -type f -perm -u+x \
                   ! -path '*/bin/*' ! -path '*/projectwx.app/*' \
@@ -245,13 +364,29 @@ PY
       else
         rec FAIL archive-safety "$f" "tar listing failed"
       fi
-      # exec surface for the raw Linux install tree
-      if tar -tvzf "$path" | awk '$1 ~ /^-/ && $1 ~ /x/ { print $NF }' \
-          | grep -vE '^\./bin/|/bin/[^/]+$' | grep -q .; then
-        rec FAIL exec-surface "$f" "executable outside bin/: $(tar -tvzf "$path" | awk '$1 ~ /^-/ && $1 ~ /x/ {print $NF}' | grep -vE '^\./bin/|/bin/[^/]+$' | head -3 | tr '\n' ' ')"
-      else
-        rec PASS exec-surface "$f" "only bin/ entries are executable"
-      fi
+      case "$f" in
+        *_source.tar.gz)
+          # A source archive mirrors the repository tree: the install-tree
+          # "bin/ only" rule does not apply, but an executable the git index
+          # does not mark executable (100755) is an unexpected executable.
+          violations=$(tar -tvzf "$path" | awk '$1 ~ /^-/ && $1 ~ /x/ { print $NF }' \
+            | source_exec_violations "$(printf '%s\n' "${listing:-}" | sed -n '1p')")
+          if [ -n "$violations" ]; then
+            rec FAIL exec-surface "$f" "executable but not executable in git index: $violations"
+          else
+            rec PASS exec-surface "$f" "executable members match the git index"
+          fi
+          ;;
+        *)
+          # exec surface for the raw Linux install tree
+          if tar -tvzf "$path" | awk '$1 ~ /^-/ && $1 ~ /x/ { print $NF }' \
+              | grep -vE '^\./bin/|/bin/[^/]+$' | grep -q .; then
+            rec FAIL exec-surface "$f" "executable outside bin/: $(tar -tvzf "$path" | awk '$1 ~ /^-/ && $1 ~ /x/ {print $NF}' | grep -vE '^\./bin/|/bin/[^/]+$' | head -3 | tr '\n' ' ')"
+          else
+            rec PASS exec-surface "$f" "only bin/ entries are executable"
+          fi
+          ;;
+      esac
       ;;
 
     *.deb)
@@ -311,17 +446,15 @@ PY
       ;;
 
     *.msi)
-      got=$(arch_of_pe_file "$path")
-      want=$(expected_arch "$f")
-      if [ "$got" = "$want" ]; then rec PASS pe-arch "$f" "MSI machine=$got"
-      else rec FAIL pe-arch "$f" "MSI machine=$got, expected $want"; fi
+      # A .msi is an OLE compound document, not a PE image: its own header has
+      # no architecture. Verify the payload the installer actually carries.
+      record_installer_pe_arch "MSI payload" "$f" "$(expected_arch "$f")"
       ;;
 
     *.exe)
-      got=$(arch_of_pe_file "$path")
-      want=$(expected_arch "$f")
-      if [ "$got" = "$want" ]; then rec PASS pe-arch "$f" "installer machine=$got"
-      else rec FAIL pe-arch "$f" "installer machine=$got, expected $want"; fi
+      # An NSIS installer is always a 32-bit stub no matter which architecture
+      # it installs, so verify the payload instead of the stub header.
+      record_installer_pe_arch "installer payload" "$f" "$(expected_arch "$f")"
       ;;
 
     *.dmg)
