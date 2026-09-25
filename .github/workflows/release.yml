@@ -1109,6 +1109,18 @@ jobs:
           fi
           test "$hits" -eq 0
           echo 'secret/integrity scan: clean'
+      # USEFUL-4 resolves DT_NEEDED sonames against a *supported host*
+      # (runtime_deps_elf.sh consults ldconfig/dpkg). The hosted runner does
+      # not ship the wxGTK runtime that every Linux artifact links against, so
+      # without this step each artifact reports its declared system dependency
+      # as "missing" and the gate fails for a purely environmental reason.
+      - name: Provide Linux runtime libraries for USEFUL-4 resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libwxgtk3.2-1t64
+          ldconfig -p | grep -F 'libwx_gtk3u_core-3.2.so.0'
       - name: ELF runtime dependency report (USEFUL-4)
         shell: bash
         run: |

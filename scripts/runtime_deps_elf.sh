@@ -6,6 +6,8 @@
 #   * system     : the soname resolves on a supported host (ldconfig -p / dpkg)
 #   * missing    : neither
 #   * host-only  : interpreter (PT_INTERP, e.g. /lib64/ld-linux-x86-64.so.2)
+#                  or a platform loader soname (ld-linux-aarch64.so.1 ...):
+#                  provided by the target platform, never redistributed
 # Output: JSON report (path --out) plus a human summary on stdout.
 #
 #   runtime_deps_elf.sh --dir RELEASE_DIR --out REPORT.json
@@ -19,7 +21,10 @@ while [ $# -gt 0 ]; do
     *) echo "runtime_deps_elf: unknown argument $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$DIR" ] && [ -n "$OUT" ] || { echo "usage: runtime_deps_elf.sh --dir DIR --out FILE" >&2; exit 2; }
+if [ -z "$DIR" ] || [ -z "$OUT" ]; then
+  echo "usage: runtime_deps_elf.sh --dir DIR --out FILE" >&2
+  exit 2
+fi
 [ -d "$DIR" ] || { echo "not a directory: $DIR" >&2; exit 2; }
 command -v readelf >/dev/null || { echo "readelf (binutils) is required" >&2; exit 2; }
 
@@ -27,13 +32,27 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 json="$work/entries.jsonl"
 : > "$json"
+# ldconfig output is cached once and grepped as a file: `ldconfig -p |
+# grep -q` is non-deterministic under `set -o pipefail` because grep -q
+# exits on the first match and can SIGPIPE ldconfig mid-stream, which
+# pipefail then reports as a failed system lookup (the same soname could
+# classify as "system" or "missing" depending on scheduling).
+ldconfig_cache="$work/ldconfig.txt"
+ldconfig -p >"$ldconfig_cache" 2>/dev/null || :
 
 classify_one_soname() { # $1=soname $2=pkgroot
   soname=$1 root=$2
-  if find "$root" -name "$soname" -type f 2>/dev/null | grep -q .; then
+  if [ -n "$(find "$root" -name "$soname" -type f -print -quit 2>/dev/null)" ]; then
     echo bundled; return
   fi
-  if ldconfig -p 2>/dev/null | grep -qF "$soname"; then
+  # The glibc/platform dynamic loader is platform plumbing, not a
+  # redistributable dependency: every target architecture ships its own
+  # (ld-linux-aarch64.so.1 can never resolve on the x64 report host, and the
+  # report must be runnable for cross-arch artifacts).
+  case "$soname" in
+    ld-linux*.so*|ld64.so*|ld.so.*) echo host-only; return ;;
+  esac
+  if grep -qF "$soname" "$ldconfig_cache"; then
     echo system; return
   fi
   if command -v dpkg-query >/dev/null 2>&1 && dpkg-query -S "/$soname" >/dev/null 2>&1; then
