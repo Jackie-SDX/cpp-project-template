@@ -64,11 +64,25 @@ string(TOLOWER "${PACKAGE_MANAGER}" _pm)
 
 set(_toolchain_is_vcpkg FALSE)
 set(_toolchain_is_conan FALSE)
+set(_toolchain_path "")
 if(DEFINED CMAKE_TOOLCHAIN_FILE AND NOT CMAKE_TOOLCHAIN_FILE STREQUAL "")
-    file(TO_CMAKE_PATH "${CMAKE_TOOLCHAIN_FILE}" _toolchain_cmake_path)
-    if(_toolchain_cmake_path MATCHES "buildsystems/vcpkg\\.cmake$")
+    # CMAKE_TOOLCHAIN_FILE is often RELATIVE: a preset's `toolchainFile` is
+    # copied into the cache exactly as written (e.g.
+    # `generators/conan_toolchain.cmake`), and CMake resolves it against the
+    # binary directory when it loads the toolchain. if(EXISTS) is documented
+    # as well-defined "only for full paths", so resolve it the same way CMake
+    # does before testing for the file. Without this the second configure of a
+    # Conan build tree -- the plain, documented `cmake --preset conan-release`
+    # -- dies with "CMAKE_TOOLCHAIN_FILE ... doesn't exist" even though the
+    # toolchain loaded fine moments earlier.
+    file(TO_CMAKE_PATH "${CMAKE_TOOLCHAIN_FILE}" _toolchain_path)
+    if(NOT IS_ABSOLUTE "${_toolchain_path}")
+        cmake_path(ABSOLUTE_PATH _toolchain_path
+            BASE_DIRECTORY "${CMAKE_BINARY_DIR}" NORMALIZE)
+    endif()
+    if(_toolchain_path MATCHES "buildsystems/vcpkg\\.cmake$")
         set(_toolchain_is_vcpkg TRUE)
-    elseif(_toolchain_cmake_path MATCHES "conan_toolchain\\.cmake$")
+    elseif(_toolchain_path MATCHES "conan_toolchain\\.cmake$")
         set(_toolchain_is_conan TRUE)
     endif()
 endif()
@@ -99,10 +113,10 @@ if(_pm STREQUAL "vcpkg")
             "PACKAGE_MANAGER=conan2. Do not mix toolchains from two package "
             "managers in one build tree.")
     endif()
-    if(NOT DEFINED CMAKE_TOOLCHAIN_FILE OR NOT EXISTS "${CMAKE_TOOLCHAIN_FILE}")
+    if(NOT DEFINED CMAKE_TOOLCHAIN_FILE OR NOT EXISTS "${_toolchain_path}")
         message(WARNING
             "PACKAGE_MANAGER=vcpkg but CMAKE_TOOLCHAIN_FILE is not set (or "
-            "doesn't exist). It needs to point at vcpkg's "
+            "doesn't exist): '${CMAKE_TOOLCHAIN_FILE}'. It needs to point at vcpkg's "
             "scripts/buildsystems/vcpkg.cmake, passed with "
             "-D CMAKE_TOOLCHAIN_FILE=... on the configure command line -- "
             "the same way this project's existing CI already does it. The "
@@ -135,10 +149,10 @@ elseif(_pm STREQUAL "conan2")
             "generated conan_toolchain.cmake instead. Do not mix toolchains "
             "from two package managers in one build tree.")
     endif()
-    if(NOT DEFINED CMAKE_TOOLCHAIN_FILE OR NOT EXISTS "${CMAKE_TOOLCHAIN_FILE}")
+    if(NOT DEFINED CMAKE_TOOLCHAIN_FILE OR NOT EXISTS "${_toolchain_path}")
         message(FATAL_ERROR
             "PACKAGE_MANAGER=conan2 but CMAKE_TOOLCHAIN_FILE is not set (or "
-            "doesn't exist).\n"
+            "doesn't exist): '${CMAKE_TOOLCHAIN_FILE}'.\n"
             "Provision the dependencies first, from the source root:\n"
             "  scripts/conan_install.sh --profile conan/profiles/<profile>\n"
             "which generates (default output folder build/conan2):\n"

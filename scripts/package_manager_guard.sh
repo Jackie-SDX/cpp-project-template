@@ -144,8 +144,52 @@ run_case vcpkg-default 0 \
 run_case bare-default 0 \
   'PACKAGE_MANAGER=vcpkg but CMAKE_TOOLCHAIN_FILE is not set' 'inferred from'
 
+# 7. What a preset really does to the cache: store CMAKE_TOOLCHAIN_FILE as a
+#    RELATIVE path and reconfigure the same build tree. if(EXISTS) is well
+#    defined "only for full paths", and CMake resolves a relative toolchain
+#    against the binary directory -- so before the fix the SECOND configure
+#    of a Conan tree died with "CMAKE_TOOLCHAIN_FILE ... doesn't exist" even
+#    though CMake had just loaded that very toolchain. (A plain first
+#    configure hides this: CMake writes the absolute path into a fresh
+#    cache, and only the preset's re-application of its raw `toolchainFile`
+#    value puts the relative one back.)
+rb="$tmpdir/build-conan-relative"
+mkdir -p "$rb/generators"
+cp "$conan_tc" "$rb/generators/conan_toolchain.cmake"
+rc=0
+cmake -S "$repo_root" -B "$rb" -DBUILD_PROJECTWX=OFF -DBUILD_TESTING=OFF \
+  -DCMAKE_BUILD_TYPE=Release \
+  -D "CMAKE_TOOLCHAIN_FILE=$rb/generators/conan_toolchain.cmake" \
+  >"$tmpdir/conan-relative-1.log" 2>&1 || rc=$?
+assert_eq "$rc" "0" "conan-relative: first configure succeeds"
+
+# Recreate the exact cache state a preset leaves behind (portable sed: no
+# -i, which differs between GNU and BSD).
+sed "s|^CMAKE_TOOLCHAIN_FILE:FILEPATH=.*|CMAKE_TOOLCHAIN_FILE:FILEPATH=generators/conan_toolchain.cmake|" \
+  "$rb/CMakeCache.txt" > "$rb/CMakeCache.txt.tmp"
+mv "$rb/CMakeCache.txt.tmp" "$rb/CMakeCache.txt"
+if grep -q '^CMAKE_TOOLCHAIN_FILE:FILEPATH=generators/conan_toolchain.cmake$' \
+  "$rb/CMakeCache.txt"; then
+  assert_eq "yes" "yes" "conan-relative: cache now holds the relative path"
+else
+  assert_eq "no" "yes" "conan-relative: cache now holds the relative path"
+fi
+
+rc=0
+cmake -S "$repo_root" -B "$rb" -DBUILD_PROJECTWX=OFF -DBUILD_TESTING=OFF \
+  -DCMAKE_BUILD_TYPE=Release \
+  >"$tmpdir/conan-relative-2.log" 2>&1 || rc=$?
+assert_eq "$rc" "0" "conan-relative: reconfigure succeeds"
+if grep -q 'Package manager: conan2' "$tmpdir/conan-relative-2.log"; then
+  assert_eq "yes" "yes" "conan-relative: reconfigure still selects conan2"
+else
+  assert_eq "no" "yes" "conan-relative: reconfigure still selects conan2"
+  printf -- '----- conan-relative-2 output -----\n%s\n-----------------------------------\n' \
+    "$(cat "$tmpdir/conan-relative-2.log")" >&2
+fi
+
 if [ "$failures" -ne 0 ]; then
   printf 'package_manager_guard: %d case(s) failed\n' "$failures" >&2
   exit 1
 fi
-printf 'package_manager_guard: selftest ok (6 cases)\n'
+printf 'package_manager_guard: selftest ok (7 cases)\n'

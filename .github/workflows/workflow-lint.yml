@@ -14,10 +14,11 @@
 # Floating tag/branch refs are reported as informational, not fatal.
 #
 # The third step is a behaviour test, not a lint: it configures this
-# repository six times to pin the vcpkg/Conan selection contract in
+# repository seven times to pin the vcpkg/Conan selection contract in
 # cmake/PackageManager.cmake (explicit selection always wins; an unlabelled
-# Conan toolchain is inferred, never rejected). See
-# scripts/package_manager_guard.sh for the case table.
+# Conan toolchain is inferred, never rejected; a relative toolchain path
+# still resolves on reconfigure). See scripts/package_manager_guard.sh for
+# the case table.
 #
 # Trigger rules
 # -------------
