@@ -299,6 +299,57 @@ if [ "$use_lock" = "1" ] && [ ! -f "$lockfile" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Non-msvc Windows legs: make wxwidgets/3.2.11 package_info() use the msvc
+# naming branch.
+#
+# wx's CMake picks the MSVC/makefile naming convention for *every* native
+# Windows build: build/cmake/options.cmake resolves the AUTO value of the
+# advanced option wxBUILD_WIN32_MSVC_NAMING to 1 whenever WIN32 AND NOT
+# MSYS AND NOT CMAKE_CROSSCOMPILING, so gcc and clang-cl builds emit
+# wxmsw32u_xrc.lib/.a into lib/<compiler>_x64_lib (run 36317089224 MinGW
+# x64 build log: "lib\gcc_x64_lib\wxmsw32u_xrc.a"). The CCI recipe's
+# package_info(), however, only advertises those names when conan's own
+# settings say is_msvc(), and otherwise claims configure-style names
+# (wx_mswu_xrc-3.2) plus a prepended include/wx-3.2 that a CMake-naming
+# build never installs. CMakeDeps therefore aborts every non-msvc Windows
+# leg while *our* project configures with "Library 'wx_mswu_xrc-3.2' not
+# found in package" (run 36314007868 MinGW x64, run 36317089224 MinGW x64
+# and LLVM ARM64). The windows-msvc-* legs are green against the msvc
+# branch under the very same file layout, so force that branch for all
+# Windows packages: a one-line local lambda at the top of package_info()
+# shadows is_msvc for its two call sites (names, includes) while generate()
+# and the build flags keep the real check. Recipes run from the cache
+# export folder whose revision the committed lockfile pins, so download
+# exactly that revision first (cold cache would otherwise evaluate the
+# pristine recipe during the first install) and patch it idempotently --
+# the lock records the revision only and stays valid.
+# ---------------------------------------------------------------------------
+if [ -n "$lockfile" ] && grep -q '^os=Windows$' "$profile" &&
+  ! grep -q '^compiler=msvc$' "$profile"; then
+  wx_rev="$(sed -n 's|.*wxwidgets/3\.2\.11#\([0-9a-f][0-9a-f]*\).*|\1|p' "$lockfile" | head -1)"
+  [ -n "$wx_rev" ] || die "wxwidgets/3.2.11 revision not found in $lockfile"
+  printf 'conan_install: wxwidgets recipe rev=%s (Windows naming patch)\n' "$wx_rev"
+  "$CONAN" download "wxwidgets/3.2.11#$wx_rev" --only-recipe -r conancenter ||
+    die "conan download wxwidgets/3.2.11#$wx_rev --only-recipe failed"
+  wx_recipes="$(find "$conan_home/p" -path '*/e/conanfile.py' \
+    -exec grep -l 'user.wxwidgets:locales' {} + 2>/dev/null || true)"
+  [ -n "$wx_recipes" ] || die "wxwidgets recipe not found in $conan_home/p after download"
+  while IFS= read -r wx_recipe; do
+    [ -n "$wx_recipe" ] || continue
+    if ! grep -q 'patched: conan_install.sh' "$wx_recipe"; then
+      sed -i 's|^    def package_info(self):$|    def package_info(self):\n        is_msvc = lambda *_a, **_k: self.settings.os == "Windows"  # patched: conan_install.sh|' "$wx_recipe" ||
+        die "failed to patch $wx_recipe"
+      printf 'conan_install: patched %s\n' "$wx_recipe"
+    fi
+  done <<< "$wx_recipes"
+  unpatched="$(while IFS= read -r wx_recipe; do
+    grep -q 'patched: conan_install.sh' "$wx_recipe" || printf '%s\n' "$wx_recipe"
+  done <<< "$wx_recipes")"
+  [ -z "$unpatched" ] || die "wxwidgets recipe patch did not apply: $unpatched"
+  printf 'conan_install: wxwidgets package_info forced to the msvc naming branch\n'
+fi
+
+# ---------------------------------------------------------------------------
 # Windows MinGW legs: pin the *MinGW* compiler for every conan invocation.
 #
 # tools.build:compiler_executables becomes CC/CXX in Autotools/Meson/CMake
@@ -589,6 +640,34 @@ end_ts="$(date +%s)"
 elapsed=$((end_ts - start_ts))
 printf 'conan_install: install exit=%s elapsed=%ss\n' "$status" "$elapsed"
 [ "$status" -eq 0 ] || exit "$status"
+
+# ---------------------------------------------------------------------------
+# After a MinGW install, prefix the wx archives so GNU find_library finds
+# them.
+#
+# With the package_info() patch above, wx is now advertised under its real
+# on-disk names (wxmsw32u_xrc, wxbase32u, ...), which the wx CMake build
+# writes without the "lib" archive prefix on Windows (lib_prefix is empty
+# under WIN32_MSVC_NAMING). A GNU toolchain's find_library only tries
+# CMAKE_FIND_LIBRARY_PREFIXES ("lib") plus CMAKE_FIND_LIBRARY_SUFFIXES
+# (".a"), and cmakedeps_macros.cmake's prefix-enriching backport branch is
+# skipped exactly when MINGW is defined, so the MinGW legs need
+# libwxmsw32u_xrc.a. clang-cl keeps the bare .lib names and is excluded.
+# Only the wx package folder is touched (keyed on one of its own files) and
+# the rename is idempotent: renamed files no longer match the wx*.a glob
+# and the finder key disappears with them.
+# ---------------------------------------------------------------------------
+if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; then
+  while IFS= read -r wx_marker; do
+    [ -n "$wx_marker" ] || continue
+    wx_dir="$(dirname "$wx_marker")"
+    for wx_lib in "$wx_dir"/wx*.a; do
+      [ -f "$wx_lib" ] || continue
+      mv "$wx_lib" "$wx_dir/lib${wx_lib##*/}" || die "failed to prefix $wx_lib"
+    done
+    printf 'conan_install: MinGW wx archives prefixed in %s\n' "$wx_dir"
+  done < <(find "$conan_home/p" -name 'wxmsw32u_xrc.a' 2>/dev/null)
+fi
 
 if [ "$evidence" = "1" ]; then
   post="$(probe_graph | tail -1)"
