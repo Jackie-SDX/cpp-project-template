@@ -7,6 +7,12 @@
 # the repo's own gate that statically validates the whole pipeline (structure,
 # expressions, action references). A red run here means a workflow is invalid.
 #
+# The second step closes the gap actionlint leaves: it resolves every pinned
+# `uses: owner/repo@<sha>` against the upstream repository, because GitHub
+# accepts an invented SHA at parse time and only fails when a workflow
+# referencing it is actually run (see .github/scripts/verify_action_pins.sh).
+# Floating tag/branch refs are reported as informational, not fatal.
+#
 # Trigger rules
 # -------------
 #   * push to main or the experimental branch, pull requests to main, manual.
@@ -15,6 +21,7 @@
 # ----------
 #   * actionlint:          https://github.com/rhysd/actionlint
 #   * Workflow reference:  https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+#   * Pinning actions:     https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
 # =============================================================================
 
 name: Workflow Lint
@@ -48,3 +55,10 @@ jobs:
             --workdir /repo \
             rhysd/actionlint:1.7.12 \
             -color -shellcheck= -pyflakes=
+
+      - name: Verify pinned action SHAs exist upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/verify_action_pins.sh --dir .github/workflows

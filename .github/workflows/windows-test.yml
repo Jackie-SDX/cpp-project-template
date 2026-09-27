@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (was floating @v4)
 
       - name: Verify vcpkg triplet is present
         shell: pwsh
@@ -48,7 +48,7 @@ jobs:
           }
 
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1 (was floating @v1)
 
       - name: Prepare vcpkg
         shell: pwsh
