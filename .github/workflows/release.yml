@@ -1287,12 +1287,33 @@ jobs:
       # not ship the wxGTK runtime that every Linux artifact links against, so
       # without this step each artifact reports its declared system dependency
       # as "missing" and the gate fails for a purely environmental reason.
+      # The Conan/vcpkg builds link wxGTK statically, so bin/projectwx carries
+      # the whole X11/Mesa closure in its DT_NEEDED (GL, EGL, Xv, XRes, the
+      # xcb-* extensions, Xaw/Xt ...) -- all of it already declared in each
+      # package's own metadata (deb Depends / rpm Requires come from
+      # shlibdeps + rpm autoreq). Provision exactly that declared closure: it
+      # keeps the check honest (an undeclared or unsatisfiable runtime dep
+      # still fails) while asking the real question -- does the artifact run on
+      # a host that installed what the artifact itself says it needs.
       - name: Provide Linux runtime libraries for USEFUL-4 resolution
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libwxgtk3.2-1t64
+          declared=$(
+            for d in release-assets/*.deb; do
+              [ -f "$d" ] || continue
+              dpkg-deb -f "$d" Depends
+            done |
+              tr ',' '\n' |
+              sed -E 's/\([^)]*\)//g; s/^[[:space:]]+//; s/[[:space:]]+$//' |
+              awk 'NF' | sort -u
+          )
+          echo "declared runtime packages from staged .deb Depends:"
+          printf '%s\n' "$declared" | sed 's/^/  /'
+          # Word-splitting the newline-separated package list is intended.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y --no-install-recommends libwxgtk3.2-1t64 $declared
           ldconfig -p | grep -F 'libwx_gtk3u_core-3.2.so.0'
       - name: ELF runtime dependency report (USEFUL-4)
         shell: bash
