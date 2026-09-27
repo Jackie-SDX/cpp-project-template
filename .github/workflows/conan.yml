@@ -20,6 +20,21 @@
 # (filtering selects, it never shrinks the declared set; an unknown filter
 # fails the plan job loudly).
 #
+# Cache contract (issue #152)
+# ---------------------------
+# GitHub's cache is ref scoped, so a key saved by a job that succeeded on one
+# branch is invisible to sibling branches and to tags. Three tiers close that
+# gap, in this order, exactly once per run (two homes must never be merged):
+#
+#   1. actions/cache exact key      (this ref, then the default branch)
+#   2. scripts/conan_cache_artifact.sh  (repository wide: any ref, ever)
+#   3. actions/cache restore-keys   (prefix of the same profile)
+#
+# The push/schedule triggers below keep the DEFAULT branch warm, which is the
+# same design as .github/workflows/vcpkg-cache-warmup.yml: every branch and
+# every tag restores default-branch entries. Each leg prints its restore
+# source (exact|artifact:<id>|prefix:<key>|cold) into the step summary.
+#
 # Release gates live in release.yml (mode from
 # packaging/release-package-manager.txt or the package_manager dispatch
 # input); this workflow is the fast per-leg loop and the cold/warm proof.
@@ -33,9 +48,27 @@ on:
         description: Exact profile name from conan/profiles to run (empty = all 19 legs)
         required: false
         default: ''
+  # Seed the default-branch cache scope (see the cache contract above). The
+  # paths mirror what re-keys the Conan cache, so a merge that touches any of
+  # them re-seeds main instead of leaving tag runs cold.
+  push:
+    branches: [ main ]
+    paths:
+      - 'conanfile.py'
+      - 'conan/**'
+      - 'scripts/conan_cache_key.sh'
+      - 'scripts/conan_cache_artifact.sh'
+      - 'scripts/conan_cache_trim.sh'
+      - 'scripts/conan_install.sh'
+      - '.github/workflows/conan.yml'
+  schedule:
+    - cron: '45 4 * * 0'
 
 permissions:
   contents: read
+  # scripts/conan_cache_artifact.sh reads the Actions artifacts API with the
+  # workflow token (artifacts are the ref-independent cache tier).
+  actions: read
 
 # One run per ref at a time: two concurrent runs could race the same cache
 # key save, and queued runs re-use each other's warm cache on purpose.
@@ -68,6 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/scripts/conan_matrix.py --selftest
+          bash scripts/conan_cache_artifact.sh selftest
           filter="${{ inputs.profile_filter }}"
           if [ -n "$filter" ]; then
             legs="$(python3 .github/scripts/conan_matrix.py "$filter")" || {
@@ -246,13 +280,52 @@ jobs:
             --family release \
             --profile "conan/profiles/${{ matrix.profile }}" \
             --build-type Release
+      # Tier 1: exact key in this ref's cache scope (or the default branch's,
+      # which is what every branch and tag restores from after the warmup
+      # seeds main).
       - name: Restore Conan package cache
         id: conan-cache-restore
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: .conan2
           key: ${{ env.CONAN_CACHE_KEY }}
+      # Tier 2: the same exact key anywhere in the repository. Actions
+      # artifacts are not ref scoped, so this is the tier that makes "a job
+      # that has ever succeeded" reusable from any branch and from tags.
+      # Fail-soft on purpose: a cache miss must never fail a leg.
+      - name: Restore Conan package cache (cross-ref artifact)
+        id: conan-artifact-restore
+        if: steps.conan-cache-restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        shell: bash
+        working-directory: project
+        run: bash scripts/conan_cache_artifact.sh restore
+      # Tier 3: nearest older key of the SAME profile (restore-keys prefix).
+      # Only reached when both exact tiers missed. The trailing '-' matters:
+      # without it linux-gcc-x86 would also prefix-match linux-gcc-x86_64.
+      - name: Restore Conan package cache (prefix)
+        id: conan-cache-prefix-restore
+        if: steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: .conan2
+          key: ${{ env.CONAN_CACHE_KEY }}
+          restore-keys: ${{ env.CONAN_CACHE_KEY_PREFIX }}-
+      # One line of evidence for the cache proofs: exact | artifact:<id> |
+      # prefix:<key> | cold, exported as CONAN_CACHE_RESTORE_SOURCE and
+      # appended to the step summary.
+      - name: Record Conan cache restore source
+        if: always()
+        shell: bash
+        working-directory: project
+        env:
+          CONAN_EXACT_HIT: ${{ steps.conan-cache-restore.outputs.cache-hit }}
+          CONAN_ARTIFACT_HIT: ${{ steps.conan-artifact-restore.outputs.hit }}
+          CONAN_ARTIFACT_ID: ${{ steps.conan-artifact-restore.outputs.artifact_id }}
+          CONAN_PREFIX_KEY: ${{ steps.conan-cache-prefix-restore.outputs.cache-matched-key }}
+        run: bash scripts/conan_cache_artifact.sh source
       - name: Conan install
+        id: conan-install
         shell: bash
         working-directory: project
         env:
@@ -266,15 +339,37 @@ jobs:
       # other and the next run rebuilds from source. The script fails the
       # job if any package folder changes.
       - name: Trim Conan package cache
+        id: conan-cache-trim
         if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true'
         shell: bash
         run: bash project/scripts/conan_cache_trim.sh
       - name: Save Conan package cache
+        id: conan-cache-save
         if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: .conan2
           key: ${{ env.CONAN_CACHE_KEY }}
+      # Mirror the home into the repository-wide artifact tier, but only when
+      # no trusted artifact carries this key yet (prepare decides) -- a warm
+      # run then costs one API call, a first build of a key costs one tarball.
+      - name: Prepare Conan cache artifact
+        id: conan-artifact-prepare
+        if: always() && steps.conan-install.outcome == 'success' && steps.conan-cache-trim.outcome != 'failure'
+        continue-on-error: true
+        shell: bash
+        working-directory: project
+        run: bash scripts/conan_cache_artifact.sh prepare
+      - name: Upload Conan cache artifact
+        if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.conan-artifact-prepare.outputs.name }}
+          path: ${{ steps.conan-artifact-prepare.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
       - name: Configure
         working-directory: project
         env:
@@ -314,5 +409,7 @@ jobs:
             echo "- runner: \`${{ matrix.os }}\` (${{ matrix.compiler }}, ${{ matrix.arch }})"
             echo "- cache key: \`${CONAN_CACHE_KEY:-<not resolved>}\`"
             echo "- cache restore hit: \`${{ steps.conan-cache-restore.outputs.cache-hit || 'false' }}\`"
+            echo "- restore source: \`${CONAN_CACHE_RESTORE_SOURCE:-cold}\`"
+            echo "- cross-ref artifact id: \`${{ steps.conan-artifact-restore.outputs.artifact_id || 'none' }}\`"
             echo "- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } >> "$GITHUB_STEP_SUMMARY"

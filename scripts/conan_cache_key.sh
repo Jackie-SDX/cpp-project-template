@@ -32,12 +32,17 @@
 #   recipe_fp    sha256 of conanfile.py (requires/options/generators).
 #   extra_fp     --extra-fingerprint value or "none".
 #
-# Why no restore-keys (unlike vcpkg_cache_key.sh): a Conan package cache is
-# keyed by package_id internally, so a stale restore can never satisfy a
-# different configuration -- it would only add dead weight. The exact key
-# already re-keys on every binary-validity input above, so a prefix fallback
-# would buy hit-rate only on comment-only edits (already handled by
-# profile_fp) while making cold/warm evidence ambiguous.
+# Cache tiers the workflows drive with this key (issue #152)
+# -----------------------------------------------------------
+#   1. actions/cache exact key            (this ref, then the default branch)
+#   2. scripts/conan_cache_artifact.sh    (repository wide, any ref)
+#   3. actions/cache restore-keys = <prefix>-
+#      A prefix restore only ever lands on the SAME profile: the trailing '-'
+#      is what keeps e.g. linux-gcc-x86 from swallowing linux-gcc-x86_64.
+#      Conan re-validates everything by package_id, so a prefix hit can only
+#      add packages that are still valid -- it can never mislink.
+# The exact key still re-keys on every binary-validity input below, so tiers
+# 2 and 3 only ever change the hit rate, never the key contract.
 #
 # Usage
 # -----
@@ -54,7 +59,8 @@
 #   --namespace         namespace token             (default: $CONAN_CACHE_NAMESPACE or master)
 #   --extra-fingerprint extra ABI fingerprint segment (default: none)
 #
-# github-env writes CONAN_CACHE_KEY to $GITHUB_ENV when that file is set.
+# github-env writes CONAN_CACHE_KEY and CONAN_CACHE_KEY_PREFIX to $GITHUB_ENV
+# when that file is set.
 #
 # Exits 2 on usage errors so a bad contract cannot silently produce a key.
 # =============================================================================
@@ -197,6 +203,18 @@ run_selftest() {
   assert_eq "$(printf '%s\n' "$out" | grep -c '^inputs: family=release namespace=master profile=linux-gcc-x86_64 build-type=Release')" "1" \
     "github-env prints the inputs diagnostic line"
 
+  # 4b. github-env exports both the exact key and the restore-keys prefix,
+  #     and prints the prefix WITH its trailing dash (the separator that keeps
+  #     linux-gcc-x86 from prefix-matching linux-gcc-x86_64).
+  local genv="$tmpdir/ghenv"
+  out="$(GITHUB_ENV="$genv" "$0" github-env --profile "$prof" --lockfile "$lock" --recipe "$recipe" --namespace master)"
+  assert_eq "$(grep -c '^CONAN_CACHE_KEY=conan-release-master-linux-gcc-x86_64-Release-' "$genv")" "1" \
+    "github-env exports CONAN_CACHE_KEY"
+  assert_eq "$(grep -c '^CONAN_CACHE_KEY_PREFIX=conan-release-master-linux-gcc-x86_64$' "$genv")" "1" \
+    "github-env exports CONAN_CACHE_KEY_PREFIX"
+  assert_eq "$(printf '%s\n' "$out" | grep -c '^restore-keys=conan-release-master-linux-gcc-x86_64-')" "1" \
+    "github-env prints restore-keys with the trailing dash"
+
   # 5. default lock path resolves next to the profile name.
   mkdir -p "$tmpdir/locks"
   cp "$lock" "$tmpdir/locks/linux-gcc-x86_64.lock"
@@ -282,8 +300,10 @@ case "$cmd" in
   github-env)
     if [ -n "${GITHUB_ENV:-}" ]; then
       printf 'CONAN_CACHE_KEY=%s\n' "$key" >> "$GITHUB_ENV"
+      printf 'CONAN_CACHE_KEY_PREFIX=%s\n' "$prefix" >> "$GITHUB_ENV"
     fi
     printf 'prefix=%s\n' "$prefix"
+    printf 'restore-keys=%s-\n' "$prefix"
     printf 'key=%s\n' "$key"
     printf 'inputs: family=%s namespace=%s profile=%s build-type=%s' \
       "$family" "$namespace" "$profile_name" "$build_type"

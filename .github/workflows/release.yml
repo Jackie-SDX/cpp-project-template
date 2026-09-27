@@ -101,6 +101,11 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: read
+  # Read-only access to this repository's Actions artifacts: the Conan cache's
+  # ref-independent tier (scripts/conan_cache_artifact.sh) lists and downloads
+  # them with the workflow token. Jobs that declare their own permissions
+  # block (validate-release, publish) keep theirs untouched.
+  actions: read
 env:
   VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
   VCPKG_CACHE_NAMESPACE: master
@@ -546,6 +551,10 @@ jobs:
           --family release \
           --profile "conan/profiles/${{ matrix.conan_profile }}" \
           --build-type Release
+    # Cache tiers (issue #152), same contract as conan.yml: exact key in this
+    # ref's scope -> repository-wide artifact (any ref, ever) -> restore-keys
+    # prefix of the same profile. Never two homes at once, never a cache
+    # problem in front of a release build (every tier is fail-soft).
     - name: Restore Conan package cache
       if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
       id: conan-cache-restore
@@ -553,8 +562,34 @@ jobs:
       with:
         path: .conan2
         key: ${{ env.CONAN_CACHE_KEY }}
+    - name: Restore Conan package cache (cross-ref artifact)
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      id: conan-artifact-restore
+      continue-on-error: true
+      shell: bash
+      working-directory: project
+      run: bash scripts/conan_cache_artifact.sh restore
+    - name: Restore Conan package cache (prefix)
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+      id: conan-cache-prefix-restore
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: .conan2
+        key: ${{ env.CONAN_CACHE_KEY }}
+        restore-keys: ${{ env.CONAN_CACHE_KEY_PREFIX }}-
+    - name: Record Conan cache restore source
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      shell: bash
+      working-directory: project
+      env:
+        CONAN_EXACT_HIT: ${{ steps.conan-cache-restore.outputs.cache-hit }}
+        CONAN_ARTIFACT_HIT: ${{ steps.conan-artifact-restore.outputs.hit }}
+        CONAN_ARTIFACT_ID: ${{ steps.conan-artifact-restore.outputs.artifact_id }}
+        CONAN_PREFIX_KEY: ${{ steps.conan-cache-prefix-restore.outputs.cache-matched-key }}
+      run: bash scripts/conan_cache_artifact.sh source
     - name: Conan install
       if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      id: conan-install
       shell: bash
       working-directory: project
       env:
@@ -571,14 +606,36 @@ jobs:
     # a single package folder changes, so a warm restore can never regress.
     - name: Trim Conan package cache
       if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      id: conan-cache-trim
       shell: bash
       run: bash project/scripts/conan_cache_trim.sh
     - name: Save Conan package cache
       if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      id: conan-cache-save
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .conan2
         key: ${{ env.CONAN_CACHE_KEY }}
+    # Repository-wide mirror of this home: uploaded only when no trusted
+    # artifact carries the key yet, so the ref that produced the cache stays
+    # irrelevant to the next consumer (branch, tag or sibling branch).
+    - name: Prepare Conan cache artifact
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-install.outcome == 'success' && steps.conan-cache-trim.outcome != 'failure'
+      id: conan-artifact-prepare
+      continue-on-error: true
+      shell: bash
+      working-directory: project
+      run: bash scripts/conan_cache_artifact.sh prepare
+    - name: Upload Conan cache artifact
+      if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ steps.conan-artifact-prepare.outputs.name }}
+        path: ${{ steps.conan-artifact-prepare.outputs.path }}
+        if-no-files-found: error
+        retention-days: 30
+        compression-level: 0
     - name: Get Windows vcpkg triplets
       if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -1855,6 +1912,9 @@ jobs:
           --family release \
           --profile "conan/profiles/${{ matrix.conan_profile }}" \
           --build-type Release
+    # Cache tiers (issue #152): exact key -> cross-ref artifact -> prefix.
+    # Identical contract to the package job and to conan.yml; see
+    # scripts/conan_cache_artifact.sh for why the tiers never overlap.
     - name: Restore Conan package cache
       if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
       id: conan-cache-restore
@@ -1862,8 +1922,34 @@ jobs:
       with:
         path: .conan2
         key: ${{ env.CONAN_CACHE_KEY }}
+    - name: Restore Conan package cache (cross-ref artifact)
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      id: conan-artifact-restore
+      continue-on-error: true
+      shell: bash
+      working-directory: project
+      run: bash scripts/conan_cache_artifact.sh restore
+    - name: Restore Conan package cache (prefix)
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+      id: conan-cache-prefix-restore
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: .conan2
+        key: ${{ env.CONAN_CACHE_KEY }}
+        restore-keys: ${{ env.CONAN_CACHE_KEY_PREFIX }}-
+    - name: Record Conan cache restore source
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      shell: bash
+      working-directory: project
+      env:
+        CONAN_EXACT_HIT: ${{ steps.conan-cache-restore.outputs.cache-hit }}
+        CONAN_ARTIFACT_HIT: ${{ steps.conan-artifact-restore.outputs.hit }}
+        CONAN_ARTIFACT_ID: ${{ steps.conan-artifact-restore.outputs.artifact_id }}
+        CONAN_PREFIX_KEY: ${{ steps.conan-cache-prefix-restore.outputs.cache-matched-key }}
+      run: bash scripts/conan_cache_artifact.sh source
     - name: Conan install
       if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      id: conan-install
       shell: bash
       working-directory: project
       env:
@@ -1876,14 +1962,33 @@ jobs:
     # other. scripts/conan_cache_trim.sh fails if any package folder changes.
     - name: Trim Conan package cache
       if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      id: conan-cache-trim
       shell: bash
       run: bash project/scripts/conan_cache_trim.sh
     - name: Save Conan package cache
       if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      id: conan-cache-save
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: .conan2
         key: ${{ env.CONAN_CACHE_KEY }}
+    - name: Prepare Conan cache artifact
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-install.outcome == 'success' && steps.conan-cache-trim.outcome != 'failure'
+      id: conan-artifact-prepare
+      continue-on-error: true
+      shell: bash
+      working-directory: project
+      run: bash scripts/conan_cache_artifact.sh prepare
+    - name: Upload Conan cache artifact
+      if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ steps.conan-artifact-prepare.outputs.name }}
+        path: ${{ steps.conan-artifact-prepare.outputs.path }}
+        if-no-files-found: error
+        retention-days: 30
+        compression-level: 0
     - name: Get custom Windows vcpkg triplets
       if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && matrix.external_triplets == true && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
