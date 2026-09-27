@@ -23,6 +23,11 @@ tools.cmake.cmaketoolchain:generator=Ninja
 # BSD format Xcode's ld expects -- pin them (same fix as IREE's macOS
 # docs). Applies to both conan package builds and this project.
 tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20", "CMAKE_AR": "/usr/bin/ar", "CMAKE_RANLIB": "/usr/bin/ranlib"}
+# LLVM's bundled libc++ (brew llvm 23) dropped transitive <algorithm>
+# includes; wxWidgets 3.2.11's bundled scintilla calls std::fill without
+# including it (run 36291616193: SplitVector.h:193, XPM.cxx:91). Force-
+# include it for every C++ TU these legs compile (cxxflags = C++ only).
+tools.build:cxxflags=["-include", "algorithm"]
 # Never auto-install via conan on macOS (brew prompts); CI pre-installs
 # whatever wxWidgets system-requirements need (usually nothing).
 tools.system.package_manager:mode=check

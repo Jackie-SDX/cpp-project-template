@@ -124,7 +124,8 @@ load_windows_environment() {
     die "failed to evaluate ENVIRONMENT_SCRIPT: $ENVIRONMENT_SCRIPT"
   fi
   rm -f "$wrapper"
-  local line
+  local line name raw_path=""
+  local orig_path="$PATH"
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
     case "$line" in
@@ -137,9 +138,28 @@ load_windows_environment() {
     case "$name" in
       ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;;
     esac
+    case "$name" in
+      [Pp][Aa][Tt][Hh])
+        # vcvars PATH is ';'-separated native Windows directories. Merging
+        # it instead of exporting keeps rm/grep/... from the bash PATH.
+        raw_path="${line#*=}"
+        continue
+        ;;
+    esac
     export "$line"
   done <"$env_file"
   rm -f "$env_file"
+  if [ -n "$raw_path" ]; then
+    local merged="" entry old_ifs="$IFS"
+    IFS=';'
+    for entry in $raw_path; do
+      [ -n "$entry" ] || continue
+      entry="$(cygpath -u "$entry" 2>/dev/null || printf '%s' "$entry")"
+      merged="${merged:+$merged:}$entry"
+    done
+    IFS="$old_ifs"
+    export PATH="${merged}:${orig_path}"
+  fi
   printf 'conan_install: loaded Windows environment from %s\n' "$ENVIRONMENT_SCRIPT"
 }
 load_windows_environment
