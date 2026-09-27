@@ -24,8 +24,16 @@ endif()
 execute_process(COMMAND ccache -p)
 execute_process(COMMAND ccache -z)
 
+# BUILD_DIR: exported by configure.cmake (build/ for the vcpkg/system path,
+# build/conan2/build/<BuildType> for Conan 2 legs); default keeps any caller
+# that configures by hand working against plain build/.
+set(build_dir "build")
+if (NOT "$ENV{BUILD_DIR}" STREQUAL "")
+	set(build_dir "$ENV{BUILD_DIR}")
+endif()
+
 execute_process(
-	COMMAND cmake --build build --config $ENV{BUILD_TYPE}
+	COMMAND cmake --build "${build_dir}" --config $ENV{BUILD_TYPE}
 	RESULT_VARIABLE result
 	OUTPUT_VARIABLE output
 	ERROR_VARIABLE output

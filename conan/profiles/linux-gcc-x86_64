@@ -1,0 +1,30 @@
+# Host profile: Linux GCC x86_64 (release legs "Linux GCC x64" +
+# local Ubuntu 24.04 development).
+#
+# CMAKE_CXX_STANDARD interplay: profiles set cppstd=gnu17 (ConanCenter
+# binaries + gtest's recipe require it to be defined), and the [conf] block
+# below re-asserts this project's C++20 after CMakeToolchain's own 17
+# injection -- see conanfile.py's header comment for the full reasoning.
+[settings]
+os=Linux
+arch=x86_64
+compiler=gcc
+compiler.version=13
+compiler.libcxx=libstdc++11
+# gnu17: matches ConanCenter's binary packages (their Linux binaries carry
+# cppstd=gnu17), so gtest/the dependency stack download instead of building.
+compiler.cppstd=gnu17
+build_type=Release
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+# CMakeToolchain injects `set(CMAKE_CXX_STANDARD <profile cppstd>)` (17) as a
+# NORMAL variable into conan_toolchain.cmake, which would shadow this
+# project's `set(CMAKE_CXX_STANDARD 20 CACHE ...)`. extra_variables is
+# emitted after that block, so 20 wins in the generated toolchain.
+tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}
+# wxWidgets declares X11/Xorg development libraries as system-requirements;
+# install them non-interactively when missing (no-op when already present,
+# which is the normal CI case: the packaging dependencies step installs them).
+tools.system.package_manager:mode=install
+tools.system.package_manager:sudo=True

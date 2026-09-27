@@ -15,8 +15,13 @@ else()
 		base
 		adv)
 
-	# Bring the headers into the project
-	include(${wxWidgets_USE_FILE})
+	# Bring the headers into the project. The classic FindwxWidgets module
+	# defines wxWidgets_USE_FILE, but package-manager provided find modules
+	# (e.g. Conan 2 CMakeDeps) only set wxWidgets_LIBRARIES to an imported
+	# target that already carries include dirs, definitions and system libs.
+	if (wxWidgets_USE_FILE)
+		include(${wxWidgets_USE_FILE})
+	endif()
 endif()
 
 file(GLOB SRC_FILES "*.cpp")

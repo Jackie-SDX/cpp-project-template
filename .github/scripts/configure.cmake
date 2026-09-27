@@ -50,6 +50,41 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Linux" AND "$ENV{CC}" STREQUAL "gcc" AND "$ENV{B
 	set(actual_build_type "Coverage")
 endif()
 
+# Conan 2 path (issue #152): when the workflow resolved package-manager mode
+# conan2 for this leg, scripts/conan_install.sh already provisioned the
+# dependencies into build/conan2 and the generated CMakeToolchain selects
+# them here. Legs without a profile (Windows CLANGARM64) and explicit
+# USE_VCPKG=OFF legs keep the existing system/vcpkg path in either mode.
+set(build_dir "build")
+set(conan_active FALSE)
+if ("$ENV{PACKAGE_MANAGER_MODE}" STREQUAL "conan2"
+		AND NOT "$ENV{CONAN_PROFILE}" STREQUAL ""
+		AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
+	set(conan_bin_dir "build/conan2/build/${actual_build_type}")
+	file(REAL_PATH "${conan_bin_dir}/generators/conan_toolchain.cmake" conan_toolchain)
+	if (NOT EXISTS "${conan_toolchain}")
+		message(FATAL_ERROR
+			"Package-manager mode=conan2 expects:\n  ${conan_toolchain}\n"
+			"Run this first, from the source root:\n"
+			"  scripts/conan_install.sh --profile conan/profiles/$ENV{CONAN_PROFILE}\n"
+			"(CI runs it as the 'Conan install' step before this one.)")
+	endif()
+	set(conan_active TRUE)
+	list(APPEND extra_config_args "-D PACKAGE_MANAGER=conan2")
+	list(APPEND extra_config_args "-D CMAKE_TOOLCHAIN_FILE=${conan_toolchain}")
+	set(build_dir "${conan_bin_dir}")
+	message(STATUS "Conan 2 toolchain: ${conan_toolchain}")
+endif()
+
+# BUILD_DIR: every downstream consumer (build.cmake, test.cmake, and the
+# workflow's install/cpack steps) follows this instead of hardcoding
+# build/. Conan legs build in build/conan2/build/<BuildType>; everything
+# else keeps plain build/.
+if (NOT "$ENV{GITHUB_ENV}" STREQUAL "")
+	file(APPEND "$ENV{GITHUB_ENV}" "BUILD_DIR=${build_dir}\n")
+endif()
+message(STATUS "BUILD_DIR: ${build_dir}")
+
 set(package_toolchain_arg "")
 if (NOT "$ENV{PACKAGE_TOOLCHAIN}" STREQUAL "")
 	set(package_toolchain_arg "-D")	
@@ -105,7 +140,7 @@ else()
 endif()
 
 
-if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF")
+if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF" AND NOT conan_active)
 	file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/vcpkg/scripts/buildsystems/vcpkg.cmake" toolchain_file)
 	set(llvm_x86_target_args)
 	if ("$ENV{VCPKG_TRIPLET}" STREQUAL "x86-win-llvm")
@@ -123,7 +158,7 @@ if ("$ENV{RUNNER_OS}" STREQUAL "Windows" AND NOT "$ENV{USE_VCPKG}" STREQUAL "OFF
 	execute_process(
 		COMMAND cmake
 			-S .
-			-B build
+			-B ${build_dir}
 			-D CMAKE_BUILD_TYPE=${actual_build_type}
 			-G "Ninja"
 			-D CMAKE_MAKE_PROGRAM=ninja
@@ -144,7 +179,7 @@ else()
 	execute_process(
 		COMMAND cmake
 			-S .
-			-B build
+			-B ${build_dir}
 			-D CMAKE_BUILD_TYPE=${actual_build_type}
 			-G "Ninja"
 			-D CMAKE_MAKE_PROGRAM=ninja

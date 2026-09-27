@@ -1,0 +1,23 @@
+# Linux Clang aarch64 (expanded leg "Linux Clang ARM64").
+#
+# Compiler versions are the runner images' toolchain of record; bump them
+# together with CI image/compiler changes (they key both package IDs and the
+# Conan cache key).
+
+[settings]
+os=Linux
+arch=armv8
+compiler=clang
+compiler.version=18
+compiler.libcxx=libstdc++11
+compiler.cppstd=gnu17
+build_type=Release
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+# See conanfile.py header: re-assert the project's C++20 after CMakeToolchain
+# injects the profile's cppstd as CMAKE_CXX_STANDARD.
+tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}
+# wxWidgets X11 system-requirements: install when missing, no-op otherwise.
+tools.system.package_manager:mode=install
+tools.system.package_manager:sudo=True

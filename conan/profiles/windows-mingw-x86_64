@@ -1,0 +1,22 @@
+# Windows MinGW x64 (release leg "Windows MinGW x64", MSYS2 MINGW64): posix threads, SEH exceptions (mingw-w64 x86_64 defaults).
+#
+# Compiler versions are the runner images' toolchain of record; bump them
+# together with CI image/compiler changes (they key both package IDs and the
+# Conan cache key).
+
+[settings]
+os=Windows
+arch=x86_64
+compiler=gcc
+compiler.version=15
+compiler.libcxx=libstdc++11
+compiler.threads=posix
+compiler.exception=seh
+compiler.cppstd=gnu17
+build_type=Release
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+# See conanfile.py header: re-assert the project's C++20 after CMakeToolchain
+# injects the profile's cppstd as CMAKE_CXX_STANDARD.
+tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}

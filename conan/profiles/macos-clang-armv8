@@ -1,0 +1,23 @@
+# macOS Homebrew LLVM clang arm64 (expanded leg "macOS LLVM ARM64").
+#
+# Compiler versions are the runner images' toolchain of record; bump them
+# together with CI image/compiler changes (they key both package IDs and the
+# Conan cache key).
+
+[settings]
+os=Macos
+arch=armv8
+compiler=clang
+compiler.version=20
+compiler.libcxx=libc++
+compiler.cppstd=gnu17
+build_type=Release
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+# See conanfile.py header: re-assert the project's C++20 after CMakeToolchain
+# injects the profile's cppstd as CMAKE_CXX_STANDARD.
+tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}
+# Never auto-install via conan on macOS (brew prompts); CI pre-installs
+# whatever wxWidgets system-requirements need (usually nothing).
+tools.system.package_manager:mode=check

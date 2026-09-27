@@ -1,0 +1,21 @@
+# Windows clang-cl x64 (release leg "Windows LLVM x64"). runtime=dynamic: the x64-win-llvm triplet/toolchain defaults to the dynamic CRT and the project skips its /MT forcing under clang-cl.
+#
+# Compiler versions are the runner images' toolchain of record; bump them
+# together with CI image/compiler changes (they key both package IDs and the
+# Conan cache key).
+
+[settings]
+os=Windows
+arch=x86_64
+compiler=clang
+compiler.version=19
+compiler.runtime=dynamic
+compiler.runtime_type=Release
+compiler.cppstd=gnu17
+build_type=Release
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+# See conanfile.py header: re-assert the project's C++20 after CMakeToolchain
+# injects the profile's cppstd as CMAKE_CXX_STANDARD.
+tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}

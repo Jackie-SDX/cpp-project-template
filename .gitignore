@@ -12,3 +12,6 @@
 /docs/sphinx/build/
 /docs/sphinx/index.rst
 /instdir*/
+/.ccache/
+__pycache__/
+/release-assets/
