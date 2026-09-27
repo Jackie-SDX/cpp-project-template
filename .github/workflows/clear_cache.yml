@@ -5,10 +5,21 @@
 # --------
 # Manual helper that wipes every Actions cache for the repository. Needed when
 # a poisoned/stale cache (e.g. a bad vcpkg binary cache entry) keeps CI failing.
+# Also the deliberate way to obtain a genuine cold-cache run for the binary
+# cache proofs (issue #152): wipe -> cold run -> warm re-run.
 #
 # Trigger rules
 # -------------
 #   * workflow_dispatch only - never runs automatically.
+#
+# Action pin
+# ----------
+#   easimon/wipe-cache is pinned to the commit the ``v2`` tag points at
+#   (verified with ``gh api repos/easimon/wipe-cache/git/ref/tags/v2``);
+#   ``action.yml`` at that commit is byte-identical to the upstream default
+#   branch, so only the CI workflows upstream changed after v2. The previous
+#   pin (9e4f7c0f...) does not exist in the upstream repository at all, so
+#   this workflow could never have run -- see docs/PROJECT_DOCUMENTATION.md.
 #
 # References
 # ----------
@@ -30,5 +41,9 @@ jobs:
     name: Delete all caches
     runs-on: ubuntu-24.04
     steps:
+      - name: List caches before wiping
+        uses: easimon/wipe-cache@e7ab82e64c328fd39c2e96933d426cd72ac2beba # v2
+        with:
+          dry-run: 'true'
       - name: Clear caches
-        uses: easimon/wipe-cache@9e4f7c0f13c90041801b573939088eb9176d0220 # v2
+        uses: easimon/wipe-cache@e7ab82e64c328fd39c2e96933d426cd72ac2beba # v2
