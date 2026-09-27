@@ -13,6 +13,12 @@
 # referencing it is actually run (see .github/scripts/verify_action_pins.sh).
 # Floating tag/branch refs are reported as informational, not fatal.
 #
+# The third step is a behaviour test, not a lint: it configures this
+# repository six times to pin the vcpkg/Conan selection contract in
+# cmake/PackageManager.cmake (explicit selection always wins; an unlabelled
+# Conan toolchain is inferred, never rejected). See
+# scripts/package_manager_guard.sh for the case table.
+#
 # Trigger rules
 # -------------
 #   * push to main or the experimental branch, pull requests to main, manual.
@@ -62,3 +68,8 @@ jobs:
         run: |
           set -euo pipefail
           bash .github/scripts/verify_action_pins.sh --dir .github/workflows
+
+      - name: Package-manager selection contract
+        run: |
+          set -euo pipefail
+          bash scripts/package_manager_guard.sh --selftest
