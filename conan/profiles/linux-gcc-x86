@@ -21,3 +21,7 @@ tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}
 # wxWidgets X11 system-requirements: install when missing, no-op otherwise.
 tools.system.package_manager:mode=install
 tools.system.package_manager:sudo=True
+# MesonToolchain leaves [binaries] c/cpp empty for non-Apple cross
+# builds (x86_64 runner -> x86) without this conf, and meson recipes
+# (fribidi) fail with "'c' compiler binary not defined".
+tools.build:compiler_executables={"c": "gcc", "cpp": "g++"}

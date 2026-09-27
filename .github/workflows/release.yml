@@ -513,16 +513,27 @@ jobs:
         # `site --user-base` does not report. The ${RUNNER_TEMP//\\//} expansion
         # normalizes Windows backslashes so the path stays bash-executable.
         venv="${RUNNER_TEMP//\\//}/conan-venv"
+        echo "conan venv: python=$py ($("$py" --version 2>&1))"
         "$py" -m venv "$venv"
-        if [ "$RUNNER_OS" = "Windows" ]; then
+        # Venv layout depends on the interpreter that created it: native Windows
+        # python -> Scripts/, MSYS2 python (first on PATH on MinGW legs) -> bin/.
+        if [ -x "$venv/Scripts/python" ]; then
           venv_bin="$venv/Scripts"
-          conan_bin="$venv_bin/conan.exe"
-        else
+        elif [ -x "$venv/bin/python" ]; then
           venv_bin="$venv/bin"
-          conan_bin="$venv_bin/conan"
+        else
+          echo "venv interpreter not found under $venv" >&2
+          exit 1
         fi
         "$venv_bin/python" -m pip install --quiet "conan==2.32.0"
-        test -f "$conan_bin"
+        if [ -f "$venv_bin/conan.exe" ]; then
+          conan_bin="$venv_bin/conan.exe"
+        elif [ -f "$venv_bin/conan" ]; then
+          conan_bin="$venv_bin/conan"
+        else
+          echo "conan executable not found under $venv_bin" >&2
+          exit 1
+        fi
         "$conan_bin" --version
         echo "$venv_bin" >> "$GITHUB_PATH"
         echo "CONAN_BIN=$conan_bin" >> "$GITHUB_ENV"
@@ -1778,16 +1789,27 @@ jobs:
         # `site --user-base` does not report. The ${RUNNER_TEMP//\\//} expansion
         # normalizes Windows backslashes so the path stays bash-executable.
         venv="${RUNNER_TEMP//\\//}/conan-venv"
+        echo "conan venv: python=$py ($("$py" --version 2>&1))"
         "$py" -m venv "$venv"
-        if [ "$RUNNER_OS" = "Windows" ]; then
+        # Venv layout depends on the interpreter that created it: native Windows
+        # python -> Scripts/, MSYS2 python (first on PATH on MinGW legs) -> bin/.
+        if [ -x "$venv/Scripts/python" ]; then
           venv_bin="$venv/Scripts"
-          conan_bin="$venv_bin/conan.exe"
-        else
+        elif [ -x "$venv/bin/python" ]; then
           venv_bin="$venv/bin"
-          conan_bin="$venv_bin/conan"
+        else
+          echo "venv interpreter not found under $venv" >&2
+          exit 1
         fi
         "$venv_bin/python" -m pip install --quiet "conan==2.32.0"
-        test -f "$conan_bin"
+        if [ -f "$venv_bin/conan.exe" ]; then
+          conan_bin="$venv_bin/conan.exe"
+        elif [ -f "$venv_bin/conan" ]; then
+          conan_bin="$venv_bin/conan"
+        else
+          echo "conan executable not found under $venv_bin" >&2
+          exit 1
+        fi
         "$conan_bin" --version
         echo "$venv_bin" >> "$GITHUB_PATH"
         echo "CONAN_BIN=$conan_bin" >> "$GITHUB_ENV"

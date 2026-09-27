@@ -102,13 +102,28 @@ load_windows_environment() {
   if ! command -v cmd >/dev/null 2>&1; then
     die "ENVIRONMENT_SCRIPT is set but cmd is not on PATH (not a Windows shell?)"
   fi
-  local env_file
+  local wrapper env_file
+  # A .bat wrapper instead of `cmd //c '"..." && set'`: MSYS re-quotes
+  # embedded quotes as \" on the way to cmd.exe, which then treats the
+  # batch path as a literal program name (run 36287538030, exit 2:
+  # "'\"...vcvars64.bat\"' is not recognized as an internal or external
+  # command"). cmd parses the quotes inside the wrapper file itself,
+  # where they are correct.
+  wrapper="${RUNNER_TEMP:-/tmp}/conan-env-load-$$.bat"
+  case "$wrapper" in
+    *' '*) die "wrapper path contains spaces: $wrapper" ;;
+  esac
   env_file="$(mktemp)"
-  # cmd's own quoting: the batch file must stay one quoted argument.
-  if ! cmd //c "\"${ENVIRONMENT_SCRIPT}\" && set" >"$env_file"; then
+  if ! printf '@echo off\r\ncall "%s" || exit /b 1\r\nset\r\n' \
+      "$ENVIRONMENT_SCRIPT" >"$wrapper"; then
     rm -f "$env_file"
+    die "failed to write wrapper $wrapper"
+  fi
+  if ! cmd //c "$wrapper" >"$env_file"; then
+    rm -f "$wrapper" "$env_file"
     die "failed to evaluate ENVIRONMENT_SCRIPT: $ENVIRONMENT_SCRIPT"
   fi
+  rm -f "$wrapper"
   local line
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
@@ -132,6 +147,38 @@ if [ ! -f "${conan_home}/profiles/default" ]; then
   printf 'conan_install: detecting default build profile in %s\n' "$conan_home"
   "$CONAN" profile detect || die "conan profile detect failed"
 fi
+
+# Always strip compiler settings from the default build profile: detect
+# writes the runner's exact compiler version, which may not exist in this
+# conan release's bundled settings.yml schema (e.g. Homebrew clang 23 vs
+# conan 2.32 -> "Invalid setting '23' is not a valid
+# 'settings.compiler.version' value"), and a warm cache can restore such a
+# profile too. This graph has no tool_requires, so the build profile's
+# compiler is never consulted -- verified with a warm install against the
+# committed lockfiles using a compiler-less default.
+default_profile="${conan_home}/profiles/default"
+if [ -f "$default_profile" ] && grep -q '^compiler' "$default_profile"; then
+  printf 'conan_install: stripping compiler settings from the default build profile\n'
+  grep -v '^compiler' "$default_profile" >"${default_profile}.tmp" \
+    && mv "${default_profile}.tmp" "$default_profile" \
+    || die "failed to sanitize $default_profile"
+fi
+
+# Third-party source hosts (e.g. www.cairographics.org) time out when all
+# CI legs fetch them concurrently; conan defaults to 2 retries / 5s for
+# recipe downloads. Bump retries in this CONAN_HOME only (never the user's
+# home config) and never clobber settings that are already present.
+conf_file="${conan_home}/global.conf"
+ensure_conf() {
+  [ -f "$conf_file" ] || : >"$conf_file"
+  grep -q "^$1:" "$conf_file" || printf '%s\n' "$2" >>"$conf_file"
+}
+ensure_conf "core.download:retry" "core.download:retry=6"
+ensure_conf "core.download:retry_wait" "core.download:retry_wait=10"
+ensure_conf "tools.files.download:retry" "tools.files.download:retry=6"
+ensure_conf "tools.files.download:retry_wait" "tools.files.download:retry_wait=15"
+printf 'conan_install: download retries in %s: package=6/10s source=6/15s\n' \
+  "$conf_file"
 
 profile_name="$(basename "$profile")"
 if [ "$use_lock" = "1" ] && [ -z "$lockfile" ]; then

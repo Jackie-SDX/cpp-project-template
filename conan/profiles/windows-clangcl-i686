@@ -19,3 +19,7 @@ tools.cmake.cmaketoolchain:generator=Ninja
 # See conanfile.py header: re-assert the project's C++20 after CMakeToolchain
 # injects the profile's cppstd as CMAKE_CXX_STANDARD.
 tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}
+# MesonToolchain leaves [binaries] c/cpp empty for non-Apple cross
+# builds (x86_64 runner -> x86) without this conf, and meson recipes
+# (fribidi) fail with "'c' compiler binary not defined".
+tools.build:compiler_executables={"c": "clang-cl", "cpp": "clang-cl"}
