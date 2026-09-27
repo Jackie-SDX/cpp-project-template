@@ -3,6 +3,11 @@
 # Compiler versions are the runner images' toolchain of record; bump them
 # together with CI image/compiler changes (they key both package IDs and the
 # Conan cache key).
+#
+# compiler.version=194 (VS 17 / VS 2022) is correct here: windows-11-arm
+# still ships `Microsoft Visual Studio\17\Enterprise` (toolset 14.4x), unlike
+# windows-latest which moved to Visual Studio 18 (see
+# windows-msvc-x86_64).
 
 [settings]
 os=Windows

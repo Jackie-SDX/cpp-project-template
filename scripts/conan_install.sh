@@ -150,17 +150,34 @@ load_windows_environment() {
   done <"$env_file"
   rm -f "$env_file"
   if [ -n "$raw_path" ]; then
-    local merged="" entry old_ifs="$IFS"
+    local merged="" entry lc_entry orig_lc old_ifs="$IFS"
+    # vcvars *prepends* to the PATH it inherited, so $raw_path already contains
+    # $orig_path. Prepending it verbatim on top of $orig_path therefore roughly
+    # doubles PATH, and the second activation Conan runs for its own
+    # conanvcvars.bat then overflows cmd.exe's 8191-character limit ("The input
+    # line is too long", run 36294183365, Windows MSVC ARM64). Keep only the
+    # entries that are genuinely new; Windows paths are case-insensitive, so
+    # compare lowercased, and track what we have already added so a single
+    # vcvars call cannot duplicate entries either.
+    orig_lc=":$(printf '%s' "$orig_path" | tr '[:upper:]' '[:lower:]'):"
     IFS=';'
     for entry in $raw_path; do
       [ -n "$entry" ] || continue
       entry="$(cygpath -u "$entry" 2>/dev/null || printf '%s' "$entry")"
+      lc_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
+      case "$orig_lc" in
+        *":$lc_entry:"*) continue ;;
+      esac
+      orig_lc="${orig_lc}${lc_entry}:"
       merged="${merged:+$merged:}$entry"
     done
     IFS="$old_ifs"
-    export PATH="${merged}:${orig_path}"
+    if [ -n "$merged" ]; then
+      export PATH="${merged}:${orig_path}"
+    fi
   fi
-  printf 'conan_install: loaded Windows environment from %s\n' "$ENVIRONMENT_SCRIPT"
+  printf 'conan_install: loaded Windows environment from %s (PATH length=%s chars)\n' \
+    "$ENVIRONMENT_SCRIPT" "${#PATH}"
 }
 load_windows_environment
 
@@ -281,8 +298,43 @@ if [ "$use_lock" = "1" ] && [ ! -f "$lockfile" ]; then
   die "lockfile not found: $lockfile (regenerate: conan lock create conanfile.py -pr $profile --lockfile-out $lockfile)"
 fi
 
+# ---------------------------------------------------------------------------
+# Windows MinGW legs: pin the *MinGW* compiler for every conan invocation.
+#
+# tools.build:compiler_executables becomes CC/CXX in Autotools/Meson/CMake
+# toolchains, and the mingw profiles declare the bare names ("gcc"/"g++").
+# Bare names are resolved through the PATH inside the msys2 bash Conan runs
+# recipes in, and that PATH is led by the conan-installed msys2 package --
+# whose recipe default packages are "base-devel,binutils,gcc", i.e. it ships a
+# cygwin-hosted MSYS gcc. libiconv (a tool_require of wxWidgets through
+# gettext) then configures with that compiler: gnulib sees _WIN32, emits its
+# `struct _stati64` replacements, and cygwin's <sys/stat.h> has no such type,
+# so the build dies with "invalid use of undefined type 'const struct
+# _stati64'" (run 36294183365). Absolute paths remove the ambiguity for every
+# generator at once; command-line -c wins over the profile value (verified
+# against conan 2.32), and Conan accepts absolute Windows paths in these confs.
+# ---------------------------------------------------------------------------
+extra_conf=""
+if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; then
+  mingw_cc="$(command -v gcc || true)"
+  mingw_cxx="$(command -v g++ || true)"
+  if [ -z "$mingw_cc" ] || [ -z "$mingw_cxx" ]; then
+    die "profile $profile needs gcc/g++ on PATH (the MinGW toolchain is not installed on this runner)"
+  fi
+  if command -v cygpath >/dev/null 2>&1; then
+    mingw_cc="$(cygpath -m "$mingw_cc")"
+    mingw_cxx="$(cygpath -m "$mingw_cxx")"
+  fi
+  extra_conf="tools.build:compiler_executables={\"c\": \"$mingw_cc\", \"cpp\": \"$mingw_cxx\"}"
+  printf 'conan_install: MinGW compilers pinned by absolute path c=%s cpp=%s\n' \
+    "$mingw_cc" "$mingw_cxx"
+fi
+
 # run_conan <args...>: appends the lockfile when locking is enabled.
 run_conan() {
+  if [ -n "$extra_conf" ]; then
+    set -- "$@" -c "$extra_conf"
+  fi
   if [ "$use_lock" = "1" ]; then
     "$CONAN" "$@" --lockfile "$lockfile"
   else

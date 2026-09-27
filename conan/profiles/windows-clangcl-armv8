@@ -11,6 +11,13 @@ compiler=clang
 compiler.version=19
 compiler.runtime=dynamic
 compiler.runtime_type=Release
+# vcvars selection for clang-cl comes from runtime_version, not from
+# compiler.version: Conan refuses to emit conanvcvars.bat without it
+# ("Visual Studio Runtime version (v140-v145) not defined", run
+# 36294183365). v144 -> Visual Studio 17 + -vcvars_ver=14.4, matching the
+# toolset windows-11-arm ships (14.4x); it is NOT v145 (that image has no
+# Visual Studio 18).
+compiler.runtime_version=v144
 compiler.cppstd=gnu17
 build_type=Release
 

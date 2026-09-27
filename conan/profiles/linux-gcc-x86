@@ -21,6 +21,17 @@ tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}
 # wxWidgets X11 system-requirements: install when missing, no-op otherwise.
 tools.system.package_manager:mode=install
 tools.system.package_manager:sudo=True
+# Large-file support for the i686 leg. wxWidgets' installed setup.h defines
+# HAVE_LARGEFILE_SUPPORT, and wx/filefn.h then asserts
+#   sizeof(off_t) == sizeof(wxLongLong_t)
+# which only holds when the 64-bit off_t is selected; on i686 that is opt-in
+# and glibc defaults to 4-byte off_t, so the project's first wx TU dies with
+# "zero width for bit-field ... BadFileSizeType" (run 36294183365). The
+# system/vcpkg path never sees this because wx-config --cxxflags exports
+# -D_FILE_OFFSET_BITS=64; tools.build:defines is the Conan equivalent and is
+# applied to every dependency's toolchain too, keeping the whole graph
+# (wxWidgets, gtest, ...) built with one consistent ABI.
+tools.build:defines=["_FILE_OFFSET_BITS=64"]
 # MesonToolchain leaves [binaries] c/cpp empty for non-Apple cross
 # builds (x86_64 runner -> x86) without this conf, and meson recipes
 # (fribidi) fail with "'c' compiler binary not defined".

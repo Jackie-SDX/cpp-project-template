@@ -3,12 +3,19 @@
 # Compiler versions are the runner images' toolchain of record; bump them
 # together with CI image/compiler changes (they key both package IDs and the
 # Conan cache key).
+#
+# compiler.version=195 (VS 18 / VS 2026): the windows-latest image carries
+# only `Microsoft Visual Studio\18\Enterprise` (toolset 14.5x). Conan maps
+# 194 -> "Visual Studio 17", which that image does not install, and
+# CMakeToolchain's VCVars step dies with "VS non-existing installation:
+# Visual Studio 17" (run 36294183365). 194 stays correct for the
+# windows-11-arm leg, which is still VS 17 (see windows-msvc-armv8).
 
 [settings]
 os=Windows
 arch=x86_64
 compiler=msvc
-compiler.version=194
+compiler.version=195
 compiler.runtime=static
 compiler.runtime_type=Release
 compiler.cppstd=17
