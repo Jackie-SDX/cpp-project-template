@@ -562,6 +562,17 @@ jobs:
         CC: ${{ matrix.cc }}
         CXX: ${{ matrix.cxx }}
       run: bash scripts/conan_install.sh --profile "conan/profiles/${{ matrix.conan_profile }}"
+    # GitHub keeps 10 GB of caches per repository. A raw $CONAN_HOME is
+    # ~3.6 GB per profile, ~69% of it wxWidgets build/download trees, so 19
+    # untrimmed homes blow the budget and the oldest entries get evicted --
+    # the next run then rebuilds every dependency from source (which is
+    # exactly how one leg died on a transient upstream source download).
+    # Strip Conan's non-critical folders first; the script fails the job if
+    # a single package folder changes, so a warm restore can never regress.
+    - name: Trim Conan package cache
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: bash project/scripts/conan_cache_trim.sh
     - name: Save Conan package cache
       if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
@@ -1860,6 +1871,13 @@ jobs:
         CC: ${{ matrix.cc }}
         CXX: ${{ matrix.cxx }}
       run: bash scripts/conan_install.sh --profile "conan/profiles/${{ matrix.conan_profile }}"
+    # See the package job: strip Conan's non-critical folders so 19 profile
+    # homes fit GitHub's 10 GB per-repo cache budget instead of evicting each
+    # other. scripts/conan_cache_trim.sh fails if any package folder changes.
+    - name: Trim Conan package cache
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: bash project/scripts/conan_cache_trim.sh
     - name: Save Conan package cache
       if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8

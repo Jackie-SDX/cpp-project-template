@@ -260,6 +260,15 @@ jobs:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
         run: bash scripts/conan_install.sh --profile "conan/profiles/${{ matrix.profile }}"
+      # Strip Conan's build/download/temp folders before the cache is
+      # archived: an untrimmed home is ~3.6 GB per profile and 19 of those
+      # exceed GitHub's 10 GB per-repo cache budget, so entries evict each
+      # other and the next run rebuilds from source. The script fails the
+      # job if any package folder changes.
+      - name: Trim Conan package cache
+        if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash project/scripts/conan_cache_trim.sh
       - name: Save Conan package cache
         if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
