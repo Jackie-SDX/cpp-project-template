@@ -11,6 +11,7 @@
     - [Dependencies](#dependencies)
       - [vcpkg](#vcpkg)
   - [macOS](#macos)
+- [Package manager selection](#package-manager)
 - [Compile](#compile)
   - [Linux & Mac](#linux--mac)
   - [Windows](#windows-compile)
@@ -396,6 +397,138 @@ cmake --build . --config Release
 ```sh
 brew install wxwidgets googletest
 ```
+
+<a id="package-manager"></a>
+## Package manager selection (vcpkg / Conan 2)
+
+wxWidgets and GoogleTest can come from two first-class, independently
+selectable backends — **vcpkg** (the default) and **Conan 2** — plus a third
+mode, `system`, that uses whatever the host provides. One CMake variable
+selects between them: `PACKAGE_MANAGER` = `vcpkg` | `conan2` | `system`,
+resolved in `cmake/PackageManager.cmake`.
+
+* The two backends never share a build tree, generated dependency metadata,
+  cache storage or CMake discovery: Conan provisions into `build/conan2/`,
+  vcpkg/system configure into their own tree, and naming a manager that
+  contradicts the toolchain file is a configure-time `FATAL_ERROR` rather
+  than a late `find_package` failure.
+* Because every backend has its own binary directory, switching managers is
+  always "configure a different directory", never an in-place migration.
+  Nothing has to be deleted to go from one to the other and back.
+
+> **To build/package with vcpkg, change/run** `cmake --preset vcpkg-release`
+> with `VCPKG_ROOT` exported (equivalently: `-D PACKAGE_MANAGER=vcpkg`
+> `-D CMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`).
+>
+> **To build/package with Conan, change/run**
+> `scripts/conan_install.sh --profile conan/profiles/<profile>` and then
+> `cmake --preset conan-release` (equivalently: `-D PACKAGE_MANAGER=conan2`
+> `-D CMAKE_TOOLCHAIN_FILE=build/conan2/build/<BuildType>/generators/conan_toolchain.cmake`).
+
+### vcpkg
+
+```sh
+# one-time, anywhere outside the repository
+git clone https://github.com/microsoft/vcpkg
+./vcpkg/bootstrap-vcpkg.sh -disableMetrics     # vcpkg.bat on Windows
+export VCPKG_ROOT="$PWD/vcpkg"                 # persistent: set it in your shell profile
+
+cd cpp-project-template
+cmake --preset vcpkg-release                   # build/vcpkg-release
+cmake --build --preset vcpkg-release
+ctest --preset vcpkg-release
+cpack --config build/vcpkg-release/CPackConfig.cmake -G TGZ
+```
+
+The `vcpkg-release` preset sets `PACKAGE_MANAGER=vcpkg` and
+`CMAKE_TOOLCHAIN_FILE=$penv{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake`
+(`vcpkg-debug` is the Debug twin). vcpkg then runs in **manifest mode**: the
+committed `vcpkg.json` plus its `builtin-baseline` pin wxWidgets and GTest, so
+`cmake --preset vcpkg-release` is all it takes — no manual `vcpkg install`.
+Windows triplet/overlay instructions (including the
+`my-vcpkg-triplets` overlays used by the LLVM legs) are under
+[Dependencies → vcpkg](#vcpkg) above.
+
+By hand, without a preset:
+
+```sh
+cmake -S . -B build/vcpkg-release \
+  -D PACKAGE_MANAGER=vcpkg \
+  -D CMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -D CMAKE_BUILD_TYPE=Release -G Ninja
+```
+
+### Conan 2
+
+```sh
+pip install "conan>=2,<3"
+
+cd cpp-project-template
+export CONAN_HOME="$PWD/.conan2"   # optional; CI points it at the workspace
+                                   # so actions/cache can restore/save it
+
+scripts/conan_install.sh --profile conan/profiles/linux-gcc-x86_64
+cmake --preset conan-release       # build/conan2/build/Release
+cmake --build --preset conan-release
+ctest --preset conan-release
+cpack --config build/conan2/build/Release/CPackConfig.cmake -G TGZ
+```
+
+`scripts/conan_install.sh` is the canonical install and does the whole
+reproducibility contract in one step:
+
+* resolves the graph from the **committed profile** in `conan/profiles/`
+  (one per OS/compiler/arch/ABI, e.g. `linux-gcc-x86_64`,
+  `windows-msvc-x86_64`, `macos-apple-clang-armv8`) and the **committed
+  lockfile** in `conan/locks/<profile>.lock`, which it appends to every
+  `conan` call (regenerate with
+  `conan lock create conanfile.py -pr <profile> --lockfile-out conan/locks/<profile>.lock`);
+* writes the generated `CMakeDeps`/`CMakeToolchain` files into
+  `build/conan2` — never into `build/`, so it can never collide with the
+  vcpkg/system tree;
+* prints before/after `cache-evidence` lines (`host=… cache=… build=…
+  missing=…`) so a cold install and a warm one are distinguishable from the
+  log alone;
+* emits `CMakeUserPresets.json` at the source root (git-ignored), which is
+  what makes `cmake --preset conan-release` work. The preset name follows
+  the install's build type.
+
+Useful flags: `--output-folder <dir>` (must not be `build/`),
+`--build-policy missing|never`, `--no-lock`, `--no-evidence`.
+
+### Choosing the manager in CI
+
+A release run resolves exactly one mode before any build job:
+
+* a tag push (`v*`) reads the committed one-line `packaging/release-package-manager.txt`
+  — so the tag alone decides, and the release logs show the chosen mode;
+* a manually dispatched run overrides it with the `package_manager` input.
+
+### If configure fails
+
+* *"PACKAGE_MANAGER=vcpkg but CMAKE_TOOLCHAIN_FILE points at a Conan
+  toolchain"* — you passed Conan's toolchain while explicitly asking for
+  vcpkg. Pick one; the two must never be mixed in a single build tree.
+* *"PACKAGE_MANAGER=conan2 but CMAKE_TOOLCHAIN_FILE is not set"* — run
+  `scripts/conan_install.sh --profile …` first; it is what generates the
+  toolchain.
+* *"PACKAGE_MANAGER=vcpkg but CMAKE_TOOLCHAIN_FILE is not set"* (warning) —
+  nothing provisioned the dependencies, so `find_package()` will only find
+  what the host has installed (apt/brew/choco). Export `VCPKG_ROOT` and use
+  the `vcpkg-release` preset, or install the dependencies another way.
+
+### What each CI mode actually provisions
+
+Preserved exactly as it was before Conan 2 was added:
+
+| Runner | `vcpkg` mode | `conan2` mode |
+|---|---|---|
+| Windows | vcpkg (classic mode, `wxwidgets` + `gtest`, per-triplet binary cache) | Conan 2 profile + lockfile |
+| Linux / macOS | host packages from `apt`/`brew` (no vcpkg toolchain on those runners) | Conan 2 profile + lockfile |
+
+Only Windows runners check out and bootstrap vcpkg; that is pre-existing
+behaviour, kept unchanged. The Conan 2 mode is available on every leg that
+has a profile in `conan/profiles/`.
 
 <a id="compile"></a>
 ## Compile
