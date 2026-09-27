@@ -128,8 +128,16 @@ load_windows_environment() {
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
     case "$line" in
-      [A-Za-z_][A-Za-z0-9_]*=*) export "$line" ;;
+      [A-Za-z_]*=*) ;;
+      *) continue ;;
     esac
+    name="${line%%=*}"
+    # 'set' also prints names like CommonProgramFiles(x86)=..., which are
+    # not valid shell identifiers -- exporting those aborts the script.
+    case "$name" in
+      ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;;
+    esac
+    export "$line"
   done <"$env_file"
   rm -f "$env_file"
   printf 'conan_install: loaded Windows environment from %s\n' "$ENVIRONMENT_SCRIPT"
@@ -143,25 +151,90 @@ load_windows_environment
 # detected compiler matches this leg. Never overwrite an existing default:
 # warm cache restores already carry one.
 conan_home="${CONAN_HOME:-${HOME}/.conan2}"
-if [ ! -f "${conan_home}/profiles/default" ]; then
+default_profile="${conan_home}/profiles/default"
+if [ ! -f "$default_profile" ] || ! grep -q '^compiler=' "$default_profile"; then
+  # Also repairs a warm cache whose default profile was saved without a
+  # compiler (that makes build-require package ids invalid).
   printf 'conan_install: detecting default build profile in %s\n' "$conan_home"
-  "$CONAN" profile detect || die "conan profile detect failed"
+  "$CONAN" profile detect --force || die "conan profile detect failed"
 fi
 
-# Always strip compiler settings from the default build profile: detect
-# writes the runner's exact compiler version, which may not exist in this
-# conan release's bundled settings.yml schema (e.g. Homebrew clang 23 vs
-# conan 2.32 -> "Invalid setting '23' is not a valid
-# 'settings.compiler.version' value"), and a warm cache can restore such a
-# profile too. This graph has no tool_requires, so the build profile's
-# compiler is never consulted -- verified with a warm install against the
-# committed lockfiles using a compiler-less default.
-default_profile="${conan_home}/profiles/default"
-if [ -f "$default_profile" ] && grep -q '^compiler' "$default_profile"; then
-  printf 'conan_install: stripping compiler settings from the default build profile\n'
-  grep -v '^compiler' "$default_profile" >"${default_profile}.tmp" \
-    && mv "${default_profile}.tmp" "$default_profile" \
-    || die "failed to sanitize $default_profile"
+# conan profile detect writes the runner's exact compiler version, which
+# may not exist in this conan release's bundled settings.yml schema (e.g.
+# Homebrew clang 23 vs conan 2.32 -> "Invalid setting '23' is not a valid
+# 'settings.compiler.version' value"). The build profile's compiler IS
+# consulted: build-require package ids evaluate it ("Invalid:
+# 'settings.compiler' value not defined"), so never strip it. Instead
+# extend THIS conan home's settings.yml when the detected version is
+# missing.
+settings_file="${conan_home}/settings.yml"
+if [ -f "$default_profile" ] && [ -f "$settings_file" ]; then
+  settings_py=""
+  if [ -n "${CONAN_BIN:-}" ] && [ -x "$(dirname "$CONAN_BIN")/python" ]; then
+    settings_py="$(dirname "$CONAN_BIN")/python"
+  else
+    settings_py="$(command -v python3 || command -v python || true)"
+  fi
+  if [ -n "$settings_py" ]; then
+    "$settings_py" - "$default_profile" "$settings_file" <<'PYEOF' \
+      || die "failed to reconcile $settings_file with $default_profile"
+import re
+import sys
+
+profile_path, settings_path = sys.argv[1], sys.argv[2]
+compiler = version = None
+with open(profile_path, encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if line.startswith("compiler.version="):
+            version = line.split("=", 1)[1].strip().strip("\"'")
+        elif line.startswith("compiler="):
+            compiler = line.split("=", 1)[1].strip().strip("\"'")
+if not (compiler and version):
+    sys.exit(0)
+
+with open(settings_path, encoding="utf-8") as handle:
+    text = handle.read()
+# settings.yml: compiler names indent 4 spaces, their keys 8.
+head = re.search(r"(?m)^    %s:\s*$" % re.escape(compiler), text)
+if not head:
+    sys.exit(0)
+rest = text[head.end():]
+next_key = re.search(r"(?m)^(?=    \S|\S)", rest)
+block = rest[: next_key.start() if next_key else len(rest)]
+vstart = re.search(r"(?m)^        version:\s*\[", block)
+if vstart is None:
+    sys.exit(0)
+offset = head.end() + vstart.end()  # text offset just past '['
+close = text.find("]", offset)
+if close < 0:
+    sys.exit(0)
+segment = text[offset:close]
+values = [v.strip().strip("\"'") for v in segment.split(",") if v.strip()]
+if version in values:
+    sys.exit(0)
+raw_first = segment.split(",")[0].strip() if segment.strip() else ""
+quoted = raw_first[:1] in ('"', "'")
+new_value = '"%s"' % version if quoted else version
+separator = ", " if segment.strip() else ""
+updated = (
+    text[:offset]
+    + segment
+    + separator
+    + new_value
+    + text[close:]
+)
+with open(settings_path, "w", encoding="utf-8") as handle:
+    handle.write(updated)
+print(
+    "conan_install: extended %s: %s version %s"
+    % (settings_path, compiler, version)
+)
+PYEOF
+  else
+    printf 'conan_install: WARNING: no python found to reconcile %s\n' \
+      "$settings_file"
+  fi
 fi
 
 # Third-party source hosts (e.g. www.cairographics.org) time out when all
@@ -171,7 +244,7 @@ fi
 conf_file="${conan_home}/global.conf"
 ensure_conf() {
   [ -f "$conf_file" ] || : >"$conf_file"
-  grep -q "^$1:" "$conf_file" || printf '%s\n' "$2" >>"$conf_file"
+  grep -q "^$1[=:]" "$conf_file" || printf '%s\n' "$2" >>"$conf_file"
 }
 ensure_conf "core.download:retry" "core.download:retry=6"
 ensure_conf "core.download:retry_wait" "core.download:retry_wait=10"
