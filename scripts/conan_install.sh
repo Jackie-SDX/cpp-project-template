@@ -642,31 +642,51 @@ printf 'conan_install: install exit=%s elapsed=%ss\n' "$status" "$elapsed"
 [ "$status" -eq 0 ] || exit "$status"
 
 # ---------------------------------------------------------------------------
-# After a MinGW install, prefix the wx archives so GNU find_library finds
-# them.
+# After a Windows install, prepare the patched wx package for this compiler.
 #
-# With the package_info() patch above, wx is now advertised under its real
-# on-disk names (wxmsw32u_xrc, wxbase32u, ...), which the wx CMake build
-# writes without the "lib" archive prefix on Windows (lib_prefix is empty
-# under WIN32_MSVC_NAMING). A GNU toolchain's find_library only tries
-# CMAKE_FIND_LIBRARY_PREFIXES ("lib") plus CMAKE_FIND_LIBRARY_SUFFIXES
-# (".a"), and cmakedeps_macros.cmake's prefix-enriching backport branch is
-# skipped exactly when MINGW is defined, so the MinGW legs need
-# libwxmsw32u_xrc.a. clang-cl keeps the bare .lib names and is excluded.
-# Only the wx package folder is touched (keyed on one of its own files) and
-# the rename is idempotent: renamed files no longer match the wx*.a glob
-# and the finder key disappears with them.
+# 1. include/msvc (all non-msvc Windows legs): wx's install.cmake copies the
+#    source include/msvc tree only under if(MSVC) (build/cmake/install.cmake
+#    :24-38), i.e. clang-cl builds -- CMake's MSVC variable is true there --
+#    get it while gcc builds do not, but the patched package_info() advertises
+#    it on every Windows package. CMake rejects a non-existent
+#    INTERFACE_INCLUDE_DIRECTORIES entry outright ("Imported target
+#    wxWidgets::wxWidgets includes non-existent path ... include/msvc", run
+#    36319827891 MinGW x64), so create the directory when it is missing;
+#    include/ comes first in cpp_info, so an empty msvc/ cannot shadow the
+#    setup.h that clang-cl already compiles against.
+#
+# 2. lib prefix for the archives (MinGW/gcc only): with the package_info()
+#    patch, wx is advertised under its real on-disk names (wxmsw32u_xrc,
+#    wxbase32u, ...), which the wx CMake build writes without the "lib"
+#    archive prefix on Windows (lib_prefix is empty under
+#    WIN32_MSVC_NAMING). A GNU toolchain's find_library only tries
+#    CMAKE_FIND_LIBRARY_PREFIXES ("lib") plus CMAKE_FIND_LIBRARY_SUFFIXES
+#    (".a"), and cmakedeps_macros.cmake's prefix-enriching backport branch is
+#    skipped exactly when MINGW is defined, so the MinGW legs need
+#    libwxmsw32u_xrc.a. clang-cl keeps the bare .lib names. Both steps are
+#    idempotent: the directory check short-circuits, and renamed archives no
+#    longer match the wx*.a glob while the finder key disappears with them.
 # ---------------------------------------------------------------------------
-if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; then
-  while IFS= read -r wx_marker; do
-    [ -n "$wx_marker" ] || continue
-    wx_dir="$(dirname "$wx_marker")"
-    for wx_lib in "$wx_dir"/wx*.a; do
-      [ -f "$wx_lib" ] || continue
-      mv "$wx_lib" "$wx_dir/lib${wx_lib##*/}" || die "failed to prefix $wx_lib"
-    done
-    printf 'conan_install: MinGW wx archives prefixed in %s\n' "$wx_dir"
-  done < <(find "$conan_home/p" -name 'wxmsw32u_xrc.a' 2>/dev/null)
+if grep -q '^os=Windows$' "$profile" && ! grep -q '^compiler=msvc$' "$profile"; then
+  while IFS= read -r wx_hdr; do
+    [ -n "$wx_hdr" ] || continue
+    wx_inc="$(dirname "$(dirname "$wx_hdr")")"
+    if [ ! -d "$wx_inc/msvc" ]; then
+      mkdir -p "$wx_inc/msvc" || die "failed to create $wx_inc/msvc"
+      printf 'conan_install: wx include/msvc created in %s\n' "$wx_inc"
+    fi
+  done < <(find "$conan_home/p" -path '*/p/include/wx/defs.h' 2>/dev/null)
+  if grep -q '^compiler=gcc$' "$profile"; then
+    while IFS= read -r wx_marker; do
+      [ -n "$wx_marker" ] || continue
+      wx_dir="$(dirname "$wx_marker")"
+      for wx_lib in "$wx_dir"/wx*.a; do
+        [ -f "$wx_lib" ] || continue
+        mv "$wx_lib" "$wx_dir/lib${wx_lib##*/}" || die "failed to prefix $wx_lib"
+      done
+      printf 'conan_install: MinGW wx archives prefixed in %s\n' "$wx_dir"
+    done < <(find "$conan_home/p" -name 'wxmsw32u_xrc.a' 2>/dev/null)
+  fi
 fi
 
 if [ "$evidence" = "1" ]; then

@@ -25,7 +25,10 @@ if (MINGW)
 	target_link_libraries(${PROJECT_CLI_NAME} PRIVATE
 		$<$<CONFIG:Release>:-static-libgcc -static-libstdc++ -static>
 	)
-elseif (MSVC)
+elseif (MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+	# Skipped under clang-cl: those legs run compiler.runtime=dynamic and
+	# conan's toolchain selects the DLL runtime; forcing MT here mismatches
+	# the /MD dependencies. Same guard as src/projectlib/test/CMakeLists.txt.
 	# MT vs MD vs MTd vs MDd https://social.msdn.microsoft.com/Forums/en-US/9474efb9-49cd-46e1-8935-ee2bebe95203/difference-in-mt-and-md-run-time-lib-setting?forum=vcgeneral
 	set_property(TARGET ${PROJECT_CLI_NAME} PROPERTY
 		MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

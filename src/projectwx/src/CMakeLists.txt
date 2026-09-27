@@ -97,7 +97,15 @@ if (MINGW AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 	target_link_libraries(${PROJECT_WX_NAME} PRIVATE
 		$<$<CONFIG:Release>:-static gcc stdc++ winpthread -dynamic>
 	)
-elseif (MSVC)
+elseif (MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+	# Skipped under clang-cl (compiler id "Clang" with MSVC-compatible
+	# syntax): those legs run compiler.runtime=dynamic, conan's toolchain
+	# sets CMAKE_MSVC_RUNTIME_LIBRARY to the DLL runtime, and forcing MT
+	# here would override it and break the link against the /MD wxWidgets
+	# built from the same profile ("mismatch detected for 'RuntimeLibrary':
+	# MT_StaticRelease vs MD_DynamicRelease", run 36319827891 Windows LLVM
+	# x64). Same guard as src/projectlib/test/CMakeLists.txt; cl legs keep
+	# the static runtime that matches windows-msvc-*'s runtime=static.
 	# MT vs MD vs MTd vs MDd https://social.msdn.microsoft.com/Forums/en-US/9474efb9-49cd-46e1-8935-ee2bebe95203/difference-in-mt-and-md-run-time-lib-setting?forum=vcgeneral
 	# Might have to use MDd with wxWidgets because: https://forums.wxwidgets.org/viewtopic.php?t=47650
 	set_property(TARGET ${PROJECT_WX_NAME} PROPERTY
