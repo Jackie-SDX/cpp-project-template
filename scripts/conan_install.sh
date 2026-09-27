@@ -330,10 +330,38 @@ if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; the
     "$mingw_cc" "$mingw_cxx"
 fi
 
+# ---------------------------------------------------------------------------
+# Build-context tool_requires (gettext -> libiconv, pulled in by wxWidgets)
+# take their settings from the *detected* build profile, not from the committed
+# host profile. Conan's Windows clang detection hard-codes
+#   "WARN: Assuming LLVM/Clang in Windows with VS 17 2022"
+# and writes compiler.runtime_version=v143 there, so VCVars for those packages
+# asks for VS 17 + toolset 14.3, which windows-latest (VS 18 only) and
+# windows-11-arm (14.4x only) do not have (run 36306665122: "VS non-existing
+# installation: Visual Studio 17" and "Toolset directory for version '14.3'
+# was not found"). The build compiler is the same clang-cl installation the
+# host profile describes, so carry the host profile's runtime_version into the
+# build context. Only the windows-clangcl-* profiles define runtime_version at
+# all, and the detected build profile must actually be clang -- msvc has no
+# such setting and Conan would reject it.
+b_runtime_version=""
+if grep -q '^compiler\.runtime_version=' "$profile"; then
+  if [ -f "$default_profile" ] && grep -q '^compiler=clang$' "$default_profile"; then
+    b_runtime_version="$(sed -n 's/^compiler\.runtime_version=//p' "$profile" | head -1)"
+    printf 'conan_install: build context compiler.runtime_version=%s\n' \
+      "$b_runtime_version"
+  fi
+fi
+
 # run_conan <args...>: appends the lockfile when locking is enabled.
 run_conan() {
   if [ -n "$extra_conf" ]; then
-    set -- "$@" -c "$extra_conf"
+    # :a -- build-context packages see the same value as host ones; the MinGW
+    # pin is meaningless for only half of the graph.
+    set -- "$@" -c:a "$extra_conf"
+  fi
+  if [ -n "$b_runtime_version" ]; then
+    set -- "$@" -s:b "compiler.runtime_version=$b_runtime_version"
   fi
   if [ "$use_lock" = "1" ]; then
     "$CONAN" "$@" --lockfile "$lockfile"

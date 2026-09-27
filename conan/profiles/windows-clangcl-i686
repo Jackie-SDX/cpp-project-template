@@ -29,3 +29,13 @@ tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}
 # builds (x86_64 runner -> x86) without this conf, and meson recipes
 # (fribidi) fail with "'c' compiler binary not defined".
 tools.build:compiler_executables={"c": "clang-cl", "cpp": "clang-cl"}
+# clang-cl for this leg resolves to the x64-host binary under
+# VC\Tools\Llvm\x64\bin, whose default target is x86_64, while vcvars32.bat
+# puts the x86 CRT on LIB. Objects and CRT then disagree and lld-link dies
+# with "undefined symbol: mainCRTStartup" (run 36306665122, bzip2). This is
+# the same override configure.cmake already applies for the vcpkg
+# x86-win-llvm triplet, expressed as a Conan conf so every Conan-built
+# dependency (bzip2, zlib, libjpeg, wxWidgets, ...) and the project's own
+# CMakeToolchain get it too.
+tools.build:cflags=["/clang:--target=i686-pc-windows-msvc"]
+tools.build:cxxflags=["/clang:--target=i686-pc-windows-msvc"]

@@ -745,20 +745,21 @@ jobs:
         $ErrorActionPreference = 'Stop'
         New-Item -ItemType Directory -Force release-assets | Out-Null
         & .\scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets\$env:PREFIX.zip" -Epoch ([int]$env:SOURCE_DATE_EPOCH)
+        $assetsDir = Join-Path (Get-Location).Path 'release-assets'
         Push-Location $env:BUILD_DIR
         cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
-        Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:PREFIX}_nsis.exe" -Force
+        Copy-Item "package\$env:BASE.exe" (Join-Path $assetsDir "${env:PREFIX}_nsis.exe") -Force
         # Standalone archive policy (2026-09-23): Windows ships .zip only. The
         # historical .7z alternative is retained here as a documented, disabled
         # block; uncomment the three lines below to restore it (requires the
         # 7zip tool installed above):
         # cpack --config CPackConfig.cmake -C Release -G 7Z
         # if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
-        # Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
+        # Copy-Item "package\$env:BASE.7z" (Join-Path $assetsDir "$env:PREFIX.7z") -Force
         cpack --config CPackConfig.cmake -C Release -G WIX
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
-        Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:PREFIX}_wix.msi" -Force
+        Copy-Item "package\$env:BASE.msi" (Join-Path $assetsDir "${env:PREFIX}_wix.msi") -Force
         Pop-Location
     - name: Package Linux
       if: runner.os == 'Linux'
@@ -2062,14 +2063,16 @@ jobs:
 
         & .\scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets\$env:PREFIX.zip" -Epoch ([int]$env:SOURCE_DATE_EPOCH)
 
+        $assetsDir = Join-Path (Get-Location).Path 'release-assets'
+
         Push-Location $env:BUILD_DIR
         cpack --config CPackConfig.cmake -C Release -G NSIS64
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw 'NSIS64 package generation failed' }
-        Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:PREFIX}_nsis.exe" -Force
+        Copy-Item "package\$env:BASE.exe" (Join-Path $assetsDir "${env:PREFIX}_nsis.exe") -Force
 
         cpack --config CPackConfig.cmake -C Release -G WIX
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw 'MSI package generation failed' }
-        Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:PREFIX}_wix.msi" -Force
+        Copy-Item "package\$env:BASE.msi" (Join-Path $assetsDir "${env:PREFIX}_wix.msi") -Force
         Pop-Location
     - name: Package Linux
       if: runner.os == 'Linux'
