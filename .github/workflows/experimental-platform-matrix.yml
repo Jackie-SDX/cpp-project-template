@@ -460,8 +460,20 @@ jobs:
         working-directory: project
         shell: bash
         run: |
+          # A toolchain that set()s CMAKE_CXX_COMPILER leaves no cache entry;
+          # CMakeCXXCompiler.cmake always records it (conan CMakeToolchain case).
           cxx_bin="$(sed -n 's/^CMAKE_CXX_COMPILER:FILEPATH=//p' build/CMakeCache.txt | head -1)"
-          test -n "$cxx_bin"
+          if [ -z "$cxx_bin" ]; then
+            cxx_bin="$(grep -h -m1 'set(CMAKE_CXX_COMPILER "' build/CMakeFiles/*/CMakeCXXCompiler.cmake 2>/dev/null | sed -n 's/.*set(CMAKE_CXX_COMPILER "\([^"]*\)".*/\1/p')"
+          fi
+          if [ -z "$cxx_bin" ]; then
+            echo "CMAKE_CXX_COMPILER not found in build/CMakeCache.txt or build/CMakeFiles/*/CMakeCXXCompiler.cmake" >&2
+            exit 1
+          fi
+          if [ ! -x "$cxx_bin" ]; then
+            resolved="$(command -v "$cxx_bin" || true)"
+            test -n "$resolved" && cxx_bin="$resolved"
+          fi
           test -x "$cxx_bin"
           echo "Configured CXX: $cxx_bin"
           if [[ "${{ matrix.compiler }}" == "msvc" ]]; then

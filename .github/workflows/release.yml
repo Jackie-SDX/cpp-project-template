@@ -1968,9 +1968,34 @@ jobs:
     - name: Verify configured compiler
       working-directory: project
       shell: bash
-      run: "cxx_bin=\"$(sed -n 's/^CMAKE_CXX_COMPILER:FILEPATH=//p' \"${BUILD_DIR}/CMakeCache.txt\" | head -1)\"\ntest -n \"$cxx_bin\"\ntest -x \"$cxx_bin\"\necho\
-        \ \"Configured CXX: $cxx_bin\"\nif [[ \"${{ matrix.compiler }}\" == \"msvc\" ]]; then\n  CXX_BIN=\"$cxx_bin\" powershell -NoProfile -Command '\n\
-        \    & \"$env:CXX_BIN\" /?\n    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n  '\nelse\n  \"$cxx_bin\" --version\nfi\n"
+      run: |
+        # CMake persists an auto-detected compiler as CMAKE_CXX_COMPILER:FILEPATH,
+        # but a toolchain that set()s CMAKE_CXX_COMPILER (conan CMakeToolchain with
+        # tools.build:compiler_executables) leaves NO cache entry for it at all.
+        # CMakeCXXCompiler.cmake always records the configured compiler either way.
+        cxx_bin="$(sed -n 's/^CMAKE_CXX_COMPILER:FILEPATH=//p' "${BUILD_DIR}/CMakeCache.txt" | head -1)"
+        if [ -z "$cxx_bin" ]; then
+          cxx_bin="$(grep -h -m1 'set(CMAKE_CXX_COMPILER "' "${BUILD_DIR}"/CMakeFiles/*/CMakeCXXCompiler.cmake 2>/dev/null | sed -n 's/.*set(CMAKE_CXX_COMPILER "\([^"]*\)".*/\1/p')"
+        fi
+        if [ -z "$cxx_bin" ]; then
+          echo "CMAKE_CXX_COMPILER not found in ${BUILD_DIR}/CMakeCache.txt or CMakeFiles/*/CMakeCXXCompiler.cmake" >&2
+          grep CMAKE_CXX_COMPILER "${BUILD_DIR}/CMakeCache.txt" >&2 || true
+          exit 1
+        fi
+        if [ ! -x "$cxx_bin" ]; then
+          resolved="$(command -v "$cxx_bin" || true)"
+          test -n "$resolved" && cxx_bin="$resolved"
+        fi
+        test -x "$cxx_bin"
+        echo "Configured CXX: $cxx_bin"
+        if [[ "${{ matrix.compiler }}" == "msvc" ]]; then
+          CXX_BIN="$cxx_bin" powershell -NoProfile -Command '
+            & "$env:CXX_BIN" /?
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          '
+        else
+          "$cxx_bin" --version
+        fi
     - name: Build
       working-directory: project
       env:
