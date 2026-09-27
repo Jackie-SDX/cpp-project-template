@@ -315,6 +315,8 @@ fi
 # against conan 2.32), and Conan accepts absolute Windows paths in these confs.
 # ---------------------------------------------------------------------------
 extra_conf=""
+b_arch=""
+b_cflags=""
 if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; then
   mingw_cc="$(command -v gcc || true)"
   mingw_cxx="$(command -v g++ || true)"
@@ -328,29 +330,78 @@ if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; the
   extra_conf="tools.build:compiler_executables={\"c\": \"$mingw_cc\", \"cpp\": \"$mingw_cxx\"}"
   printf 'conan_install: MinGW compilers pinned by absolute path c=%s cpp=%s\n' \
     "$mingw_cc" "$mingw_cxx"
+  # `conan profile detect` guesses the build arch from the runner, not from
+  # the compiler it finds, so the MinGW x86 leg records arch=x86_64 while the
+  # toolchain pinned above is i686. AutotoolsToolchain then puts -m64 into
+  # CFLAGS/CXXFLAGS/LDFLAGS of every build-context package and the i686 gcc
+  # cannot link anything ("C compiler cannot create executables", run
+  # 36310578332). Take the build arch from the compiler this leg uses.
+  dumpmachine="$(gcc -dumpmachine 2>/dev/null || true)"
+  case "$dumpmachine" in
+    i?86-*) b_arch="x86" ;;
+    x86_64-*) b_arch="x86_64" ;;
+    aarch64-*|arm64-*) b_arch="armv8" ;;
+  esac
+  printf 'conan_install: build context arch=%s (%s)\n' "${b_arch:-<as detected>}" \
+    "${dumpmachine:-unknown target}"
+  # gettext 0.22.5 ships a gnulib localtime.c that walks `char **env` as if it
+  # were `char *` (gettext bug #65957, fixed in 0.24). GCC 14+ promoted
+  # -Wincompatible-pointer-types to an error, so every mingw leg dies there
+  # ("initialization of 'char *' from incompatible pointer type 'char **'",
+  # run 36310578332). ConanCenter's gettext recipe ships no patch and MSVC
+  # does not error, which is why only the MinGW legs see it; downgrade the
+  # diagnostic for build-context packages instead of forking the recipe.
+  b_cflags="-Wno-error=incompatible-pointer-types"
 fi
 
 # ---------------------------------------------------------------------------
 # Build-context tool_requires (gettext -> libiconv, pulled in by wxWidgets)
 # take their settings from the *detected* build profile, not from the committed
-# host profile. Conan's Windows clang detection hard-codes
-#   "WARN: Assuming LLVM/Clang in Windows with VS 17 2022"
-# and writes compiler.runtime_version=v143 there, so VCVars for those packages
-# asks for VS 17 + toolset 14.3, which windows-latest (VS 18 only) and
-# windows-11-arm (14.4x only) do not have (run 36306665122: "VS non-existing
-# installation: Visual Studio 17" and "Toolset directory for version '14.3'
-# was not found"). The build compiler is the same clang-cl installation the
-# host profile describes, so carry the host profile's runtime_version into the
-# build context. Only the windows-clangcl-* profiles define runtime_version at
-# all, and the detected build profile must actually be clang -- msvc has no
-# such setting and Conan would reject it.
+# host profile. Two separate corrections are needed on the Windows clang legs:
+#
+#  1. Conan's Windows clang detection hard-codes
+#     "WARN: Assuming LLVM/Clang in Windows with VS 17 2022" and writes
+#     compiler.runtime_version=v143, so VCVars for those packages asks for
+#     VS 17 + toolset 14.3, which windows-latest (VS 18 only) and
+#     windows-11-arm (14.4x only) do not have (run 36306665122: "VS
+#     non-existing installation: Visual Studio 17").
+#  2. ConanCenter does not test Windows+Clang for autotools recipes, and
+#     libiconv/1.17 hardcodes `build-aux/compile clang-cl -nologo`; on this
+#     runner that build dies inside configure ("cannot run C compiled
+#     programs", exit 77) or at link time with unresolved CRT imports
+#     (run 36310578332, x86/x64/ARM64). The same packages build cleanly with
+#     MSVC on the windows-msvc-* legs, and they are *tools* -- nothing in the
+#     host graph links against them -- so build them with MSVC instead: the
+#     host profile's runtime_version maps 1:1 onto the msvc version the same
+#     runner carries (v145 -> VS 18 = 195, v144 -> VS 2022 = 194).
+#
+# Only the windows-clangcl-* profiles define runtime_version at all. Conan
+# drops the clang-only keys (runtime_version, libcxx, gnu* cppstd) from the
+# detected build profile by itself once the compiler is overridden, but it
+# rejects runtime_version on the command line when compiler=msvc, so the two
+# corrections are mutually exclusive (verified against conan 2.32).
+# ---------------------------------------------------------------------------
 b_runtime_version=""
+b_msvc=""
 if grep -q '^compiler\.runtime_version=' "$profile"; then
-  if [ -f "$default_profile" ] && grep -q '^compiler=clang$' "$default_profile"; then
-    b_runtime_version="$(sed -n 's/^compiler\.runtime_version=//p' "$profile" | head -1)"
+  host_runtime_version="$(sed -n 's/^compiler\.runtime_version=//p' "$profile" | head -1)"
+  case "$host_runtime_version" in
+    v140) b_msvc="190" ;;
+    v141) b_msvc="191" ;;
+    v142) b_msvc="192" ;;
+    v143) b_msvc="193" ;;
+    v144) b_msvc="194" ;;
+    v145) b_msvc="195" ;;
+  esac
+  if [ -z "$b_msvc" ] && [ -f "$default_profile" ] && grep -q '^compiler=clang$' "$default_profile"; then
+    b_runtime_version="$host_runtime_version"
     printf 'conan_install: build context compiler.runtime_version=%s\n' \
       "$b_runtime_version"
   fi
+fi
+if [ -n "$b_msvc" ]; then
+  printf 'conan_install: build context compiler=msvc %s (host profile: %s %s)\n' \
+    "$b_msvc" "$(basename "$profile")" "$host_runtime_version"
 fi
 
 # run_conan <args...>: appends the lockfile when locking is enabled.
@@ -360,7 +411,16 @@ run_conan() {
     # pin is meaningless for only half of the graph.
     set -- "$@" -c:a "$extra_conf"
   fi
-  if [ -n "$b_runtime_version" ]; then
+  if [ -n "$b_arch" ]; then
+    set -- "$@" -s:b "arch=$b_arch"
+  fi
+  if [ -n "$b_cflags" ]; then
+    set -- "$@" -c:b "tools.build:cflags=[\"$b_cflags\"]"
+  fi
+  if [ -n "$b_msvc" ]; then
+    set -- "$@" -s:b compiler=msvc -s:b "compiler.version=$b_msvc" \
+      -s:b compiler.runtime=dynamic -s:b compiler.runtime_type=Release
+  elif [ -n "$b_runtime_version" ]; then
     set -- "$@" -s:b "compiler.runtime_version=$b_runtime_version"
   fi
   if [ "$use_lock" = "1" ]; then
