@@ -209,15 +209,24 @@ jobs:
         run: |
           set -euo pipefail
           py="$(command -v python3 || command -v python)"
-          "$py" -m pip install --user "conan==2.32.0"
-          user_base="$("$py" -m site --user-base)"
+          # A venv, not --user: macOS runners' python3 is externally managed
+          # (PEP 668) and Windows user scripts land in a versioned directory that
+          # `site --user-base` does not report. The ${RUNNER_TEMP//\\//} expansion
+          # normalizes Windows backslashes so the path stays bash-executable.
+          venv="${RUNNER_TEMP//\\//}/conan-venv"
+          "$py" -m venv "$venv"
           if [ "$RUNNER_OS" = "Windows" ]; then
-            echo "$user_base/Scripts" >> "$GITHUB_PATH"
-            "$user_base/Scripts/conan" --version
+            venv_bin="$venv/Scripts"
+            conan_bin="$venv_bin/conan.exe"
           else
-            echo "$user_base/bin" >> "$GITHUB_PATH"
-            "$user_base/bin/conan" --version
+            venv_bin="$venv/bin"
+            conan_bin="$venv_bin/conan"
           fi
+          "$venv_bin/python" -m pip install --quiet "conan==2.32.0"
+          test -f "$conan_bin"
+          "$conan_bin" --version
+          echo "$venv_bin" >> "$GITHUB_PATH"
+          echo "CONAN_BIN=$conan_bin" >> "$GITHUB_ENV"
       - name: Resolve Conan cache key
         shell: bash
         working-directory: project

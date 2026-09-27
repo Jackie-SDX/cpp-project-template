@@ -121,6 +121,18 @@ load_windows_environment() {
 }
 load_windows_environment
 
+# Conan always needs a *build* profile; --profile supplies the host one, and
+# the build profile falls back to $CONAN_HOME/profiles/default. A fresh
+# CONAN_HOME (cold CI cache on a new runner) has no auto-detected default
+# yet -- detect it once, inside the loaded compiler environment so the
+# detected compiler matches this leg. Never overwrite an existing default:
+# warm cache restores already carry one.
+conan_home="${CONAN_HOME:-${HOME}/.conan2}"
+if [ ! -f "${conan_home}/profiles/default" ]; then
+  printf 'conan_install: detecting default build profile in %s\n' "$conan_home"
+  "$CONAN" profile detect || die "conan profile detect failed"
+fi
+
 profile_name="$(basename "$profile")"
 if [ "$use_lock" = "1" ] && [ -z "$lockfile" ]; then
   lockfile="${lockfile_dir}/${profile_name}.lock"
