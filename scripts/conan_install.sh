@@ -327,9 +327,70 @@ if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; the
     mingw_cc="$(cygpath -m "$mingw_cc")"
     mingw_cxx="$(cygpath -m "$mingw_cxx")"
   fi
-  extra_conf="tools.build:compiler_executables={\"c\": \"$mingw_cc\", \"cpp\": \"$mingw_cxx\"}"
+  executables="{\"c\": \"$mingw_cc\", \"cpp\": \"$mingw_cxx\""
+  # MSYS2's base `binutils` package also ships a cygwin-hosted `windres`
+  # (target x86_64-pc-cygwin) in .../msys64/usr/bin, and the msys2 Conan
+  # package appends that directory to the build-context bindirs, so it leads
+  # PATH for every tool_require: a bare `windres` there resolves to the
+  # amd64 one first. Its .res output is amd64 COFF, which the i686 linker
+  # rejects ("iconv.res: file format not recognized" + "collect2: error: ld
+  # returned 1 exit status", run 36314007868) while the x86_64 linker
+  # accepts it -- which is exactly why only the MinGW x86 leg dies. `ar` and
+  # `ranlib` do not show this: an ar archive is target-independent, and BFD
+  # auto-detects the object format when reading. Pin the windres that sits
+  # next to the pinned gcc instead: CMake reads it from the `rc` entry of
+  # tools.build:compiler_executables (CMAKE_RC_COMPILER, blocks.py), and
+  # libiconv's configure -- which runs $(WINDRES) for src/iconv.res and $(RC)
+  # for lib/libiconv.res -- only reads the environment, so expose both names
+  # through the [buildenv] of the default build profile: conan falls back to
+  # $CONAN_HOME/profiles/default for the build context whenever
+  # --profile:build is absent (ProfilesAPI.get_profiles_from_args), and a
+  # recipe's self.run() applies that env file to every command it launches.
+  windres="$(dirname "$mingw_cc")/windres.exe"
+  # git-bash's test -f accepts native paths ("D:/..." and "D:\..." both work
+  # in MSYS), but check the cygpath -u (POSIX) form as well so the gate can
+  # never silently fail and leave the fix unapplied.
+  windres_ok=""
+  if [ -f "$windres" ]; then
+    windres_ok="1"
+  elif command -v cygpath >/dev/null 2>&1 &&
+       [ -f "$(cygpath -u "$windres" 2>/dev/null || printf '%s' "$windres")" ]; then
+    windres_ok="1"
+  elif command -v windres >/dev/null 2>&1; then
+    windres="$(command -v windres)"
+    if command -v cygpath >/dev/null 2>&1; then
+      windres="$(cygpath -m "$windres")"
+    fi
+    [ -f "$windres" ] && windres_ok="1"
+  fi
+  if [ -n "$windres_ok" ]; then
+    executables="$executables, \"rc\": \"$windres\""
+    if [ -f "$default_profile" ]; then
+      # Rewrite on every run: a warm cache may still carry the previous
+      # image's path, while `conan profile detect --force` (cold home only)
+      # removes the section entirely. cygpath -m keeps the value
+      # slash-separated -- conan unescapes backslashes inside profile values
+      # ("D:\a\bin" would arrive as "D:a<bell>in") -- and CMake plus the
+      # MSYS shell both accept that form.
+      tmp_profile="${default_profile}.tmp"
+      if grep -v -e '^WINDRES=' -e '^RC=' "$default_profile" >"$tmp_profile"; then
+        mv "$tmp_profile" "$default_profile"
+      else
+        rm -f "$tmp_profile"
+      fi
+      grep -q '^\[buildenv\]' "$default_profile" ||
+        printf '\n[buildenv]\n' >>"$default_profile"
+      printf 'WINDRES=%s\nRC=%s\n' "$windres" "$windres" >>"$default_profile"
+      printf 'conan_install: MinGW windres pinned rc=%s (default build profile [buildenv])\n' \
+        "$windres"
+    fi
+  else
+    printf 'conan_install: WARNING: no windres.exe next to %s; .res steps may pick the cygwin one\n' \
+      "$mingw_cc"
+  fi
   printf 'conan_install: MinGW compilers pinned by absolute path c=%s cpp=%s\n' \
     "$mingw_cc" "$mingw_cxx"
+  extra_conf="tools.build:compiler_executables=$executables}"
   # `conan profile detect` guesses the build arch from the runner, not from
   # the compiler it finds, so the MinGW x86 leg records arch=x86_64 while the
   # toolchain pinned above is i686. Overriding that with `-s:b arch=x86` is
@@ -425,6 +486,23 @@ run_conan() {
   if [ -n "$b_msvc" ]; then
     set -- "$@" -s:b compiler=msvc -s:b "compiler.version=$b_msvc" \
       -s:b compiler.runtime=dynamic -s:b compiler.runtime_type=Release
+    # pcre2's CMake names the static libraries pcre2-8-static.lib etc. inside
+    # `IF(MSVC)`, and CMake's MSVC variable is TRUE for the clang-cl driver
+    # too, while the recipe's _lib_name() only adds the -static suffix when
+    # conan's own settings say compiler=msvc. On the clang legs the two
+    # therefore disagree and wxWidgets' configure aborts with
+    # "Library 'pcre2-posix' not found in package ... declare it with
+    # cpp_info.system_libs" (run 36312864487 Windows LLVM x64/x86, run
+    # 36314007868 again). ConanCenter does not test Windows+Clang for pcre2
+    # either, so build that one host dependency with the real MSVC toolchain
+    # the same runner already carries -- the recipe then agrees with its own
+    # CMake on both sides (is_msvc True, CMake MSVC True). A pattern setting
+    # touches only pcre2's node; conan drops the clang-only keys
+    # (runtime_version, gnu* cppstd) from it by itself once compiler changes
+    # (verified against conan 2.32), and lockfiles pin revisions only, so no
+    # re-locking is needed.
+    set -- "$@" -s "pcre2/*:compiler=msvc" -s "pcre2/*:compiler.version=$b_msvc" \
+      -s "pcre2/*:compiler.runtime=dynamic" -s "pcre2/*:compiler.runtime_type=Release"
   elif [ -n "$b_runtime_version" ]; then
     set -- "$@" -s:b "compiler.runtime_version=$b_runtime_version"
   fi
