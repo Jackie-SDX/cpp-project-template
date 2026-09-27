@@ -315,8 +315,8 @@ fi
 # against conan 2.32), and Conan accepts absolute Windows paths in these confs.
 # ---------------------------------------------------------------------------
 extra_conf=""
-b_arch=""
 b_cflags=""
+b_no_arch_flags=""
 if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; then
   mingw_cc="$(command -v gcc || true)"
   mingw_cxx="$(command -v g++ || true)"
@@ -332,18 +332,23 @@ if grep -q '^os=Windows$' "$profile" && grep -q '^compiler=gcc$' "$profile"; the
     "$mingw_cc" "$mingw_cxx"
   # `conan profile detect` guesses the build arch from the runner, not from
   # the compiler it finds, so the MinGW x86 leg records arch=x86_64 while the
-  # toolchain pinned above is i686. AutotoolsToolchain then puts -m64 into
-  # CFLAGS/CXXFLAGS/LDFLAGS of every build-context package and the i686 gcc
-  # cannot link anything ("C compiler cannot create executables", run
-  # 36310578332). Take the build arch from the compiler this leg uses.
+  # toolchain pinned above is i686. Overriding that with `-s:b arch=x86` is
+  # not an option: cmake is a tool_require of the same build profile and
+  # ConanCenter ships no x86 binary ("CMake binaries are only provided for
+  # x86_64 and armv8 architectures", run 36312864487). Keep the detected
+  # arch and instead suppress the -m64 that AutotoolsToolchain/CMakeToolchain
+  # derive from it for the build context: i686 gcc rejects it outright
+  # ("cc1: sorry, unimplemented: 64-bit mode not compiled in", which the
+  # configure run reports as "C compiler cannot create executables", run
+  # 36310578332), and that compiler already targets 32-bit without any arch
+  # flag. tools.gnu:disable_flags is consulted by both toolchains before the
+  # flag is emitted (conan 2.32, flags.py architecture_flag).
   dumpmachine="$(gcc -dumpmachine 2>/dev/null || true)"
   case "$dumpmachine" in
-    i?86-*) b_arch="x86" ;;
-    x86_64-*) b_arch="x86_64" ;;
-    aarch64-*|arm64-*) b_arch="armv8" ;;
+    i?86-*) b_no_arch_flags="1" ;;
   esac
-  printf 'conan_install: build context arch=%s (%s)\n' "${b_arch:-<as detected>}" \
-    "${dumpmachine:-unknown target}"
+  printf 'conan_install: MinGW target=%s (build arch flags: %s)\n' \
+    "${dumpmachine:-unknown target}" "$([ -n "$b_no_arch_flags" ] && printf disabled || printf enabled)"
   # gettext 0.22.5 ships a gnulib localtime.c that walks `char **env` as if it
   # were `char *` (gettext bug #65957, fixed in 0.24). GCC 14+ promoted
   # -Wincompatible-pointer-types to an error, so every mingw leg dies there
@@ -411,8 +416,8 @@ run_conan() {
     # pin is meaningless for only half of the graph.
     set -- "$@" -c:a "$extra_conf"
   fi
-  if [ -n "$b_arch" ]; then
-    set -- "$@" -s:b "arch=$b_arch"
+  if [ -n "$b_no_arch_flags" ]; then
+    set -- "$@" -c:b 'tools.gnu:disable_flags=["arch"]'
   fi
   if [ -n "$b_cflags" ]; then
     set -- "$@" -c:b "tools.build:cflags=[\"$b_cflags\"]"

@@ -72,7 +72,13 @@ target_include_directories(${PROJECT_WX_NAME} PUBLIC "${PROJECT_BINARY_DIR}")
 target_include_directories(${PROJECT_WX_NAME} PUBLIC "${PROJECT_LIB_DIR}/src")
 target_link_libraries(${PROJECT_WX_NAME} PUBLIC ${PROJECT_LIB_NAME})
 
-if (WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64)$")
+# Upstream/vcpkg's config-mode package exports the wx:: component targets;
+# Conan 2 CMakeDeps exports one aggregated wxWidgets::wxWidgets imported
+# target and puts it in wxWidgets_LIBRARIES instead, so take the component
+# path only when those targets exist (otherwise the conan ARM64 legs die in
+# configure with "Target projectwx links to: wx::core but the target was not
+# found", run 36312864487).
+if (WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64)$" AND TARGET wx::core)
 	target_link_libraries(${PROJECT_WX_NAME} PUBLIC
 		wx::core
 		wx::base
