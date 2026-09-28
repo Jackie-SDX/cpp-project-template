@@ -12,3 +12,8 @@
 /docs/sphinx/build/
 /docs/sphinx/index.rst
 /instdir*/
+/.ccache/
+/.conan2/
+/vcpkg_cache/
+__pycache__/
+/release-assets/

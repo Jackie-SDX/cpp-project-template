@@ -1,0 +1,25 @@
+# Windows MSVC x86 (release leg "Windows MSVC x86").
+#
+# Compiler versions are the runner images' toolchain of record; bump them
+# together with CI image/compiler changes (they key both package IDs and the
+# Conan cache key).
+#
+# compiler.version=195 (VS 18 / VS 2026): windows-latest ships only Visual
+# Studio 18; 194 makes Conan look for VS 17 and fail with "VS non-existing
+# installation" (run 36294183365). See windows-msvc-x86_64.
+
+[settings]
+os=Windows
+arch=x86
+compiler=msvc
+compiler.version=195
+compiler.runtime=static
+compiler.runtime_type=Release
+compiler.cppstd=17
+build_type=Release
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+# See conanfile.py header: re-assert the project's C++20 after CMakeToolchain
+# injects the profile's cppstd as CMAKE_CXX_STANDARD.
+tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}

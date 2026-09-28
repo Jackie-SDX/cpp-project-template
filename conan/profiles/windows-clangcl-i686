@@ -1,0 +1,41 @@
+# Windows clang-cl x86 (release leg "Windows LLVM x86").
+#
+# Compiler versions are the runner images' toolchain of record; bump them
+# together with CI image/compiler changes (they key both package IDs and the
+# Conan cache key).
+
+[settings]
+os=Windows
+arch=x86
+compiler=clang
+compiler.version=19
+compiler.runtime=dynamic
+compiler.runtime_type=Release
+# vcvars selection for clang-cl comes from runtime_version, not from
+# compiler.version: Conan refuses to emit conanvcvars.bat without it
+# ("Visual Studio Runtime version (v140-v145) not defined", run
+# 36294183365). v145 -> Visual Studio 18 + -vcvars_ver=14.5, matching the
+# toolset windows-latest ships (14.5x). See windows-clangcl-x86_64.
+compiler.runtime_version=v145
+compiler.cppstd=gnu17
+build_type=Release
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+# See conanfile.py header: re-assert the project's C++20 after CMakeToolchain
+# injects the profile's cppstd as CMAKE_CXX_STANDARD.
+tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}
+# MesonToolchain leaves [binaries] c/cpp empty for non-Apple cross
+# builds (x86_64 runner -> x86) without this conf, and meson recipes
+# (fribidi) fail with "'c' compiler binary not defined".
+tools.build:compiler_executables={"c": "clang-cl", "cpp": "clang-cl"}
+# clang-cl for this leg resolves to the x64-host binary under
+# VC\Tools\Llvm\x64\bin, whose default target is x86_64, while vcvars32.bat
+# puts the x86 CRT on LIB. Objects and CRT then disagree and lld-link dies
+# with "undefined symbol: mainCRTStartup" (run 36306665122, bzip2). This is
+# the same override configure.cmake already applies for the vcpkg
+# x86-win-llvm triplet, expressed as a Conan conf so every Conan-built
+# dependency (bzip2, zlib, libjpeg, wxWidgets, ...) and the project's own
+# CMakeToolchain get it too.
+tools.build:cflags=["/clang:--target=i686-pc-windows-msvc"]
+tools.build:cxxflags=["/clang:--target=i686-pc-windows-msvc"]

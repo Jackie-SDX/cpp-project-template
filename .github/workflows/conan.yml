@@ -1,0 +1,429 @@
+# =============================================================================
+# Conan - per-profile cold/warm cache proof + full conan matrix (issue #152)
+# =============================================================================
+# Purpose
+# --------
+# Builds every supported conan/profiles leg end to end:
+#
+#   deps -> conan install (cold/warm evidence) -> configure -> build -> test
+#
+# with the Conan package cache restored/saved through
+# scripts/conan_cache_key.sh (family=release: the SAME keys release.yml
+# restores, so a green run here warms the release path and vice versa).
+# Every leg writes a before/after cache-evidence table to its step summary:
+#
+#   cold run = cache=<0..47> build=<n> before install, everything Cache after
+#   warm run = everything Cache before AND after, install finishes in seconds
+#
+# Dispatch input `profile_filter` selects ONE exact profile for iteration;
+# the full 19-leg matrix is always declared in .github/scripts/conan_matrix.py
+# (filtering selects, it never shrinks the declared set; an unknown filter
+# fails the plan job loudly).
+#
+# Cache contract (issue #152)
+# ---------------------------
+# GitHub's cache is ref scoped, so a key saved by a job that succeeded on one
+# branch is invisible to sibling branches and to tags. Three tiers close that
+# gap, in this order, exactly once per run (two homes must never be merged):
+#
+#   1. actions/cache exact key      (this ref, then the default branch)
+#   2. scripts/conan_cache_artifact.sh  (repository wide: any ref, ever)
+#   3. actions/cache restore-keys   (prefix of the same profile)
+#
+# The push/schedule triggers below keep the DEFAULT branch warm, which is the
+# same design as .github/workflows/vcpkg-cache-warmup.yml: every branch and
+# every tag restores default-branch entries. Each leg prints its restore
+# source (exact|artifact:<id>|prefix:<key>|cold) into the step summary.
+#
+# Release gates live in release.yml (mode from
+# packaging/release-package-manager.txt or the package_manager dispatch
+# input); this workflow is the fast per-leg loop and the cold/warm proof.
+# =============================================================================
+name: Conan
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile_filter:
+        description: Exact profile name from conan/profiles to run (empty = all 19 legs)
+        required: false
+        default: ''
+  # Seed the default-branch cache scope (see the cache contract above). The
+  # paths mirror what re-keys the Conan cache, so a merge that touches any of
+  # them re-seeds main instead of leaving tag runs cold.
+  push:
+    branches: [ main ]
+    paths:
+      - 'conanfile.py'
+      - 'conan/**'
+      - 'scripts/conan_cache_key.sh'
+      - 'scripts/conan_cache_artifact.sh'
+      - 'scripts/conan_cache_trim.sh'
+      - 'scripts/conan_install.sh'
+      - '.github/workflows/conan.yml'
+  schedule:
+    - cron: '45 4 * * 0'
+
+permissions:
+  contents: read
+  # scripts/conan_cache_artifact.sh reads the Actions artifacts API with the
+  # workflow token (artifacts are the ref-independent cache tier).
+  actions: read
+
+# One run per ref at a time: two concurrent runs could race the same cache
+# key save, and queued runs re-use each other's warm cache on purpose.
+concurrency:
+  group: conan-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_COMPILERCHECK: content
+
+jobs:
+  # plan: materialize the leg selection as JSON. The table lives in
+  # conan_matrix.py; --selftest and the profile files are validated here too.
+  plan:
+    name: Plan legs
+    runs-on: ubuntu-24.04
+    outputs:
+      legs: ${{ steps.legs.outputs.legs }}
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: project
+          fetch-depth: 1
+      - name: Build matrix
+        id: legs
+        working-directory: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/conan_matrix.py --selftest
+          bash scripts/conan_cache_artifact.sh selftest
+          filter="${{ inputs.profile_filter }}"
+          if [ -n "$filter" ]; then
+            legs="$(python3 .github/scripts/conan_matrix.py "$filter")" || {
+              echo "profile_filter '$filter' matches no matrix leg" >&2
+              exit 1
+            }
+          else
+            legs="$(python3 .github/scripts/conan_matrix.py)"
+          fi
+          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+          echo "planned legs: $(printf '%s' "$legs" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+
+  conan-leg:
+    name: ${{ matrix.profile }}
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    env:
+      PACKAGE_MANAGER_MODE: conan2
+      CONAN_PROFILE: ${{ matrix.profile }}
+      CONAN_HOME: ${{ github.workspace }}/.conan2
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.legs) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: project
+          submodules: true
+          fetch-depth: 1
+      # System libraries the wxWidgets source build needs (and the runtime
+      # libs validate-release resolves) -- same package sets release.yml
+      # installs, so this workflow proves the release dependency surface.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        working-directory: project
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          if [[ "${{ matrix.linux_multilib }}" == "true" ]]; then
+            sudo dpkg --add-architecture i386
+            sudo apt-get update
+            sudo apt-get install -y ninja-build ccache pkg-config rpm dpkg-dev gcc-multilib g++-multilib libwxgtk3.2-dev:i386 libgtest-dev:i386
+            {
+              echo "CFLAGS=-m32"
+              echo "CXXFLAGS=-m32"
+              echo "LDFLAGS=-m32"
+              echo "PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig"
+            } >> "$GITHUB_ENV"
+          else
+            sudo apt-get install -y ninja-build ccache pkg-config rpm dpkg-dev libwxgtk3.2-dev libgtest-dev
+          fi
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            sudo apt-get install -y clang
+          fi
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          brew install ninja ccache wxwidgets googletest
+          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+            brew install gcc
+            gcc_prefix="$(brew --prefix gcc)"
+            gcc_major="$(brew list --versions gcc | awk '{print $2}' | cut -d. -f1)"
+            {
+              echo "CC=${gcc_prefix}/bin/gcc-${gcc_major}"
+              echo "CXX=${gcc_prefix}/bin/g++-${gcc_major}"
+            } >> "$GITHUB_ENV"
+          elif [[ "${{ matrix.compiler }}" == "llvm" ]]; then
+            brew install llvm
+            llvm_prefix="$(brew --prefix llvm)"
+            test -x "$llvm_prefix/bin/clang"
+            test -x "$llvm_prefix/bin/clang++"
+            {
+              echo "CC=${llvm_prefix}/bin/clang"
+              echo "CXX=${llvm_prefix}/bin/clang++"
+              echo "PATH=${llvm_prefix}/bin:$PATH"
+            } >> "$GITHUB_ENV"
+          fi
+      - name: Install Windows tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ninja ccache -y --no-progress
+      - name: Refresh Windows environment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1") {
+            Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+            refreshenv
+          }
+          ninja --version
+      # CORE-1/P0-4: the MinGW legs must compile with the matching MSYS2
+      # toolchain (x64->MINGW64, x86->MINGW32), same as release.yml.
+      - name: Setup MSYS2 MinGW
+        id: msys2
+        if: runner.os == 'Windows' && matrix.compiler == 'mingw'
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        with:
+          msystem: ${{ matrix.msys2_msystem }}
+          update: false
+          path-type: minimal
+          install: ${{ matrix.msys2_toolchain }}
+      - name: Add MSYS2 compiler to PATH
+        if: runner.os == 'Windows' && matrix.compiler == 'mingw'
+        shell: pwsh
+        run: |
+          $msysRoot = "${{ steps.msys2.outputs.msys2-location }}"
+          if (-not $msysRoot) { throw "MSYS2 location output was empty" }
+          $bin = Join-Path $msysRoot "${{ matrix.msys2_bin }}"
+          if (-not (Test-Path $bin)) { throw "MSYS2 compiler directory not found: $bin" }
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Assert MinGW target architecture
+        if: runner.os == 'Windows' && matrix.compiler == 'mingw'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.arch }}" in
+            x64) want=x86_64-w64-mingw32 ;;
+            x86) want=i686-w64-mingw32 ;;
+            *) echo "unknown mingw arch ${{ matrix.arch }}" >&2; exit 1 ;;
+          esac
+          got=$(gcc -dumpmachine | tr '[:upper:]' '[:lower:]')
+          echo "gcc -dumpmachine = $got (expected $want)"
+          test "$got" = "$want"
+      - name: Locate Visual Studio environment
+        if: runner.os == 'Windows' && (matrix.compiler == 'msvc' || matrix.compiler == 'llvm')
+        shell: pwsh
+        run: "$vswhere = \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe\"\nif (-not (Test-Path $vswhere)) {\n  $vswhere = \"$env:ProgramFiles\\Microsoft Visual Studio\\Installer\\vswhere.exe\"\n}\nif (-not (Test-Path $vswhere)) { throw \"vswhere.exe not found\" }\nif (\"${{ matrix.arch }}\" -eq \"arm64\") {\n  $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath\n  if (-not $vsRoot) { throw \"Native ARM64 MSVC toolset not found\" }\n  $vsRoot = ($vsRoot | Select-Object -First 1).Trim()\n  $vsDevCmd = Join-Path $vsRoot \"Common7\\Tools\\VsDevCmd.bat\"\n  $wrapper = Join-Path $env:GITHUB_WORKSPACE \"vs-arm64-env.bat\"\n  Set-Content -Path $wrapper -Value \"@echo off\" -Encoding ascii\n  Add-Content -Path $wrapper -Value ('call \"' + $vsDevCmd + '\" -arch=arm64 -host_arch=arm64') -Encoding ascii\n  \"ENVIRONMENT_SCRIPT=$wrapper\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8\n} else {\n  $vsRoot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath\n  if (-not $vsRoot) { throw \"Visual Studio C++ toolset not found\" }\n  $vsRoot = ($vsRoot | Select-Object -First 1).Trim()\n  $script = Join-Path $vsRoot \"VC\\Auxiliary\\Build\\${{ matrix.environment_script }}\"\n  if (-not (Test-Path $script)) { throw \"Expected environment script not found at $script\" }\n  \"ENVIRONMENT_SCRIPT=$script\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8\n}\n"
+
+      # Conan 2 provisioning: identical step contract to release.yml.
+      - name: Setup Conan 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          py="$(command -v python3 || command -v python)"
+          # A venv, not --user: macOS runners' python3 is externally managed
+          # (PEP 668) and Windows user scripts land in a versioned directory that
+          # `site --user-base` does not report. The ${RUNNER_TEMP//\\//} expansion
+          # normalizes Windows backslashes so the path stays bash-executable.
+          venv="${RUNNER_TEMP//\\//}/conan-venv"
+          echo "conan venv: python=$py ($("$py" --version 2>&1))"
+          "$py" -m venv "$venv"
+          # Venv layout depends on the interpreter that created it: native Windows
+          # python -> Scripts/, MSYS2 python (first on PATH on MinGW legs) -> bin/.
+          if [ -x "$venv/Scripts/python" ]; then
+            venv_bin="$venv/Scripts"
+          elif [ -x "$venv/bin/python" ]; then
+            venv_bin="$venv/bin"
+          else
+            echo "venv interpreter not found under $venv" >&2
+            exit 1
+          fi
+          "$venv_bin/python" -m pip install --quiet "conan==2.32.0"
+          if [ -f "$venv_bin/conan.exe" ]; then
+            conan_bin="$venv_bin/conan.exe"
+          elif [ -f "$venv_bin/conan" ]; then
+            conan_bin="$venv_bin/conan"
+          else
+            echo "conan executable not found under $venv_bin" >&2
+            exit 1
+          fi
+          "$conan_bin" --version
+          echo "$venv_bin" >> "$GITHUB_PATH"
+          echo "CONAN_BIN=$conan_bin" >> "$GITHUB_ENV"
+      - name: Resolve Conan cache key
+        shell: bash
+        working-directory: project
+        run: |
+          bash scripts/conan_cache_key.sh github-env \
+            --family release \
+            --profile "conan/profiles/${{ matrix.profile }}" \
+            --build-type Release
+      # Tier 1: exact key in this ref's cache scope (or the default branch's,
+      # which is what every branch and tag restores from after the warmup
+      # seeds main).
+      - name: Restore Conan package cache
+        id: conan-cache-restore
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: .conan2
+          key: ${{ env.CONAN_CACHE_KEY }}
+      # Tier 2: the same exact key anywhere in the repository. Actions
+      # artifacts are not ref scoped, so this is the tier that makes "a job
+      # that has ever succeeded" reusable from any branch and from tags.
+      # Fail-soft on purpose: a cache miss must never fail a leg.
+      - name: Restore Conan package cache (cross-ref artifact)
+        id: conan-artifact-restore
+        if: steps.conan-cache-restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        shell: bash
+        working-directory: project
+        env:
+          # Listing/downloading repository artifacts over the REST API needs
+          # the workflow token; the workflow grants actions: read for it.
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/conan_cache_artifact.sh restore
+      # Tier 3: nearest older key of the SAME profile (restore-keys prefix).
+      # Only reached when both exact tiers missed. The trailing '-' matters:
+      # without it linux-gcc-x86 would also prefix-match linux-gcc-x86_64.
+      - name: Restore Conan package cache (prefix)
+        id: conan-cache-prefix-restore
+        if: steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: .conan2
+          key: ${{ env.CONAN_CACHE_KEY }}
+          restore-keys: ${{ env.CONAN_CACHE_KEY_PREFIX }}-
+      # One line of evidence for the cache proofs: exact | artifact:<id> |
+      # prefix:<key> | cold, exported as CONAN_CACHE_RESTORE_SOURCE and
+      # appended to the step summary.
+      - name: Record Conan cache restore source
+        if: always()
+        shell: bash
+        working-directory: project
+        env:
+          CONAN_EXACT_HIT: ${{ steps.conan-cache-restore.outputs.cache-hit }}
+          CONAN_ARTIFACT_HIT: ${{ steps.conan-artifact-restore.outputs.hit }}
+          CONAN_ARTIFACT_ID: ${{ steps.conan-artifact-restore.outputs.artifact_id }}
+          CONAN_PREFIX_KEY: ${{ steps.conan-cache-prefix-restore.outputs.cache-matched-key }}
+        run: bash scripts/conan_cache_artifact.sh source
+      - name: Conan install
+        id: conan-install
+        shell: bash
+        working-directory: project
+        env:
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: bash scripts/conan_install.sh --profile "conan/profiles/${{ matrix.profile }}"
+      # Strip Conan's build/download/temp folders before the cache is
+      # archived: an untrimmed home is ~3.6 GB per profile and 19 of those
+      # exceed GitHub's 10 GB per-repo cache budget, so entries evict each
+      # other and the next run rebuilds from source. The script fails the
+      # job if any package folder changes.
+      #
+      # Trim and save are skipped again when the artifact tier supplied the
+      # home: that content is already carried repository-wide, so copying it
+      # into this ref's cache scope too would only push the repository back
+      # over its 10 GB budget and evict entries that other refs depend on.
+      - name: Trim Conan package cache
+        id: conan-cache-trim
+        if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+        shell: bash
+        run: bash project/scripts/conan_cache_trim.sh
+      - name: Save Conan package cache
+        id: conan-cache-save
+        if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+        with:
+          path: .conan2
+          key: ${{ env.CONAN_CACHE_KEY }}
+      # Mirror the home into the repository-wide artifact tier, but only when
+      # no trusted artifact carries this key yet (prepare decides) -- a warm
+      # run then costs one API call, a first build of a key costs one tarball.
+      - name: Prepare Conan cache artifact
+        id: conan-artifact-prepare
+        if: always() && steps.conan-install.outcome == 'success' && steps.conan-cache-trim.outcome != 'failure'
+        continue-on-error: true
+        shell: bash
+        working-directory: project
+        env:
+          # The dedupe probe ("does a trusted artifact for this key already
+          # exist?") is an API read; without the token prepare would repack
+          # and re-upload the home on every run.
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/conan_cache_artifact.sh prepare
+      - name: Upload Conan cache artifact
+        if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.conan-artifact-prepare.outputs.name }}
+          path: ${{ steps.conan-artifact-prepare.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Configure
+        working-directory: project
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          RUNNER_OS: ${{ runner.os }}
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          BUILD_TYPE: Release
+          PACKAGE_TOOLCHAIN: ${{ matrix.compiler }}
+          BUILD_PROJECTWX: ${{ matrix.build_projectwx }}
+          BUILD_TESTING: ${{ matrix.build_testing }}
+        run: cmake -P ./.github/scripts/configure.cmake
+      - name: Build
+        working-directory: project
+        env:
+          CXX: ${{ matrix.cxx }}
+          RUNNER_OS: ${{ runner.os }}
+          ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+          BUILD_TYPE: Release
+        run: cmake -P ./.github/scripts/build.cmake
+      - name: Test
+        if: matrix.build_testing != 'OFF'
+        working-directory: project
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          RUNNER_OS: ${{ runner.os }}
+          BUILD_TYPE: Release
+        run: cmake -P ./.github/scripts/test.cmake
+      - name: Record leg summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### conan leg: \`${{ matrix.profile }}\`"
+            echo ""
+            echo "- runner: \`${{ matrix.os }}\` (${{ matrix.compiler }}, ${{ matrix.arch }})"
+            echo "- cache key: \`${CONAN_CACHE_KEY:-<not resolved>}\`"
+            echo "- cache restore hit: \`${{ steps.conan-cache-restore.outputs.cache-hit || 'false' }}\`"
+            echo "- restore source: \`${CONAN_CACHE_RESTORE_SOURCE:-cold}\`"
+            echo "- cross-ref artifact id: \`${{ steps.conan-artifact-restore.outputs.artifact_id || 'none' }}\`"
+            echo "- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"

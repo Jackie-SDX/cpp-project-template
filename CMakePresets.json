@@ -35,6 +35,30 @@
             }
         },
         {
+            "name": "vcpkg-release",
+            "inherits": "base",
+            "displayName": "Release (Ninja, vcpkg)",
+            "description": "Explicit vcpkg-backed Release build. Requires VCPKG_ROOT to point at a vcpkg checkout; manifest mode installs wxwidgets/gtest automatically (vcpkg.json).",
+            "generator": "Ninja",
+            "toolchainFile": "$penv{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "PACKAGE_MANAGER": "vcpkg"
+            }
+        },
+        {
+            "name": "vcpkg-debug",
+            "inherits": "base",
+            "displayName": "Debug (Ninja, vcpkg)",
+            "description": "Explicit vcpkg-backed Debug build. Requires VCPKG_ROOT to point at a vcpkg checkout; manifest mode installs wxwidgets/gtest automatically (vcpkg.json).",
+            "generator": "Ninja",
+            "toolchainFile": "$penv{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "PACKAGE_MANAGER": "vcpkg"
+            }
+        },
+        {
             "name": "coverage",
             "inherits": "base",
             "displayName": "Coverage",
@@ -70,6 +94,8 @@
     "buildPresets": [
         { "name": "default",  "configurePreset": "default" },
         { "name": "release",  "configurePreset": "release" },
+        { "name": "vcpkg-release", "configurePreset": "vcpkg-release" },
+        { "name": "vcpkg-debug",    "configurePreset": "vcpkg-debug" },
         { "name": "coverage", "configurePreset": "coverage" },
         { "name": "tidy",     "configurePreset": "tidy" },
         { "name": "cppcheck", "configurePreset": "cppcheck" }
@@ -83,6 +109,16 @@
         {
             "name": "release",
             "configurePreset": "release",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "vcpkg-release",
+            "configurePreset": "vcpkg-release",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "vcpkg-debug",
+            "configurePreset": "vcpkg-debug",
             "output": { "outputOnFailure": true }
         }
     ]

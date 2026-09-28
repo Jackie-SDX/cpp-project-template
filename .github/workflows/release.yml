@@ -45,9 +45,22 @@
 #   * ``v*`` tag pushes (production release), pull requests against ``main``
 #     (smoke gates only), and manual dispatch.
 #
+# Package-manager mode (issue #152)
+# ---------------------------------
+#   Every run resolves ONE dependency-backend mode before any build job:
+#     conan2 -> committed Conan profiles/lockfiles provision wxWidgets+GTest
+#               (scripts/conan_install.sh), Windows CLANGARM64 excepted (it
+#               stays on MSYS2 system packages, no profile);
+#     vcpkg  -> exactly the pre-existing behaviour (nothing changes).
+#   The mode comes from the workflow_dispatch ``package_manager`` input when
+#   given, otherwise from packaging/release-package-manager.txt (single
+#   line: ``conan2`` or ``vcpkg``). The ``resolve`` job records the chosen
+#   mode in its step summary and exports it to every build job; asset names
+#   are IDENTICAL in both modes (PACKAGE_TOOLCHAIN/CPP_PROJECT_TEMPLATE_VERSION).
+#
 # Job dependency graph
 # --------------------
-#   cache-gate -> package/source/expanded-package -> validate-release -> publish
+#   resolve -> cache-gate -> package/source/expanded-package -> validate-release -> publish
 #   package-smoke runs on PRs without the ``full-release-test`` label.
 #   A PR must carry the ``full-release-test`` label to run the full matrix.
 #
@@ -73,12 +86,26 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      package_manager:
+        description: Dependency backend for this run (default follows packaging/release-package-manager.txt)
+        type: choice
+        options:
+          - default
+          - conan2
+          - vcpkg
+        default: default
 
 concurrency:
   group: release-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 permissions:
   contents: read
+  # Read-only access to this repository's Actions artifacts: the Conan cache's
+  # ref-independent tier (scripts/conan_cache_artifact.sh) lists and downloads
+  # them with the workflow token. Jobs that declare their own permissions
+  # block (validate-release, publish) keep theirs untouched.
+  actions: read
 env:
   VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
   VCPKG_CACHE_NAMESPACE: master
@@ -86,17 +113,65 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_COMPILERCHECK: content
 jobs:
+  # resolve: single source of truth for the package-manager mode of THIS run
+  # (issue #152). workflow_dispatch input wins when given; otherwise the
+  # committed packaging/release-package-manager.txt decides. Every build job
+  # consumes the mode through needs.resolve.outputs.mode -> job env
+  # PACKAGE_MANAGER_MODE, so a tag push can only ever build the mode that
+  # was committed with it.
+  resolve:
+    name: Resolve package-manager mode
+    runs-on: ubuntu-24.04
+    outputs:
+      mode: ${{ steps.pick.outputs.mode }}
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: project
+          fetch-depth: 1
+      - name: Pick package-manager mode
+        id: pick
+        working-directory: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          input_mode="${{ inputs.package_manager }}"
+          if [ -z "$input_mode" ] || [ "$input_mode" = "default" ]; then
+            mode_source="packaging/release-package-manager.txt"
+            mode="$(tr -d '[:space:]' < packaging/release-package-manager.txt)"
+          else
+            mode_source="workflow_dispatch input"
+            mode="$input_mode"
+          fi
+          case "$mode" in
+            conan2|vcpkg) ;;
+            *) echo "invalid package-manager mode: '$mode' (from $mode_source)" >&2; exit 1 ;;
+          esac
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Package-manager mode: \`${mode}\`"
+            echo ""
+            echo "- source: \`${mode_source}\`"
+            echo "- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- ref: \`${{ github.ref }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "package-manager mode=$mode (source: $mode_source)"
   # cache-gate: proves the vcpkg binary cache contract (ADR 006) before any
   # package job starts. It fails a tag/dispatch run only when vcpkg-cache-warmup
   # recorded a seed for this exact key recently and the cache is nevertheless
   # gone; a cold start (fork, first run, key change, expired record) always
   # proceeds and lets the package job build slowly, because a cache miss must
-  # never fail a release.
+  # never fail a release. In conan2 mode there is no vcpkg binary cache to
+  # prove, so every check is skipped and the job reports N/A instead.
 
   cache-gate:
     name: Windows release cache gate (${{ matrix.name }})
+    needs: resolve
     if: github.event_name == 'push' && github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-release-test'))
     runs-on: ${{ matrix.os }}
+    env:
+      PACKAGE_MANAGER_MODE: ${{ needs.resolve.outputs.mode }}
     strategy:
       fail-fast: false
       matrix:
@@ -143,7 +218,20 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { path: project }
+      - name: Record package-manager mode
+        shell: bash
+        run: |
+          if [ "$PACKAGE_MANAGER_MODE" = "conan2" ]; then
+            {
+              echo "#### cache-gate (${{ matrix.name }})"
+              echo ""
+              echo "N/A in conan2 mode: this leg provisions dependencies from"
+              echo "committed Conan profiles/lockfiles; the vcpkg binary-cache"
+              echo "contract is not part of the run."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Resolve release cache key
+        if: env.PACKAGE_MANAGER_MODE != 'conan2'
         shell: bash
         run: |
           bash project/scripts/vcpkg_cache_key.sh github-env \
@@ -153,6 +241,7 @@ jobs:
             --build-type Release \
             --manifest project/vcpkg.json
       - name: Restore release package cache
+        if: env.PACKAGE_MANAGER_MODE != 'conan2'
         id: package-cache
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
@@ -161,6 +250,7 @@ jobs:
           restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
           lookup-only: true
       - name: Restore vcpkg cache seed record
+        if: env.PACKAGE_MANAGER_MODE != 'conan2'
         id: seed-record
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
@@ -169,6 +259,7 @@ jobs:
           restore-keys: |
             vcpkg-seed-${{ env.VCPKG_CACHE_KEY }}-
       - name: Checkout vcpkg
+        if: env.PACKAGE_MANAGER_MODE != 'conan2'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: microsoft/vcpkg
@@ -176,6 +267,7 @@ jobs:
           path: vcpkg
           fetch-depth: 1
       - name: Restore vcpkg tool cache
+        if: env.PACKAGE_MANAGER_MODE != 'conan2'
         id: vcpkg-tool-cache
         uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
@@ -185,6 +277,7 @@ jobs:
             vcpkg-tool-windows-${{ matrix.tool_arch }}-${{ env.VCPKG_GIT_REF }}-
           lookup-only: true
       - name: Enforce upstream release cache contract
+        if: env.PACKAGE_MANAGER_MODE != 'conan2'
         shell: bash
         run: |
           bash project/scripts/vcpkg_cache_gate.sh \
@@ -197,10 +290,14 @@ jobs:
   # macOS Clang). Skipped on plain PRs unless the full-release-test label is set.
 
   package:
-    needs: cache-gate
+    needs: [resolve, cache-gate]
     name: ${{ matrix.name }}
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-release-test')
     runs-on: ${{ matrix.os }}
+    env:
+      PACKAGE_MANAGER_MODE: ${{ needs.resolve.outputs.mode }}
+      CONAN_PROFILE: ${{ matrix.conan_profile }}
+      CONAN_HOME: ${{ github.workspace }}/.conan2
     strategy:
       fail-fast: false
       matrix:
@@ -214,6 +311,7 @@ jobs:
           toolchain: msvc
           arch: x64
           nsis_generator: NSIS64
+          conan_profile: windows-msvc-x86_64
         - name: Windows MSVC x86
           os: windows-latest
           cc: cl
@@ -223,6 +321,7 @@ jobs:
           toolchain: msvc
           arch: x86
           nsis_generator: NSIS
+          conan_profile: windows-msvc-i686
         - name: Windows MinGW x64
           os: windows-latest
           cc: gcc
@@ -234,6 +333,7 @@ jobs:
           msys2_msystem: MINGW64
           msys2_toolchain: mingw-w64-x86_64-toolchain
           msys2_bin: mingw64/bin
+          conan_profile: windows-mingw-x86_64
         - name: Windows MinGW x86
           os: windows-latest
           cc: gcc
@@ -245,6 +345,7 @@ jobs:
           msys2_msystem: MINGW32
           msys2_toolchain: mingw-w64-i686-toolchain
           msys2_bin: mingw32/bin
+          conan_profile: windows-mingw-i686
         - name: Windows LLVM x64
           os: windows-latest
           cc: clang-cl
@@ -254,6 +355,7 @@ jobs:
           toolchain: llvm
           arch: x64
           nsis_generator: NSIS64
+          conan_profile: windows-clangcl-x86_64
         - name: Windows LLVM x86
           os: windows-latest
           cc: clang-cl
@@ -263,24 +365,28 @@ jobs:
           toolchain: llvm
           arch: x86
           nsis_generator: NSIS
+          conan_profile: windows-clangcl-i686
         - name: Linux GCC x64
           os: ubuntu-24.04
           cc: gcc
           cxx: g++
           toolchain: gcc
           arch: x64
+          conan_profile: linux-gcc-x86_64
         - name: Linux GCC arm64
           os: ubuntu-24.04-arm
           cc: gcc
           cxx: g++
           toolchain: gcc
           arch: arm64
+          conan_profile: linux-gcc-armv8
         - name: macOS Clang arm64
           os: macos-latest
           cc: clang
           cxx: clang++
           toolchain: apple-clang
           arch: arm64
+          conan_profile: macos-apple-clang-armv8
     defaults:
       run:
         shell: bash
@@ -396,8 +502,153 @@ jobs:
         got=$(gcc -dumpmachine | tr '[:upper:]' '[:lower:]')
         echo "gcc -dumpmachine = $got (expected $want)"
         test "$got" = "$want"
+    # Conan 2 provisioning (issue #152). Runs after MSYS2/vcvars setup so the
+    # dependency source build (wxWidgets) sees the leg's compiler, and before
+    # the vcpkg steps so a conan2-mode leg never touches vcpkg at all. The
+    # cache is content-addressed by scripts/conan_cache_key.sh; exact-key
+    # restore only (a stale restore can never satisfy a different package_id).
+    - name: Setup Conan 2
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        py="$(command -v python3 || command -v python)"
+        # A venv, not --user: macOS runners' python3 is externally managed
+        # (PEP 668) and Windows user scripts land in a versioned directory that
+        # `site --user-base` does not report. The ${RUNNER_TEMP//\\//} expansion
+        # normalizes Windows backslashes so the path stays bash-executable.
+        venv="${RUNNER_TEMP//\\//}/conan-venv"
+        echo "conan venv: python=$py ($("$py" --version 2>&1))"
+        "$py" -m venv "$venv"
+        # Venv layout depends on the interpreter that created it: native Windows
+        # python -> Scripts/, MSYS2 python (first on PATH on MinGW legs) -> bin/.
+        if [ -x "$venv/Scripts/python" ]; then
+          venv_bin="$venv/Scripts"
+        elif [ -x "$venv/bin/python" ]; then
+          venv_bin="$venv/bin"
+        else
+          echo "venv interpreter not found under $venv" >&2
+          exit 1
+        fi
+        "$venv_bin/python" -m pip install --quiet "conan==2.32.0"
+        if [ -f "$venv_bin/conan.exe" ]; then
+          conan_bin="$venv_bin/conan.exe"
+        elif [ -f "$venv_bin/conan" ]; then
+          conan_bin="$venv_bin/conan"
+        else
+          echo "conan executable not found under $venv_bin" >&2
+          exit 1
+        fi
+        "$conan_bin" --version
+        echo "$venv_bin" >> "$GITHUB_PATH"
+        echo "CONAN_BIN=$conan_bin" >> "$GITHUB_ENV"
+    - name: Resolve Conan cache key
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      shell: bash
+      working-directory: project
+      run: |
+        bash scripts/conan_cache_key.sh github-env \
+          --family release \
+          --profile "conan/profiles/${{ matrix.conan_profile }}" \
+          --build-type Release
+    # Cache tiers (issue #152), same contract as conan.yml: exact key in this
+    # ref's scope -> repository-wide artifact (any ref, ever) -> restore-keys
+    # prefix of the same profile. Never two homes at once, never a cache
+    # problem in front of a release build (every tier is fail-soft).
+    - name: Restore Conan package cache
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      id: conan-cache-restore
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: .conan2
+        key: ${{ env.CONAN_CACHE_KEY }}
+    - name: Restore Conan package cache (cross-ref artifact)
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      id: conan-artifact-restore
+      continue-on-error: true
+      shell: bash
+      working-directory: project
+      env:
+        # Artifact tier reads go through the REST API (actions: read).
+        GH_TOKEN: ${{ github.token }}
+      run: bash scripts/conan_cache_artifact.sh restore
+    - name: Restore Conan package cache (prefix)
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+      id: conan-cache-prefix-restore
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: .conan2
+        key: ${{ env.CONAN_CACHE_KEY }}
+        restore-keys: ${{ env.CONAN_CACHE_KEY_PREFIX }}-
+    - name: Record Conan cache restore source
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      shell: bash
+      working-directory: project
+      env:
+        CONAN_EXACT_HIT: ${{ steps.conan-cache-restore.outputs.cache-hit }}
+        CONAN_ARTIFACT_HIT: ${{ steps.conan-artifact-restore.outputs.hit }}
+        CONAN_ARTIFACT_ID: ${{ steps.conan-artifact-restore.outputs.artifact_id }}
+        CONAN_PREFIX_KEY: ${{ steps.conan-cache-prefix-restore.outputs.cache-matched-key }}
+      run: bash scripts/conan_cache_artifact.sh source
+    - name: Conan install
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      id: conan-install
+      shell: bash
+      working-directory: project
+      env:
+        ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+        CC: ${{ matrix.cc }}
+        CXX: ${{ matrix.cxx }}
+      run: bash scripts/conan_install.sh --profile "conan/profiles/${{ matrix.conan_profile }}"
+    # GitHub keeps 10 GB of caches per repository. A raw $CONAN_HOME is
+    # ~3.6 GB per profile, ~69% of it wxWidgets build/download trees, so 19
+    # untrimmed homes blow the budget and the oldest entries get evicted --
+    # the next run then rebuilds every dependency from source (which is
+    # exactly how one leg died on a transient upstream source download).
+    # Strip Conan's non-critical folders first; the script fails the job if
+    # a single package folder changes, so a warm restore can never regress.
+    # Trim/save are skipped when the artifact tier supplied the home: the
+    # content already lives repository-wide, and a per-ref copy would push
+    # the 10 GB cache budget into eviction thrash (the failure mode this
+    # whole tier contract exists to remove).
+    - name: Trim Conan package cache
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+      id: conan-cache-trim
+      shell: bash
+      run: bash project/scripts/conan_cache_trim.sh
+    - name: Save Conan package cache
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+      id: conan-cache-save
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: .conan2
+        key: ${{ env.CONAN_CACHE_KEY }}
+    # Repository-wide mirror of this home: uploaded only when no trusted
+    # artifact carries the key yet, so the ref that produced the cache stays
+    # irrelevant to the next consumer (branch, tag or sibling branch).
+    - name: Prepare Conan cache artifact
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-install.outcome == 'success' && steps.conan-cache-trim.outcome != 'failure'
+      id: conan-artifact-prepare
+      continue-on-error: true
+      shell: bash
+      working-directory: project
+      env:
+        # Dedupe probe ("is there already a trusted artifact for this key?");
+        # without it every warm run would repack and re-upload the home.
+        GH_TOKEN: ${{ github.token }}
+      run: bash scripts/conan_cache_artifact.sh prepare
+    - name: Upload Conan cache artifact
+      if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ steps.conan-artifact-prepare.outputs.name }}
+        path: ${{ steps.conan-artifact-prepare.outputs.path }}
+        if-no-files-found: error
+        retention-days: 30
+        compression-level: 0
     - name: Get Windows vcpkg triplets
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: Neumann-A/my-vcpkg-triplets
@@ -405,7 +656,7 @@ jobs:
         path: my-vcpkg-triplets
         fetch-depth: 1
     - name: Resolve GitLab-style vcpkg cache key
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       shell: bash
       run: |
         bash project/scripts/vcpkg_cache_key.sh github-env \
@@ -415,7 +666,7 @@ jobs:
           --build-type Release \
           --manifest project/vcpkg.json
     - name: Restore GitLab-style vcpkg binary cache
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       id: vcpkg-binary-cache-restore
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
@@ -423,7 +674,7 @@ jobs:
         key: ${{ env.VCPKG_CACHE_KEY }}
         restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
     - name: Checkout Windows vcpkg
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: microsoft/vcpkg
@@ -431,7 +682,7 @@ jobs:
         path: vcpkg
         fetch-depth: 1
     - name: Restore Windows vcpkg tool cache
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       id: vcpkg-tool-cache
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
@@ -440,18 +691,18 @@ jobs:
         restore-keys: |
           vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
     - name: Bootstrap Windows vcpkg
-      if: runner.os == 'Windows' && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+      if: runner.os == 'Windows' && steps.vcpkg-tool-cache.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
       shell: pwsh
       working-directory: vcpkg
       run: .\bootstrap-vcpkg.bat -disableMetrics
     - name: Verify Windows vcpkg tool
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       shell: pwsh
       run: |
         if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe was not restored or bootstrapped' }
         & .\vcpkg\vcpkg.exe version
     - name: Restore vcpkg download cache
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       id: vcpkg-download-cache
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
@@ -460,7 +711,7 @@ jobs:
         restore-keys: |
           vcpkg-downloads-windows-${{ runner.arch }}-
     - name: vcpkg
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && env.PACKAGE_MANAGER_MODE != 'conan2'
       shell: pwsh
       env:
         VCPKG_MANIFEST_MODE: OFF
@@ -481,19 +732,19 @@ jobs:
         }
         if ($lastExitCode -ne 0) { throw "vcpkg install failed after 5 attempts with exit code $lastExitCode" }
     - name: Save vcpkg download cache
-      if: always() && runner.os == 'Windows' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != ''
+      if: always() && runner.os == 'Windows' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != '' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
         key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
     - name: Save Windows vcpkg tool cache
-      if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+      if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg/vcpkg.exe
         key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
     - name: Save GitLab-style vcpkg binary cache
-      if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true'
+      if: runner.os == 'Windows' && success() && steps.vcpkg-binary-cache-restore.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
@@ -547,7 +798,7 @@ jobs:
       run: cmake -P ./.github/scripts/test.cmake
     - name: Install
       working-directory: project
-      run: cmake --install build --prefix instdir --strip --config Release
+      run: cmake --install "${BUILD_DIR}" --prefix instdir --strip --config Release
     - name: Verify install tree
       working-directory: project
       run: test -n "$(find instdir -type f -print -quit)"
@@ -555,7 +806,7 @@ jobs:
       id: package_name
       working-directory: project
       shell: bash
-      run: 'base=$(sed -n ''s/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p'' build/CPackConfig.cmake | head -1)
+      run: 'base=$(sed -n ''s/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p'' "${BUILD_DIR}/CPackConfig.cmake" | head -1)
 
         test -n "$base"
 
@@ -573,20 +824,21 @@ jobs:
         $ErrorActionPreference = 'Stop'
         New-Item -ItemType Directory -Force release-assets | Out-Null
         & .\scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets\$env:PREFIX.zip" -Epoch ([int]$env:SOURCE_DATE_EPOCH)
-        Push-Location build
+        $assetsDir = Join-Path (Get-Location).Path 'release-assets'
+        Push-Location $env:BUILD_DIR
         cpack --config CPackConfig.cmake -C Release -G "${{ matrix.nsis_generator }}"
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw "NSIS package generation failed" }
-        Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:PREFIX}_nsis.exe" -Force
+        Copy-Item "package\$env:BASE.exe" (Join-Path $assetsDir "${env:PREFIX}_nsis.exe") -Force
         # Standalone archive policy (2026-09-23): Windows ships .zip only. The
         # historical .7z alternative is retained here as a documented, disabled
         # block; uncomment the three lines below to restore it (requires the
         # 7zip tool installed above):
         # cpack --config CPackConfig.cmake -C Release -G 7Z
         # if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.7z")) { throw "7Z package generation failed" }
-        # Copy-Item "package\$env:BASE.7z" "..\release-assets\$env:PREFIX.7z" -Force
+        # Copy-Item "package\$env:BASE.7z" (Join-Path $assetsDir "$env:PREFIX.7z") -Force
         cpack --config CPackConfig.cmake -C Release -G WIX
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw "MSI package generation failed" }
-        Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:PREFIX}_wix.msi" -Force
+        Copy-Item "package\$env:BASE.msi" (Join-Path $assetsDir "${env:PREFIX}_wix.msi") -Force
         Pop-Location
     - name: Package Linux
       if: runner.os == 'Linux'
@@ -597,13 +849,13 @@ jobs:
 
         scripts/make_deterministic_tarball.sh --epoch "$SOURCE_DATE_EPOCH" --input instdir --output "release-assets/${PREFIX}.tar.gz"
 
-        cpack --config build/CPackConfig.cmake -C Release -G DEB
+        cpack --config "${BUILD_DIR}/CPackConfig.cmake" -C Release -G DEB
 
-        cpack --config build/CPackConfig.cmake -C Release -G RPM
+        cpack --config "${BUILD_DIR}/CPackConfig.cmake" -C Release -G RPM
 
-        deb=$(find build/package -maxdepth 1 -type f -name ''*.deb'' | head -1)
+        deb=$(find "${BUILD_DIR}/package" -maxdepth 1 -type f -name ''*.deb'' | head -1)
 
-        rpm=$(find build/package -maxdepth 1 -type f -name ''*.rpm'' | head -1)
+        rpm=$(find "${BUILD_DIR}/package" -maxdepth 1 -type f -name ''*.rpm'' | head -1)
 
         test -n "$deb" && test -n "$rpm"
 
@@ -624,7 +876,7 @@ jobs:
 
         cpack_ok=0
         for attempt in 1 2 3; do
-          if cpack --config build/CPackConfig.cmake -C Release -G DragNDrop; then
+          if cpack --config "${BUILD_DIR}/CPackConfig.cmake" -C Release -G DragNDrop; then
             cpack_ok=1
             break
           fi
@@ -638,7 +890,7 @@ jobs:
           exit 1
         fi
 
-        dmg=$(find build/package -maxdepth 1 -type f -name ''*.dmg'' | head -1)
+        dmg=$(find "${BUILD_DIR}/package" -maxdepth 1 -type f -name ''*.dmg'' | head -1)
 
         test -n "$dmg"
 
@@ -940,7 +1192,7 @@ jobs:
         BUILD_TYPE: Release
       run: cmake -P ./.github/scripts/test.cmake
     - name: Install
-      run: cmake --install build --prefix instdir --strip
+      run: cmake --install "${BUILD_DIR}" --prefix instdir --strip
     - name: Package Linux smoke
       run: 'set -euo pipefail
 
@@ -952,13 +1204,13 @@ jobs:
 
         scripts/make_deterministic_tarball.sh --epoch "$epoch" --input instdir --output "release-assets/linux-gcc-x86_64.tar.gz"
 
-        cpack --config build/CPackConfig.cmake -C Release -G DEB
+        cpack --config "${BUILD_DIR}/CPackConfig.cmake" -C Release -G DEB
 
-        cpack --config build/CPackConfig.cmake -C Release -G RPM
+        cpack --config "${BUILD_DIR}/CPackConfig.cmake" -C Release -G RPM
 
-        cp build/package/*.deb release-assets/linux-gcc-x86_64.deb
+        cp "${BUILD_DIR}"/package/*.deb release-assets/linux-gcc-x86_64.deb
 
-        cp build/package/*.rpm release-assets/linux-gcc-x86_64.rpm
+        cp "${BUILD_DIR}"/package/*.rpm release-assets/linux-gcc-x86_64.rpm
 
         sha256sum release-assets/* > release-assets/SHA256SUMS
 
@@ -1114,12 +1366,33 @@ jobs:
       # not ship the wxGTK runtime that every Linux artifact links against, so
       # without this step each artifact reports its declared system dependency
       # as "missing" and the gate fails for a purely environmental reason.
+      # The Conan/vcpkg builds link wxGTK statically, so bin/projectwx carries
+      # the whole X11/Mesa closure in its DT_NEEDED (GL, EGL, Xv, XRes, the
+      # xcb-* extensions, Xaw/Xt ...) -- all of it already declared in each
+      # package's own metadata (deb Depends / rpm Requires come from
+      # shlibdeps + rpm autoreq). Provision exactly that declared closure: it
+      # keeps the check honest (an undeclared or unsatisfiable runtime dep
+      # still fails) while asking the real question -- does the artifact run on
+      # a host that installed what the artifact itself says it needs.
       - name: Provide Linux runtime libraries for USEFUL-4 resolution
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libwxgtk3.2-1t64
+          declared=$(
+            for d in release-assets/*.deb; do
+              [ -f "$d" ] || continue
+              dpkg-deb -f "$d" Depends
+            done |
+              tr ',' '\n' |
+              sed -E 's/\([^)]*\)//g; s/^[[:space:]]+//; s/[[:space:]]+$//' |
+              awk 'NF' | sort -u
+          )
+          echo "declared runtime packages from staged .deb Depends:"
+          printf '%s\n' "$declared" | sed 's/^/  /'
+          # Word-splitting the newline-separated package list is intended.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y --no-install-recommends libwxgtk3.2-1t64 $declared
           ldconfig -p | grep -F 'libwx_gtk3u_core-3.2.so.0'
       - name: ELF runtime dependency report (USEFUL-4)
         shell: bash
@@ -1346,9 +1619,13 @@ jobs:
   # rows defined by packaging/release-contract.tsv.
 
   expanded-package:
-    needs: cache-gate
+    needs: [resolve, cache-gate]
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    env:
+      PACKAGE_MANAGER_MODE: ${{ needs.resolve.outputs.mode }}
+      CONAN_PROFILE: ${{ matrix.conan_profile }}
+      CONAN_HOME: ${{ github.workspace }}/.conan2
     strategy:
       fail-fast: false
       matrix:
@@ -1364,6 +1641,7 @@ jobs:
           external_triplets: false
           environment_script: vcvars-arm64.bat
           cache_id: windows-msvc-arm64
+          conan_profile: windows-msvc-armv8
           windows_installers: true
         - name: Windows CLANGARM64 MinGW
           os: windows-11-arm
@@ -1377,6 +1655,7 @@ jobs:
           msys2_packages: wxwidgets3.2-msw:p gtest:p
           msys2_bin: clangarm64/bin
           cache_id: windows-clangarm64
+          conan_profile: ''
           windows_installers: true
         - name: Windows LLVM ARM64
           os: windows-11-arm
@@ -1389,6 +1668,7 @@ jobs:
           external_triplets: false
           environment_script: vcvars-arm64.bat
           cache_id: windows-llvm-arm64
+          conan_profile: windows-clangcl-armv8
         - name: Linux GCC x86
           os: ubuntu-24.04
           compiler: gcc
@@ -1397,6 +1677,7 @@ jobs:
           arch: x86
           linux_multilib: true
           cache_id: linux-gcc-x86
+          conan_profile: linux-gcc-x86
         - name: Linux Clang x64
           os: ubuntu-24.04
           compiler: clang
@@ -1405,6 +1686,7 @@ jobs:
           arch: x64
           linux_multilib: false
           cache_id: linux-clang-x64
+          conan_profile: linux-clang-x86_64
         - name: Linux Clang ARM64
           os: ubuntu-24.04-arm
           compiler: clang
@@ -1413,6 +1695,7 @@ jobs:
           arch: arm64
           linux_multilib: false
           cache_id: linux-clang-arm64
+          conan_profile: linux-clang-armv8
         - name: macOS Apple Clang x64
           os: macos-15-intel
           compiler: apple-clang
@@ -1420,6 +1703,7 @@ jobs:
           cxx: clang++
           arch: x64
           cache_id: macos-apple-clang-x64
+          conan_profile: macos-apple-clang-x86_64
         - name: macOS GCC x64
           os: macos-15-intel
           compiler: gcc
@@ -1429,6 +1713,7 @@ jobs:
           build_projectwx: 'OFF'
           build_testing: 'OFF'
           cache_id: macos-gcc-x64
+          conan_profile: macos-gcc-x86_64
         - name: macOS GCC ARM64
           os: macos-latest
           compiler: gcc
@@ -1438,6 +1723,7 @@ jobs:
           build_projectwx: 'OFF'
           build_testing: 'OFF'
           cache_id: macos-gcc-arm64
+          conan_profile: macos-gcc-armv8
         - name: macOS LLVM x64
           os: macos-15-intel
           compiler: llvm
@@ -1445,6 +1731,7 @@ jobs:
           cxx: clang++
           arch: x64
           cache_id: macos-llvm-x64
+          conan_profile: macos-clang-x86_64
         - name: macOS LLVM ARM64
           os: macos-latest
           compiler: llvm
@@ -1452,6 +1739,7 @@ jobs:
           cxx: clang++
           arch: arm64
           cache_id: macos-llvm-arm64
+          conan_profile: macos-clang-armv8
     steps:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -1586,8 +1874,141 @@ jobs:
         \ { throw \"Visual Studio C++ toolset not found\" }\n  $vsRoot = ($vsRoot | Select-Object -First 1).Trim()\n  $script = Join-Path $vsRoot \"VC\\\
         Auxiliary\\Build\\${{ matrix.environment_script }}\"\n  if (-not (Test-Path $script)) { throw \"Expected environment script not found at $script\"\
         \ }\n  \"ENVIRONMENT_SCRIPT=$script\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8\n}\n"
+    # Conan 2 provisioning (issue #152) for the expanded matrix. Same
+    # contract as the package job: setup -> key -> restore -> install -> save,
+    # placed after compiler/env setup so wxWidgets source builds see the leg
+    # toolchain. Windows CLANGARM64 has no conan_profile and keeps its
+    # MSYS2/system dependency path in both modes.
+    - name: Setup Conan 2
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        py="$(command -v python3 || command -v python)"
+        # A venv, not --user: macOS runners' python3 is externally managed
+        # (PEP 668) and Windows user scripts land in a versioned directory that
+        # `site --user-base` does not report. The ${RUNNER_TEMP//\\//} expansion
+        # normalizes Windows backslashes so the path stays bash-executable.
+        venv="${RUNNER_TEMP//\\//}/conan-venv"
+        echo "conan venv: python=$py ($("$py" --version 2>&1))"
+        "$py" -m venv "$venv"
+        # Venv layout depends on the interpreter that created it: native Windows
+        # python -> Scripts/, MSYS2 python (first on PATH on MinGW legs) -> bin/.
+        if [ -x "$venv/Scripts/python" ]; then
+          venv_bin="$venv/Scripts"
+        elif [ -x "$venv/bin/python" ]; then
+          venv_bin="$venv/bin"
+        else
+          echo "venv interpreter not found under $venv" >&2
+          exit 1
+        fi
+        "$venv_bin/python" -m pip install --quiet "conan==2.32.0"
+        if [ -f "$venv_bin/conan.exe" ]; then
+          conan_bin="$venv_bin/conan.exe"
+        elif [ -f "$venv_bin/conan" ]; then
+          conan_bin="$venv_bin/conan"
+        else
+          echo "conan executable not found under $venv_bin" >&2
+          exit 1
+        fi
+        "$conan_bin" --version
+        echo "$venv_bin" >> "$GITHUB_PATH"
+        echo "CONAN_BIN=$conan_bin" >> "$GITHUB_ENV"
+    - name: Resolve Conan cache key
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      shell: bash
+      working-directory: project
+      run: |
+        bash scripts/conan_cache_key.sh github-env \
+          --family release \
+          --profile "conan/profiles/${{ matrix.conan_profile }}" \
+          --build-type Release
+    # Cache tiers (issue #152): exact key -> cross-ref artifact -> prefix.
+    # Identical contract to the package job and to conan.yml; see
+    # scripts/conan_cache_artifact.sh for why the tiers never overlap.
+    - name: Restore Conan package cache
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      id: conan-cache-restore
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: .conan2
+        key: ${{ env.CONAN_CACHE_KEY }}
+    - name: Restore Conan package cache (cross-ref artifact)
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      id: conan-artifact-restore
+      continue-on-error: true
+      shell: bash
+      working-directory: project
+      env:
+        # Artifact tier reads go through the REST API (actions: read).
+        GH_TOKEN: ${{ github.token }}
+      run: bash scripts/conan_cache_artifact.sh restore
+    - name: Restore Conan package cache (prefix)
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+      id: conan-cache-prefix-restore
+      uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: .conan2
+        key: ${{ env.CONAN_CACHE_KEY }}
+        restore-keys: ${{ env.CONAN_CACHE_KEY_PREFIX }}-
+    - name: Record Conan cache restore source
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      shell: bash
+      working-directory: project
+      env:
+        CONAN_EXACT_HIT: ${{ steps.conan-cache-restore.outputs.cache-hit }}
+        CONAN_ARTIFACT_HIT: ${{ steps.conan-artifact-restore.outputs.hit }}
+        CONAN_ARTIFACT_ID: ${{ steps.conan-artifact-restore.outputs.artifact_id }}
+        CONAN_PREFIX_KEY: ${{ steps.conan-cache-prefix-restore.outputs.cache-matched-key }}
+      run: bash scripts/conan_cache_artifact.sh source
+    - name: Conan install
+      if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != ''
+      id: conan-install
+      shell: bash
+      working-directory: project
+      env:
+        ENVIRONMENT_SCRIPT: ${{ env.ENVIRONMENT_SCRIPT }}
+        CC: ${{ matrix.cc }}
+        CXX: ${{ matrix.cxx }}
+      run: bash scripts/conan_install.sh --profile "conan/profiles/${{ matrix.conan_profile }}"
+    # See the package job: strip Conan's non-critical folders so 19 profile
+    # homes fit GitHub's 10 GB per-repo cache budget instead of evicting each
+    # other. scripts/conan_cache_trim.sh fails if any package folder changes.
+    - name: Trim Conan package cache
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+      id: conan-cache-trim
+      shell: bash
+      run: bash project/scripts/conan_cache_trim.sh
+    - name: Save Conan package cache
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
+      id: conan-cache-save
+      uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
+      with:
+        path: .conan2
+        key: ${{ env.CONAN_CACHE_KEY }}
+    - name: Prepare Conan cache artifact
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-install.outcome == 'success' && steps.conan-cache-trim.outcome != 'failure'
+      id: conan-artifact-prepare
+      continue-on-error: true
+      shell: bash
+      working-directory: project
+      env:
+        # Dedupe probe ("is there already a trusted artifact for this key?");
+        # without it every warm run would repack and re-upload the home.
+        GH_TOKEN: ${{ github.token }}
+      run: bash scripts/conan_cache_artifact.sh prepare
+    - name: Upload Conan cache artifact
+      if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ steps.conan-artifact-prepare.outputs.name }}
+        path: ${{ steps.conan-artifact-prepare.outputs.path }}
+        if-no-files-found: error
+        retention-days: 30
+        compression-level: 0
     - name: Get custom Windows vcpkg triplets
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && matrix.external_triplets == true
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && matrix.external_triplets == true && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: Neumann-A/my-vcpkg-triplets
@@ -1595,7 +2016,7 @@ jobs:
         path: my-vcpkg-triplets
         fetch-depth: 1
     - name: Resolve expanded Windows vcpkg cache key
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && env.PACKAGE_MANAGER_MODE != 'conan2'
       shell: bash
       run: |
         bash project/scripts/vcpkg_cache_key.sh github-env \
@@ -1606,7 +2027,7 @@ jobs:
           --manifest project/vcpkg.json
     - name: Restore Windows vcpkg binary cache
       id: vcpkg-cache-restore
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
@@ -1614,7 +2035,7 @@ jobs:
         restore-keys: ${{ env.VCPKG_CACHE_RESTORE_KEYS }}
 
     - name: Checkout Windows vcpkg
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: microsoft/vcpkg
@@ -1622,7 +2043,7 @@ jobs:
         path: vcpkg
         fetch-depth: 1
     - name: Restore Windows vcpkg tool cache
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && env.PACKAGE_MANAGER_MODE != 'conan2'
       id: vcpkg-tool-cache
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
@@ -1631,18 +2052,18 @@ jobs:
         restore-keys: |
           vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-
     - name: Bootstrap Windows vcpkg
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && steps.vcpkg-tool-cache.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
       shell: pwsh
       working-directory: vcpkg
       run: .\bootstrap-vcpkg.bat -disableMetrics
     - name: Verify Windows vcpkg tool
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && env.PACKAGE_MANAGER_MODE != 'conan2'
       shell: pwsh
       run: |
         if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe was not restored or bootstrapped' }
         & .\vcpkg\vcpkg.exe version
     - name: Restore vcpkg download cache
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && env.PACKAGE_MANAGER_MODE != 'conan2'
       id: vcpkg-download-cache
       uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
@@ -1651,7 +2072,7 @@ jobs:
         restore-keys: |
           vcpkg-downloads-windows-${{ runner.arch }}-
     - name: vcpkg
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && env.PACKAGE_MANAGER_MODE != 'conan2'
       shell: pwsh
       env:
         VCPKG_MANIFEST_MODE: OFF
@@ -1675,19 +2096,19 @@ jobs:
         }
         if ($lastExitCode -ne 0) { throw "vcpkg install failed after 5 attempts with exit code $lastExitCode" }
     - name: Save vcpkg download cache
-      if: always() && runner.os == 'Windows' && matrix.compiler != 'clangarm64' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != ''
+      if: always() && runner.os == 'Windows' && matrix.compiler != 'clangarm64' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != '' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
         key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
     - name: Save Windows vcpkg tool cache
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg/vcpkg.exe
         key: vcpkg-tool-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}-${{ hashFiles('vcpkg/scripts/vcpkg-tool-metadata.txt') }}
     - name: Save Windows vcpkg binary cache
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-cache-restore.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: project/vcpkg_cache
@@ -1710,9 +2131,34 @@ jobs:
     - name: Verify configured compiler
       working-directory: project
       shell: bash
-      run: "cxx_bin=\"$(sed -n 's/^CMAKE_CXX_COMPILER:FILEPATH=//p' build/CMakeCache.txt | head -1)\"\ntest -n \"$cxx_bin\"\ntest -x \"$cxx_bin\"\necho\
-        \ \"Configured CXX: $cxx_bin\"\nif [[ \"${{ matrix.compiler }}\" == \"msvc\" ]]; then\n  CXX_BIN=\"$cxx_bin\" powershell -NoProfile -Command '\n\
-        \    & \"$env:CXX_BIN\" /?\n    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n  '\nelse\n  \"$cxx_bin\" --version\nfi\n"
+      run: |
+        # CMake persists an auto-detected compiler as CMAKE_CXX_COMPILER:FILEPATH,
+        # but a toolchain that set()s CMAKE_CXX_COMPILER (conan CMakeToolchain with
+        # tools.build:compiler_executables) leaves NO cache entry for it at all.
+        # CMakeCXXCompiler.cmake always records the configured compiler either way.
+        cxx_bin="$(sed -n 's/^CMAKE_CXX_COMPILER:FILEPATH=//p' "${BUILD_DIR}/CMakeCache.txt" | head -1)"
+        if [ -z "$cxx_bin" ]; then
+          cxx_bin="$(grep -h -m1 'set(CMAKE_CXX_COMPILER "' "${BUILD_DIR}"/CMakeFiles/*/CMakeCXXCompiler.cmake 2>/dev/null | sed -n 's/.*set(CMAKE_CXX_COMPILER "\([^"]*\)".*/\1/p')"
+        fi
+        if [ -z "$cxx_bin" ]; then
+          echo "CMAKE_CXX_COMPILER not found in ${BUILD_DIR}/CMakeCache.txt or CMakeFiles/*/CMakeCXXCompiler.cmake" >&2
+          grep CMAKE_CXX_COMPILER "${BUILD_DIR}/CMakeCache.txt" >&2 || true
+          exit 1
+        fi
+        if [ ! -x "$cxx_bin" ]; then
+          resolved="$(command -v "$cxx_bin" || true)"
+          test -n "$resolved" && cxx_bin="$resolved"
+        fi
+        test -x "$cxx_bin"
+        echo "Configured CXX: $cxx_bin"
+        if [[ "${{ matrix.compiler }}" == "msvc" ]]; then
+          CXX_BIN="$cxx_bin" powershell -NoProfile -Command '
+            & "$env:CXX_BIN" /?
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          '
+        else
+          "$cxx_bin" --version
+        fi
     - name: Build
       working-directory: project
       env:
@@ -1737,12 +2183,13 @@ jobs:
         BUILD_TYPE: Release
       run: cmake -P ./.github/scripts/test.cmake
     - name: Install
+      shell: bash
       working-directory: project
-      run: cmake --install build --prefix instdir --strip --config Release
+      run: cmake --install "${BUILD_DIR}" --prefix instdir --strip --config Release
     - name: Verify binary architecture
       working-directory: project
       shell: bash
-      run: "if [[ \"$RUNNER_OS\" == \"Windows\" ]]; then\n  powershell -NoProfile -Command '\n    $exe = Get-ChildItem -Recurse -File build\\bin -Filter\
+      run: "if [[ \"$RUNNER_OS\" == \"Windows\" ]]; then\n  powershell -NoProfile -Command '\n    $exe = Get-ChildItem -Recurse -File $env:BUILD_DIR\\bin -Filter\
         \ projectcli.exe | Select-Object -First 1\n    if (-not $exe) { throw \"projectcli.exe not found\" }\n    $bytes = [IO.File]::ReadAllBytes($exe.FullName)\n\
         \    if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {\n      throw \"Not a valid PE executable: $($exe.FullName)\"\n  \
         \  }\n    $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)\n    if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) {\n      throw \"Invalid\
@@ -1750,7 +2197,7 @@ jobs:
         \ -ne 0x00 -or $bytes[$peOffset + 3] -ne 0x00) {\n      throw \"Invalid PE signature\"\n    }\n    $machine = [BitConverter]::ToUInt16($bytes, $peOffset\
         \ + 4)\n    $expected = switch (\"${{ matrix.arch }}\") {\n      \"arm64\" { [UInt16]0xAA64 }\n      \"x86\"   { [UInt16]0x014C }\n      default\
         \ { [UInt16]0x8664 }\n    }\n    if ($machine -ne $expected) {\n      throw (\"Expected {0} PE (0x{1:X4}), got 0x{2:X4}\" -f \"${{ matrix.arch }}\"\
-        , $expected, $machine)\n    }\n    \"Verified $($exe.FullName): PE machine 0x{0:X4}\" -f $machine\n  '\nelse\n  target=\"$(find build/bin -maxdepth\
+        , $expected, $machine)\n    }\n    \"Verified $($exe.FullName): PE machine 0x{0:X4}\" -f $machine\n  '\nelse\n  target=\"$(find \"${BUILD_DIR}/bin\" -maxdepth\
         \ 1 -type f -perm -111 -print -quit)\"\n  test -n \"$target\"\n  file \"$target\"\n  case \"${{ matrix.arch }}\" in\n    x86) file \"$target\" |\
         \ grep -Eq '32-bit|Intel 80386' ;;\n    arm64) file \"$target\" | grep -Eiq 'arm aarch64|arm64' ;;\n    x64) file \"$target\" | grep -Eq 'x86-64|x86_64|Mach-O\
         \ 64-bit executable x86_64' ;;\n    *) exit 1 ;;\n  esac\nfi\n"
@@ -1758,7 +2205,7 @@ jobs:
       id: package_name
       working-directory: project
       shell: bash
-      run: 'base=$(sed -n ''s/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p'' build/CPackConfig.cmake | head -1)
+      run: 'base=$(sed -n ''s/.*CPACK_PACKAGE_FILE_NAME "\([^"]*\)".*/\1/p'' "${BUILD_DIR}/CPackConfig.cmake" | head -1)
 
         test -n "$base"
 
@@ -1778,14 +2225,16 @@ jobs:
 
         & .\scripts\make_deterministic_zip.ps1 -InputDir instdir -OutputPath "release-assets\$env:PREFIX.zip" -Epoch ([int]$env:SOURCE_DATE_EPOCH)
 
-        Push-Location build
+        $assetsDir = Join-Path (Get-Location).Path 'release-assets'
+
+        Push-Location $env:BUILD_DIR
         cpack --config CPackConfig.cmake -C Release -G NSIS64
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.exe")) { throw 'NSIS64 package generation failed' }
-        Copy-Item "package\$env:BASE.exe" "..\release-assets\${env:PREFIX}_nsis.exe" -Force
+        Copy-Item "package\$env:BASE.exe" (Join-Path $assetsDir "${env:PREFIX}_nsis.exe") -Force
 
         cpack --config CPackConfig.cmake -C Release -G WIX
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path "package\$env:BASE.msi")) { throw 'MSI package generation failed' }
-        Copy-Item "package\$env:BASE.msi" "..\release-assets\${env:PREFIX}_wix.msi" -Force
+        Copy-Item "package\$env:BASE.msi" (Join-Path $assetsDir "${env:PREFIX}_wix.msi") -Force
         Pop-Location
     - name: Package Linux
       if: runner.os == 'Linux'
@@ -1796,13 +2245,13 @@ jobs:
 
         scripts/make_deterministic_tarball.sh --epoch "$SOURCE_DATE_EPOCH" --input instdir --output "release-assets/${PREFIX}.tar.gz"
 
-        cpack --config build/CPackConfig.cmake -C Release -G DEB
+        cpack --config "${BUILD_DIR}/CPackConfig.cmake" -C Release -G DEB
 
-        cpack --config build/CPackConfig.cmake -C Release -G RPM
+        cpack --config "${BUILD_DIR}/CPackConfig.cmake" -C Release -G RPM
 
-        deb=$(find build/package -maxdepth 1 -type f -name ''*.deb'' | head -1)
+        deb=$(find "${BUILD_DIR}/package" -maxdepth 1 -type f -name ''*.deb'' | head -1)
 
-        rpm=$(find build/package -maxdepth 1 -type f -name ''*.rpm'' | head -1)
+        rpm=$(find "${BUILD_DIR}/package" -maxdepth 1 -type f -name ''*.rpm'' | head -1)
 
         test -n "$deb" && test -n "$rpm"
 
@@ -1823,7 +2272,7 @@ jobs:
 
         cpack_ok=0
         for attempt in 1 2 3; do
-          if cpack --config build/CPackConfig.cmake -C Release -G DragNDrop; then
+          if cpack --config "${BUILD_DIR}/CPackConfig.cmake" -C Release -G DragNDrop; then
             cpack_ok=1
             break
           fi
@@ -1837,7 +2286,7 @@ jobs:
           exit 1
         fi
 
-        dmg=$(find build/package -maxdepth 1 -type f -name ''*.dmg'' | head -1)
+        dmg=$(find "${BUILD_DIR}/package" -maxdepth 1 -type f -name ''*.dmg'' | head -1)
 
         test -n "$dmg"
 

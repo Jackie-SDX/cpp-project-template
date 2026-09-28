@@ -28,10 +28,17 @@ if("$ENV{CTEST_DASHBOARD}" STREQUAL "ON")
   list(APPEND CTEST_STEPS Submit)
 endif()
 
+# BUILD_DIR: exported by configure.cmake; default keeps hand-rolled callers
+# working against plain build/.
+set(build_dir "build")
+if (NOT "$ENV{BUILD_DIR}" STREQUAL "")
+  set(build_dir "$ENV{BUILD_DIR}")
+endif()
+
 foreach(step IN LISTS CTEST_STEPS)
   execute_process(
     COMMAND ctest -j ${N} -C $ENV{BUILD_TYPE} -D Continuous${step}
-    WORKING_DIRECTORY build
+    WORKING_DIRECTORY "${build_dir}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
     ERROR_VARIABLE output

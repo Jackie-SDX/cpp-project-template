@@ -1,0 +1,26 @@
+# Windows MSVC/LLVM ARM64 (expanded legs "Windows MSVC ARM64" and, with the clang-cl override below swapped in, "Windows LLVM ARM64").
+#
+# Compiler versions are the runner images' toolchain of record; bump them
+# together with CI image/compiler changes (they key both package IDs and the
+# Conan cache key).
+#
+# compiler.version=194 (VS 17 / VS 2022) is correct here: windows-11-arm
+# still ships `Microsoft Visual Studio\17\Enterprise` (toolset 14.4x), unlike
+# windows-latest which moved to Visual Studio 18 (see
+# windows-msvc-x86_64).
+
+[settings]
+os=Windows
+arch=armv8
+compiler=msvc
+compiler.version=194
+compiler.runtime=static
+compiler.runtime_type=Release
+compiler.cppstd=17
+build_type=Release
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+# See conanfile.py header: re-assert the project's C++20 after CMakeToolchain
+# injects the profile's cppstd as CMAKE_CXX_STANDARD.
+tools.cmake.cmaketoolchain:extra_variables={"CMAKE_CXX_STANDARD": "20"}

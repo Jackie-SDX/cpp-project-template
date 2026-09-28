@@ -15,8 +15,13 @@ else()
 		base
 		adv)
 
-	# Bring the headers into the project
-	include(${wxWidgets_USE_FILE})
+	# Bring the headers into the project. The classic FindwxWidgets module
+	# defines wxWidgets_USE_FILE, but package-manager provided find modules
+	# (e.g. Conan 2 CMakeDeps) only set wxWidgets_LIBRARIES to an imported
+	# target that already carries include dirs, definitions and system libs.
+	if (wxWidgets_USE_FILE)
+		include(${wxWidgets_USE_FILE})
+	endif()
 endif()
 
 file(GLOB SRC_FILES "*.cpp")
@@ -67,7 +72,13 @@ target_include_directories(${PROJECT_WX_NAME} PUBLIC "${PROJECT_BINARY_DIR}")
 target_include_directories(${PROJECT_WX_NAME} PUBLIC "${PROJECT_LIB_DIR}/src")
 target_link_libraries(${PROJECT_WX_NAME} PUBLIC ${PROJECT_LIB_NAME})
 
-if (WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64)$")
+# Upstream/vcpkg's config-mode package exports the wx:: component targets;
+# Conan 2 CMakeDeps exports one aggregated wxWidgets::wxWidgets imported
+# target and puts it in wxWidgets_LIBRARIES instead, so take the component
+# path only when those targets exist (otherwise the conan ARM64 legs die in
+# configure with "Target projectwx links to: wx::core but the target was not
+# found", run 36312864487).
+if (WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64)$" AND TARGET wx::core)
 	target_link_libraries(${PROJECT_WX_NAME} PUBLIC
 		wx::core
 		wx::base
@@ -86,7 +97,15 @@ if (MINGW AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 	target_link_libraries(${PROJECT_WX_NAME} PRIVATE
 		$<$<CONFIG:Release>:-static gcc stdc++ winpthread -dynamic>
 	)
-elseif (MSVC)
+elseif (MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+	# Skipped under clang-cl (compiler id "Clang" with MSVC-compatible
+	# syntax): those legs run compiler.runtime=dynamic, conan's toolchain
+	# sets CMAKE_MSVC_RUNTIME_LIBRARY to the DLL runtime, and forcing MT
+	# here would override it and break the link against the /MD wxWidgets
+	# built from the same profile ("mismatch detected for 'RuntimeLibrary':
+	# MT_StaticRelease vs MD_DynamicRelease", run 36319827891 Windows LLVM
+	# x64). Same guard as src/projectlib/test/CMakeLists.txt; cl legs keep
+	# the static runtime that matches windows-msvc-*'s runtime=static.
 	# MT vs MD vs MTd vs MDd https://social.msdn.microsoft.com/Forums/en-US/9474efb9-49cd-46e1-8935-ee2bebe95203/difference-in-mt-and-md-run-time-lib-setting?forum=vcgeneral
 	# Might have to use MDd with wxWidgets because: https://forums.wxwidgets.org/viewtopic.php?t=47650
 	set_property(TARGET ${PROJECT_WX_NAME} PROPERTY

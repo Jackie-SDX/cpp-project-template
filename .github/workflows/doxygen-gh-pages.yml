@@ -82,7 +82,7 @@ jobs:
       - name: Add Doxygen to PATH
         run: echo "${GITHUB_WORKSPACE}/doxygen-${{ env.DOXYGEN_VERSION }}/bin" >> "$GITHUB_PATH"
       - name: Cache & install build deps + fonts
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1 (was floating @v1)
         with:
           packages: >
             build-essential pkg-config libexpat1-dev libltdl-dev
@@ -125,7 +125,7 @@ jobs:
           cmake --build . --target doxygen
           test -f ../docs/doxygen/build/html/index.html
       - name: Upload documentation to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4 (was floating @v4)
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs/doxygen/build/html
