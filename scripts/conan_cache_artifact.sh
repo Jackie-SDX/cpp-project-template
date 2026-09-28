@@ -476,14 +476,14 @@ JSON
   got="$(to_local_path 'C:/a/_temp/x.tar.gz')"
   [ "$got" = '/C/a/_temp/x.tar.gz' ] &&
     ok "to_local_path: forward-slash drive path" || ko "to_local_path slash, got '$got'"
-  got="$(to_local_path '/home/runner/work/_temp/x')"
-  [ "$got" = '/home/runner/work/_temp/x' ] &&
+  got="$(to_local_path '/var/tmp/x')"
+  [ "$got" = '/var/tmp/x' ] &&
     ok "to_local_path: POSIX path is untouched" || ko "to_local_path changed a POSIX path, got '$got'"
   got="$(CONAN_PATH_TEST_UNAME='MINGW64_NT-10.0' from_local_path '/C/a/_temp/x.tar.gz')"
   [ "$got" = 'C:/a/_temp/x.tar.gz' ] &&
     ok "from_local_path: MSYS path becomes a drive path" || ko "from_local_path msys, got '$got'"
-  got="$(from_local_path '/home/runner/work/_temp/x')"
-  [ "$got" = '/home/runner/work/_temp/x' ] &&
+  got="$(from_local_path '/var/tmp/x')"
+  [ "$got" = '/var/tmp/x' ] &&
     ok "from_local_path: identity on this OS" || ko "from_local_path changed a POSIX path, got '$got'"
   got="$(CONAN_PATH_TEST_UNAME='Darwin' from_local_path '/C/a/x')"
   [ "$got" = '/C/a/x' ] &&
