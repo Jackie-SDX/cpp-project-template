@@ -94,11 +94,36 @@ artifact_name() {
 }
 
 conan_home() {
-  printf '%s\n' "${CONAN_HOME:-${PWD}/.conan2}"
+  to_local_path "${CONAN_HOME:-${PWD}/.conan2}"
 }
 
 scratch_dir() {
-  printf '%s\n' "${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+  to_local_path "${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+}
+
+# Convert a path to the form every POSIX tool on this runner accepts.
+#
+# Windows runners hand out C:\a\_temp\..., and GNU tar reads a leading "C:"
+# as its [host]:[file] remote syntax, so packing a home used to die with
+#     tar (child): Cannot connect to C: resolve failed
+#     tar: C\:\\a\\_temp/...: Cannot write: Broken pipe
+# (observed on run 36361077045, job "Windows LLVM ARM64"). The MSYS form
+# /C/a/_temp/... has no colon, is understood by tar/unzip/find/curl/mktemp,
+# and on Linux/macOS this is an identity transform.
+to_local_path() {
+  printf '%s' "$1" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):/#/\1/#'
+}
+
+# Inverse of to_local_path, for values handed back to GitHub's JavaScript
+# actions (upload-artifact), which want a drive-letter path: /C/a/x -> C:/a/x.
+# Identity outside the MSYS shells. The uname result is overridable so the
+# selftest can exercise the Windows branch on a POSIX machine.
+from_local_path() {
+  local kernel="${CONAN_PATH_TEST_UNAME:-$(uname -s 2>/dev/null || printf 'unknown')}"
+  case "$kernel" in
+    MINGW*|MSYS*|CYGWIN*) printf '%s' "$1" | sed -e 's#^/\([A-Za-z]\)/#\1:/#' ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 python_bin() {
@@ -313,7 +338,9 @@ cmd_prepare() {
   upload="true"
   info "packed conan home for ${name} ($(stat -c %s "$tarball" 2>/dev/null || wc -c < "$tarball") bytes)"
   out "name=${name}"
-  out "path=${tarball}"
+  # $tarball is a POSIX-style path (see to_local_path); upload-artifact runs
+  # in JavaScript and needs the drive-letter spelling back.
+  out "path=$(from_local_path "$tarball")"
   out "upload_needed=${upload}"
   out "artifact_id="
 }
@@ -437,6 +464,30 @@ JSON
   GITHUB_OUTPUT="$tmpdir/out6" select_artifact conan-bin-k < "$tmpdir/bad.json" > "$tmpdir/bad.log" || true
   [ "$(sed -n 's/^exists=//p' "$tmpdir/out6" | head -1)" = "false" ] &&
     ok "malformed API body degrades to a miss" || ko "malformed body must degrade to a miss"
+
+  # 7. path spelling: GNU tar on Windows parses "C:\a\x" (and even "C:/a/x")
+  #    as its [host]:[file] remote syntax, so every path this script hands to a
+  #    POSIX tool must be colon-free, while the path handed to upload-artifact
+  #    must be a drive-letter path again.
+  local got
+  got="$(to_local_path 'C:\a\_temp\conan-home.tar.gz')"
+  [ "$got" = '/C/a/_temp/conan-home.tar.gz' ] &&
+    ok "to_local_path: backslash drive path" || ko "to_local_path backslash, got '$got'"
+  got="$(to_local_path 'C:/a/_temp/x.tar.gz')"
+  [ "$got" = '/C/a/_temp/x.tar.gz' ] &&
+    ok "to_local_path: forward-slash drive path" || ko "to_local_path slash, got '$got'"
+  got="$(to_local_path '/home/runner/work/_temp/x')"
+  [ "$got" = '/home/runner/work/_temp/x' ] &&
+    ok "to_local_path: POSIX path is untouched" || ko "to_local_path changed a POSIX path, got '$got'"
+  got="$(CONAN_PATH_TEST_UNAME='MINGW64_NT-10.0' from_local_path '/C/a/_temp/x.tar.gz')"
+  [ "$got" = 'C:/a/_temp/x.tar.gz' ] &&
+    ok "from_local_path: MSYS path becomes a drive path" || ko "from_local_path msys, got '$got'"
+  got="$(from_local_path '/home/runner/work/_temp/x')"
+  [ "$got" = '/home/runner/work/_temp/x' ] &&
+    ok "from_local_path: identity on this OS" || ko "from_local_path changed a POSIX path, got '$got'"
+  got="$(CONAN_PATH_TEST_UNAME='Darwin' from_local_path '/C/a/x')"
+  [ "$got" = '/C/a/x' ] &&
+    ok "from_local_path: identity outside MSYS" || ko "from_local_path rewrote on Darwin, got '$got'"
 
   if [ "$failures" -ne 0 ]; then
     printf 'selftest: %s failure(s)\n' "$failures" >&2
