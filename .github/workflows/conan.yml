@@ -299,6 +299,10 @@ jobs:
         continue-on-error: true
         shell: bash
         working-directory: project
+        env:
+          # Listing/downloading repository artifacts over the REST API needs
+          # the workflow token; the workflow grants actions: read for it.
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/conan_cache_artifact.sh restore
       # Tier 3: nearest older key of the SAME profile (restore-keys prefix).
       # Only reached when both exact tiers missed. The trailing '-' matters:
@@ -364,6 +368,11 @@ jobs:
         continue-on-error: true
         shell: bash
         working-directory: project
+        env:
+          # The dedupe probe ("does a trusted artifact for this key already
+          # exist?") is an API read; without the token prepare would repack
+          # and re-upload the home on every run.
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/conan_cache_artifact.sh prepare
       - name: Upload Conan cache artifact
         if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'

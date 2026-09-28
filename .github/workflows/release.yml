@@ -568,6 +568,9 @@ jobs:
       continue-on-error: true
       shell: bash
       working-directory: project
+      env:
+        # Artifact tier reads go through the REST API (actions: read).
+        GH_TOKEN: ${{ github.token }}
       run: bash scripts/conan_cache_artifact.sh restore
     - name: Restore Conan package cache (prefix)
       if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
@@ -629,6 +632,10 @@ jobs:
       continue-on-error: true
       shell: bash
       working-directory: project
+      env:
+        # Dedupe probe ("is there already a trusted artifact for this key?");
+        # without it every warm run would repack and re-upload the home.
+        GH_TOKEN: ${{ github.token }}
       run: bash scripts/conan_cache_artifact.sh prepare
     - name: Upload Conan cache artifact
       if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'
@@ -1932,6 +1939,9 @@ jobs:
       continue-on-error: true
       shell: bash
       working-directory: project
+      env:
+        # Artifact tier reads go through the REST API (actions: read).
+        GH_TOKEN: ${{ github.token }}
       run: bash scripts/conan_cache_artifact.sh restore
     - name: Restore Conan package cache (prefix)
       if: env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
@@ -1982,6 +1992,10 @@ jobs:
       continue-on-error: true
       shell: bash
       working-directory: project
+      env:
+        # Dedupe probe ("is there already a trusted artifact for this key?");
+        # without it every warm run would repack and re-upload the home.
+        GH_TOKEN: ${{ github.token }}
       run: bash scripts/conan_cache_artifact.sh prepare
     - name: Upload Conan cache artifact
       if: steps.conan-artifact-prepare.outputs.upload_needed == 'true'
