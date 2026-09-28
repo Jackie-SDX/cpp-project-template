@@ -1670,7 +1670,8 @@ built. This section is the record **from the beginning**: what the issue demande
 baseline it started from, everything that was implemented, every failure in the bring-up
 loop, both release gates, and how the branch was consolidated into `main`.
 
-**Point in time:** `main` after the merge of `oc/issue-152-conan2` (branch tip `ee3d269`);
+**Point in time:** `main` @ `1ffc6d8` (the merge of `oc/issue-152-conan2`, branch tip
+`ee3d269`);
 release [`v0.0.11`](https://github.com/Jackie-SDX/cpp-project-template/releases/tag/v0.0.11)
 (Conan 2) published 2026-09-27T22:51:58Z; release
 [`v0.0.13`](https://github.com/Jackie-SDX/cpp-project-template/releases/tag/v0.0.13)
@@ -1933,6 +1934,7 @@ script, and because tags are never moved to hide a failure, the corrected tree s
 | 9 | **Cache invisible across refs** (the issue's complaint) | Actions caches are ref-scoped; 10 GB LRU thrash; exact-key-only restore; malformed tag scope `refs/heads/refs/tags/*` | §19 — three tiers, `d9db0e9`, `718fe85`, `52d1d7c`, `289a43c` |
 | 10 | `Validate release inventory` `abs-paths` failure on `v0.0.12` | the selftest fixture used a literal `/home/<user>/…` build path that matched the checker's own pattern | `b536a6c` (`/var/tmp/x`) |
 | 11 | Windows pack died with `tar (child): Cannot connect to C: resolve failed` | GNU tar parsed the drive letter as a remote host | `289a43c` (`to_local_path` / `from_local_path`) |
+| 12 | Post-merge Conan run `36383080162` attempt 1 failed in `linux-clang-x86_64` | **external, not a project defect**: on a *cold* cache the leg built `cairo/1.18.4` from source, and `https://www.cairographics.org/releases/cairo-1.18.4.tar.xz` refused connections six times in a row, so Conan's `source()` retries were exhausted (`ConanException: Error downloading file … Max retries exceeded`). The URL answered **HTTP 200 in 0.64 s** when probed after the run | no code change: `gh run rerun 36383080162 --failed` → attempt 2 **success, 20/20** |
 
 **Rejected / not done, on purpose**
 
@@ -1951,7 +1953,7 @@ Executed at the operator's request in one pass:
 1. **Documentation consolidated.** Everything done from the beginning was appended to this
    document (§20), on top of the cache/release record already in §19. The stale OpenCode
    artefacts that this section supersedes were deleted:
-   `OpenCodeAudit.md`, `OpenCode2.md`,    `docs/AUDIT.md` (`OpenCodeAudit.md` and
+   `OpenCodeAudit.md`, `OpenCode2.md`, `docs/AUDIT.md` (`OpenCodeAudit.md` and
    `docs/AUDIT.md` were byte-identical duplicates), and the `HISTORICAL/` folder. Their
    content remains available in git history at their last commits. Statements elsewhere in
    this document that mention `HISTORICAL/` or `docs/AUDIT.md` (§13, §14) describe the tree
@@ -1977,6 +1979,19 @@ Executed at the operator's request in one pass:
 | Lint on final SHA | run `36366813692` success |
 | Selftests/guards | 7 guard + 23 artifact + 12 key checks; actionlint exit 0; 21 action pins |
 
+**Post-merge simulation on `main` @ `1ffc6d8` (2026-09-28, requested by the operator)**
+
+| Claim | Evidence |
+|---|---|
+| Merged tree builds and tests (vcpkg/CI matrix) | `CI` run [`36383080128`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36383080128) — **success, 18/18 jobs, 0 failures** |
+| Merged tree builds and tests (Conan matrix, 19 legs) | `Conan` run [`36383080162`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36383080162) attempt 2 — **success, 20/20 jobs, 0 failures** (attempt 1 = the external `cairographics.org` outage of 20.13 row 12) |
+| Conan cache reuse on the default branch, by restore tier | Same run, 19 legs: **10 `artifact:<id>`**, **1 `exact`**, **8 `cold`**. `macos-apple-clang-x86_64` restored `artifact:10945119789`, an artifact **created 2026-09-28T00:09:53Z by run `36361077045` on a pre-merge branch** — cross-ref reuse now proven from `main` itself |
+| Release packaging simulation, **Conan mode** | `Release` run [`36383211902`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36383211902) (`-f package_manager=conan2`) — **success, 32/32 jobs**; `Resolve package-manager mode` ✓, `Validate release inventory` ✓, `Publish release` **skipped** (correct: not a tag push) |
+| Release packaging simulation, **default = vcpkg** | `Release` run [`36392769479`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36392769479) (`-f package_manager=default`, i.e. the committed `packaging/release-package-manager.txt`) — **success, 32/32 jobs**; `Resolve package-manager mode` ✓, `Validate release inventory` ✓, `Publish release` **skipped** |
+| Documentation / lint / cache warm | `Workflow Lint` [`36383080208`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36383080208) success; `GH Doxygen` [`36383080167`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36383080167) success; `Release vcpkg cache warmup` [`36383080127`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36383080127) success; `pages build and deployment` [`36383195817`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36383195817) success |
+| Offline selftests re-run on `main` after the merge | guard 7 cases ✓, artifact-tier 23 checks ✓, cache-key 12 checks ✓, `verify_action_pins` 21 SHA pins / 0 missing ✓ |
+| Working tree after merge | `git status --porcelain` empty; no `build/`, `CMakeUserPresets.json`, `.conan2/` or `vcpkg/` paths tracked; no credentials or tokens anywhere in `git grep` |
+
 ### 20.16 Residual limitations and open items
 
 1. **`v0.0.12` has a tag but no release.** Documented, deliberate, never to be fixed by
@@ -1984,12 +1999,24 @@ Executed at the operator's request in one pass:
    is `v0.0.13`.
 2. **Conan binary caching only becomes "first run free" for new keys after the merge**, since
    the `push`/`schedule` seeding triggers only act on `main` (§19.10).
+   *Update 2026-09-28: **merged** — the seeding triggers are now live, and the first
+   post-merge `Conan` run already consumed 10 artifact-tier restores (§20.15).*
 3. **Chocolatey `nsis` flakiness** on Windows legs remains an accepted external risk
    (§19.8); those legs are re-run, not patched.
 4. **The vcpkg binary cache only carries weight on Windows** — Linux/macOS release legs
    install host packages by design (§19.7), which is pre-existing behaviour, preserved.
 5. `TODO.md` was left alone — only the artefacts listed in §20.14 were removed, and each of
    those remains readable in git history at its last commit.
+6. **A cold `linux-clang-x86_64` Conan leg downloads `cairo` from `www.cairographics.org`**
+   (no prebuilt binary for that exact setting), so the first run of a brand-new key for that
+   profile depends on an upstream host being reachable — it was not, once, on 2026-09-28
+   (20.13 row 12). From the second run onwards the artifact tier removes the dependency.
+   Same accepted class as item 3.
+7. **`.github/workflows/opencode.yml` still carries two unpinned refs**
+   (`actions/checkout@v6`, `anomalyco/opencode/github@latest`). That workflow is the
+   controller automation of this repository, not part of the CPP build/package/release
+   path, so it was out of scope for issue #152; `verify_action_pins.sh` reports it openly
+   (`21 sha pin(s) checked, 2 unpinned ref(s), 0 missing`).
 
 *This document was generated from verified repository state; all hashes, counts, asset lists, and run
 results were read directly from the three Git repositories and the GitHub API. Any later change to
