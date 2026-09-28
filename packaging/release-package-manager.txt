@@ -1,1 +1,1 @@
-conan2
+vcpkg
