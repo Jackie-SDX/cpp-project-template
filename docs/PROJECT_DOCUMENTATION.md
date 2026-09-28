@@ -1650,6 +1650,7 @@ with `gh run rerun <id> --failed`.
    any merge). After
    the merge the `push`-path-filtered + weekly `conan.yml` triggers start seeding the default
    branch, which is what makes tier 1 work for *new* keys the first time.
+   *Update 2026-09-28: **done** — merged and validated, see §20.14 and §20.15.*
 2. **The artifact tier costs one API list call plus a ~19–401 MB download** on a cold branch;
    the download is skipped whenever tier 1 hits, and the upload happens at most once per key
    per 30 days.
@@ -1660,6 +1661,335 @@ with `gh run rerun <id> --failed`.
    CI before any package job.
 5. **Chocolatey `nsis` flakiness** (19.8) remains an accepted risk of the Windows bootstrap
    step; it is retried, not patched.
+
+---
+## 20. First-class Conan 2 + vcpkg dual backend — the complete record from the beginning (issue #152, 2026-09-26 → 2026-09-28)
+
+§19 records only the *cross-ref binary-cache* half of issue #152, which was the last thing
+built. This section is the record **from the beginning**: what the issue demanded, the
+baseline it started from, everything that was implemented, every failure in the bring-up
+loop, both release gates, and how the branch was consolidated into `main`.
+
+**Point in time:** `main` after the merge of `oc/issue-152-conan2` (branch tip `ee3d269`);
+release [`v0.0.11`](https://github.com/Jackie-SDX/cpp-project-template/releases/tag/v0.0.11)
+(Conan 2) published 2026-09-27T22:51:58Z; release
+[`v0.0.13`](https://github.com/Jackie-SDX/cpp-project-template/releases/tag/v0.0.13)
+(vcpkg) published 2026-09-28T01:28:14Z. Issue #152 is tracked on the controlling repository
+`Jackie-SDX/SnapDragon`; the target repository is only `Jackie-SDX/cpp-project-template`.
+
+### 20.1 The contract that was accepted
+
+The issue required Conan 2 and vcpkg to become **first-class, independently selectable**
+backends without breaking anything, proven by **two separate release gates**:
+
+| Gate | Tag | Required backend |
+|---|---|---|
+| 1 | `v0.0.11` | Conan 2 |
+| 2 | `v0.0.12` | vcpkg (the pre-existing path) |
+
+Both gates had to be green before the task could be declared complete. The issue also fixed
+the working method: capture raw logs, find the *earliest* meaningful failure, check the live
+repository state, research current upstream documentation **before** patching, make the
+smallest evidence-backed fix, re-run the narrow reproducer, then the wider validation — and
+explicitly forbade guessing, cargo-culting, Conan 1 syntax, suppression-to-get-green,
+matrix-shrinking and `continue-on-error` on required validation.
+
+### 20.2 Baseline, recorded before any edit (`main` @ `46815c1`)
+
+| Item | State before this work |
+|---|---|
+| Default branch | `main` @ `46815c1` *docs: record CPP distribution hardening completion* |
+| Last release | `v0.0.10` (2026-09-25, distribution-hardening benchmark, §17) |
+| Package managers | **vcpkg only in practice.** `vcpkg.json` (manifest + `builtin-baseline`), `CMakePresets.json` `vcpkg-release`/`vcpkg-debug`, vcpkg binary caching and cache gates in `release.yml` |
+| Selection mechanism | Already present: `cmake/PackageManager.cmake` with `PACKAGE_MANAGER` = `vcpkg` \| `conan2` \| `system`, default `vcpkg` — but no CI path could select `conan2` |
+| Conan files | **`conanfile.txt` only** — a 2026-09-10 experiment with *version ranges* (`wxwidgets/[>=3.2 <4]`, `gtest/[>=1.14 <2]`), no profiles, no lockfiles, no recipe, no workflow, no CI wiring |
+| Workflows | 11 files; **no `conan.yml`**; `release.yml` had no `package_manager` input and no Conan steps |
+| Working tree | Clean; nothing of the issue had been implemented yet |
+
+Baseline taken from `git ls-tree -r origin/main`. Throughout the whole task the vcpkg
+manifest, vcpkg presets, vcpkg cache keys and vcpkg gate scripts were **never edited to
+weaken them** — `git diff origin/main...HEAD` shows `vcpkg.json` unchanged.
+
+### 20.3 What was built (29 commits, 68 files, +5 179 / −138)
+
+**Recipe, profiles, locks**
+
+| Path | What it is |
+|---|---|
+| `conanfile.py` | Conan 2 recipe replacing `conanfile.txt`. Pinned (not ranged) versions: `wxwidgets/3.2.11`, `gtest/1.17.0`; options `gui` / `tests` so CLI-only legs resolve an empty graph instead of compiling wxWidgets they never link; `cmake_layout` so the generated files stay where the old `.txt` put them |
+| `conan/profiles/*` (19) | One committed profile per supported OS/compiler/arch/ABI — the same 19 legs the CI matrix declares in `.github/scripts/conan_matrix.py` |
+| `conan/locks/<profile>.lock` (19) | A lockfile per profile pinning the full transitive graph; `scripts/conan_install.sh` appends it to every `conan` call |
+| `conanfile.txt` | **Removed** — superseded by the recipe (the `.txt` format cannot express options or a recipe layout) |
+
+**Selection and isolation**
+
+| Path | What it is |
+|---|---|
+| `cmake/PackageManager.cmake` (193 lines) | The single selection point. Hardened by this issue: a selection that cannot work is now a configure-time `FATAL_ERROR` with an actionable message, and a manager/toolchain **mismatch is a hard error**, not a late `find_package` failure |
+| `CMakePresets.json` | `vcpkg-release` / `vcpkg-debug` unchanged in behaviour; `conan-release` / `conan-debug` come from the `CMakeUserPresets.json` the install generates |
+| `scripts/conan_install.sh` | The canonical Conan install: profile + lockfile, writes into `build/conan2`, prints before/after `cache-evidence` lines, emits the user presets |
+| `scripts/package_manager_guard.sh` (195 lines) | Selftest-able guard (7 cases) proving the two managers cannot contaminate each other's toolchains, metadata, build trees or discovery |
+| `build/conan2/**` | Conan's binary directory — **always separate** from the vcpkg/system tree, which is what makes switching managers "configure a different directory" instead of an in-place migration |
+
+**Caching and CI**
+
+| Path | What it is |
+|---|---|
+| `.github/workflows/conan.yml` (new) | Per-profile cold/warm cache proof + the full 19-leg Conan matrix; `workflow_dispatch` with `profile_filter`, `push` on `main` path-filtered to the Conan inputs, weekly `cron` |
+| `.github/workflows/release.yml` | `package_manager` dispatch input (`default` / `conan2` / `vcpkg`), the whole Conan install/cache/pack lane, workflow-level `actions: read` |
+| `packaging/release-package-manager.txt` (new) | One committed line that decides the mode for a **tag** push. Currently `vcpkg` (set for gate 2) |
+| `scripts/conan_cache_key.sh`, `conan_cache_trim.sh`, `conan_cache_artifact.sh` | Key derivation, home trimming, and the repository-wide artifact tier of §19 |
+| `.github/scripts/conan_matrix.py`, `verify_action_pins.sh` | The declared 19-leg matrix, and a pin check that fails CI if a floating action ref creeps in |
+| `.github/scripts/verify_action_pins.sh` | 21 SHA pins verified upstream, 0 missing |
+
+### 20.4 Manager selection — the exact user steps
+
+Documented in full in `docs/install.md` § *Package manager selection (vcpkg / Conan 2)*.
+Verbatim:
+
+> **To build/package with vcpkg:** `cmake --preset vcpkg-release` with `VCPKG_ROOT`
+> exported (equivalently `-D PACKAGE_MANAGER=vcpkg`
+> `-D CMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`).
+>
+> **To build/package with Conan:** `scripts/conan_install.sh --profile conan/profiles/<profile>`
+> and then `cmake --preset conan-release` (equivalently `-D PACKAGE_MANAGER=conan2`
+> `-D CMAKE_TOOLCHAIN_FILE=build/conan2/build/<BuildType>/generators/conan_toolchain.cmake`).
+
+```sh
+# vcpkg
+export VCPKG_ROOT=/path/to/vcpkg
+cmake --preset vcpkg-release && cmake --build --preset vcpkg-release
+ctest --preset vcpkg-release
+cpack --config build/vcpkg-release/CPackConfig.cmake -G TGZ
+
+# Conan 2
+pip install "conan>=2,<3"
+scripts/conan_install.sh --profile conan/profiles/linux-gcc-x86_64
+cmake --preset conan-release && cmake --build --preset conan-release
+ctest --preset conan-release
+cpack --config build/conan2/build/Release/CPackConfig.cmake -G TGZ
+```
+
+In CI the mode is resolved **once**, before any build job: a `v*` tag push reads
+`packaging/release-package-manager.txt`; a dispatched run overrides it with the
+`package_manager` input. The chosen mode is printed in the logs of every release run.
+
+### 20.5 Isolation guarantees (§6 of the issue, satisfied)
+
+* Different binary directories — `build/conan2/…` vs `build/vcpkg-…` — so a switch is never
+  an in-place migration and nothing has to be deleted.
+* Different generated dependency metadata (`CMakeDeps`/`CMakeToolchain` vs vcpkg's
+  `vcpkg_config.cmake`).
+* Different cache storage (Conan home/download cache vs vcpkg binary cache).
+* A manager that contradicts the passed toolchain file is a configure-time `FATAL_ERROR`.
+* `scripts/package_manager_guard.sh --selftest` proves both directions of the switch and the
+  mismatch failures (7 cases, all passing).
+
+### 20.6 Dependency and supply-chain position
+
+* Versions are **pinned in the recipe** and the whole transitive graph is **locked per
+  profile** — a floating range would let ConanCenter publish a new revision and silently
+  change what a "same source" release links against. That is the deliberate difference from
+  the 2026-09-10 `conanfile.txt` experiment.
+* vcpkg keeps its own pinning model (`builtin-baseline` in `vcpkg.json`), untouched.
+* Packages and versions are real ConanCenter/`center2.conan.io` recipes
+  (`wxwidgets/3.2.11`, `gtest/1.17.0`); nothing was invented.
+* Actions are pinned to commit SHAs and `verify_action_pins.sh` fails CI on a floating ref.
+* No credentials are hard-coded; cache/artifact reads use the workflow token explicitly
+  (`52d1d7c`), and the artifact tier refuses `refs/pull/` heads and foreign repositories.
+* Untrusted-PR boundaries: cache seeding only runs from `main` pushes and schedules.
+
+### 20.7 Binary caching (both managers)
+
+**vcpkg** — pre-existing GitLab-style binary cache + Actions cache + `vcpkg-seed-*` records,
+re-keyed over OS/arch/triplet/toolset/baseline. Proven live rather than assumed: the gate-2
+pre-flight run restored an **exact hit from the `main` seed** written by warmup run
+`36359278293` (§19.7).
+
+**Conan** — the three-tier design of §19.3, with `CONAN_CACHE_RESTORE_SOURCE` reporting
+`exact` / `artifact:<id>` / `prefix:<key>` / `cold` on every leg, so cold and warm runs are
+distinguishable from the log alone. §19.6 holds the live evidence, including a cache
+produced on one branch and consumed on a different branch.
+
+### 20.8 CI changes
+
+* New `.github/workflows/conan.yml` — the fast per-leg loop and the cold/warm proof, with
+  `push` (path-filtered) + weekly `schedule` triggers so **`main` stays seeded** once merged.
+* `release.yml` gained the `package_manager` input, the Conan lane, and workflow-level
+  `actions: read` (the artifact tier reads the REST API).
+* Both release gates and every cache key print the manager mode and the restore source.
+* `clear_cache.yml` documents the deliberate cold-cache procedure (wipe → cold → warm).
+* All 21 action pins verified against upstream; `easimon/wipe-cache` re-pinned to the real
+  `v2` commit after the floating tag moved (`5b42af9`).
+
+### 20.9 Bring-up: the failure loop, in order
+
+Every dispatch below followed its push by **3–20 seconds**, so each row is one iteration of
+"run → earliest failing step → fix". Runs are `Release` workflow_dispatch on
+`oc/issue-152-conan2` unless noted.
+
+| Run | Started (UTC) | Result | Earliest failing step(s) | Followed by |
+|---|---|---|---|---|
+| [`36286330644`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36286330644) | 09-27 01:42 | failure | `Setup Conan 2` on every Windows and macOS leg (one CLANGARM64 leg a step later at `Install`); `Conan install` on all five Linux legs | `74f5d13` conan venv setup, default build profile, expanded Install shell |
+| [`36287538030`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36287538030) | 09-27 02:06 | failure | `Conan install` on 11 legs, `Setup Conan 2` on both MinGW legs, one macOS `Build` | `12785f6` venv layout detection, cross-profile meson compilers, source retries |
+| [`36290832224`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36290832224) | 09-27 03:14 | failure | `Conan install` on 15 legs | `21fb084` reconcile detected compiler with `settings.yml`, harden env import |
+| [`36291616193`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36291616193) | 09-27 03:30 | failure | `Conan install` on 9 legs + `Verify configured compiler` | `d9f816b` merge vcvars `PATH`, Windows-build lockfiles, libc++ algorithm include; `ac7cf48` verify configured compiler |
+| [`36294183365`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36294183365) | 09-27 04:23 | failure | `Conan install` on 8 legs; `Build` on Linux GCC x86 | `867135b` retarget MSVC/clang-cl to VS 18, pin MinGW gcc, dedupe vcvars `PATH` |
+| [`36306665122`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36306665122) | 09-27 08:35 | failure | `Conan install` on 5 legs; `Configure` (MSVC ARM64); `Package Windows` (MSVC x86/x64) | `baa706b` reach build-context toolchains in Conan 2 Windows legs |
+| [`36310578332`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36310578332) | 09-27 09:49 | failure | `Conan install` on 5 legs; `Configure` on MSVC ARM64 | `75bdfc4` build Conan Windows `tool_requires` with MSVC and matching MinGW arch |
+| [`36312864487`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36312864487) | 09-27 10:32 | failure | `Configure` on MinGW x64 / MSVC ARM64; `Conan install` on 4 legs | `ba93492` keep MinGW x86 arch flags off, pick wx targets per backend |
+| [`36314007868`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36314007868) | 09-27 10:54 | failure | `Conan install` on 4 Windows legs; `Configure` on MinGW x64 (log also shows `libiconv`/`wxwidgets` recipe `build()` errors) | `eed5b9c` pin target-matched `windres` and pcre2's compiler on Windows legs |
+| [`36317089224`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36317089224) | 09-27 11:51 | failure | `Configure` on all five Windows legs | `426cfe4` align wxWidgets recipe names with wx's Windows CMake naming |
+| [`36319827891`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36319827891) | 09-27 12:41 | failure | `Build` on the three LLVM legs; `Configure` on both MinGW legs | `2dfccc1` clang-cl CRT mismatch, missing wx include/msvc on MinGW |
+| [`36321557859`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36321557859) | 09-27 13:11 | failure | `Validate release inventory` → `Verify identity and version contract (CORE-10)` | `8cf10f7` align `AUTHOR_*` with the git author of record; select `conan2` for release gate 1 |
+| [`36334997189`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36334997189) | 09-27 16:55 | failure | `Validate release inventory` → `ELF runtime dependency report (USEFUL-4)` | `41cc9e2` provision the artifacts' declared runtime closure |
+| [`36345020780`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36345020780) | 09-27 19:37 → 21:05 | **success** | — | **first fully green `Release` on the branch: 88 min 33 s, 0 failed jobs** |
+
+The shape of the loop is the classic one: the failures migrate rightwards
+(`Setup Conan 2` → `Conan install` → `Configure` → `Build` → `Package` →
+`Validate release inventory`), which is how the root cause is known to have moved rather
+than the build having been silenced.
+
+### 20.10 Commit timeline (all 29 commits, oldest first)
+
+| Commit | UTC | Change |
+|---|---|---|
+| `8bd1102` | 09-27 01:41 | first-class Conan 2 backend with cache-first CI (the initial implementation) |
+| `74f5d13` | 09-27 02:06 | conan venv setup, default build profile, expanded Install shell |
+| `12785f6` | 09-27 02:30 | conan venv layout detection, cross-profile meson compilers, source retries |
+| `17069ae` | 09-27 03:14 | pin Apple `ar`/`ranlib` on macOS LLVM legs |
+| `21fb084` | 09-27 03:30 | reconcile detected compiler with `settings.yml`, harden env import |
+| `d9f816b` | 09-27 03:54 | merge vcvars `PATH`, Windows-build lockfiles, libc++ algorithm include |
+| `ac7cf48` | 09-27 04:22 | verify configured compiler when no `CMAKE_CXX_COMPILER` cache entry exists |
+| `867135b` | 09-27 08:35 | retarget MSVC/clang-cl to VS 18, pin MinGW gcc, dedupe vcvars `PATH` |
+| `baa706b` | 09-27 09:49 | reach build-context toolchains in Conan 2 Windows legs |
+| `75bdfc4` | 09-27 10:32 | build Conan Windows `tool_requires` with MSVC and matching MinGW arch |
+| `ba93492` | 09-27 10:54 | keep MinGW x86 arch flags off, pick wx targets per backend |
+| `eed5b9c` | 09-27 11:51 | pin target-matched `windres` and pcre2's compiler on Windows legs |
+| `426cfe4` | 09-27 12:41 | align wxWidgets recipe names with wx's Windows CMake naming |
+| `2dfccc1` | 09-27 13:11 | clang-cl CRT mismatch and missing wx include/msvc on MinGW |
+| `8cf10f7` | 09-27 16:50 | align `AUTHOR_*` with the git author of record; select `conan2` for release gate 1 |
+| `5b42af9` | 09-27 16:54 | repin `easimon/wipe-cache` to the real `v2` commit |
+| `e5e75c7` | 09-27 17:02 | verify every action pin exists upstream; pin remaining floating refs |
+| `7e6542d` | 09-27 17:26 | an unlabelled Conan toolchain now selects `conan2` |
+| `79ff794` | 09-27 18:14 | resolve a relative `CMAKE_TOOLCHAIN_FILE` before testing it |
+| `69ed5f4` | 09-27 18:14 | state the exact vcpkg and Conan 2 selection commands (`docs/install.md`) |
+| `41cc9e2` | 09-27 18:52 | provision the artifacts' declared runtime closure for USEFUL-4 |
+| `ebbeec6` | 09-27 19:26 | trim the Conan home before archiving it into the CI cache → **tagged `v0.0.11`** |
+| `d9db0e9` | 09-27 23:54 | make the Conan cache reusable across refs (three tiers, §19) |
+| `718fe85` | 09-28 00:07 | never copy an artifact-tier home into a ref's cache scope |
+| `52d1d7c` | 09-28 00:18 | give the artifact tier the workflow token it reads with |
+| `289a43c` | 09-28 00:31 | keep GNU tar from reading the Windows drive letter as a host |
+| `5bd2aec` | 09-28 00:48 | switch the release package manager to vcpkg for gate 2 → **tagged `v0.0.12`** |
+| `b536a6c` | 09-28 01:19 | keep the release source-archive path check clean → **tagged `v0.0.13`** |
+| `ee3d269` | 09-28 01:37 | record the cross-ref cache fix and both release gates (§19) |
+
+### 20.11 Validation performed
+
+**Offline, before every push**
+
+| Check | Command | Result |
+|---|---|---|
+| package-manager guard | `bash scripts/package_manager_guard.sh --selftest` | 7 cases pass |
+| artifact-tier selftest | `bash scripts/conan_cache_artifact.sh selftest` | 23 checks pass |
+| cache-key selftest | `bash scripts/conan_cache_key.sh selftest` | 12 checks pass |
+| action pins | `bash .github/scripts/verify_action_pins.sh --dir .github/workflows` | 21 SHA pins, 0 missing |
+| workflow syntax | `python3 -c 'import yaml …'` on the changed workflows | parse OK |
+| actionlint | `rhysd/actionlint:1.7.12 -shellcheck= -pyflakes=` | exit 0, 0 findings |
+
+**Repository lint workflow (green on every commit that dispatched it)** —
+`36336959902`, `36339935808`, `36342260623`, `36351097877`, `36360316697`,
+`36361860915`, `36362704536`, and **`36366813692` on the final branch SHA**.
+
+**Live** — the full `Release` matrix with an explicit `package_manager` input: the
+bring-up table of §20.8, the cache proofs of §19.6, the vcpkg gate pre-flight of §19.7, and
+both release-tag runs of §20.12.
+
+### 20.12 Release gates
+
+| Gate | Tag | Mode | Evidence |
+|---|---|---|---|
+| **1** | `v0.0.11` = `ebbeec6` | `conan2` | **Published 2026-09-27T22:51:58Z**, run [`36351261376`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36351261376) all green; **61 assets / 303 529 037 bytes**. Branch validation run [`36345020780`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36345020780) green 88 min 33 s beforehand |
+| **2a** | `v0.0.12` = `5bd2aec` | `vcpkg` | Tag pushed 2026-09-28T01:05:16Z; run [`36364618764`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36364618764) passed **all 7 vcpkg cache gates and every package leg** (30 of 32 jobs), then `Validate release inventory` failed `abs-paths` on our own selftest fixture (§19.4 row 6) and `Publish release` was skipped. **The tag was not moved** and has no release |
+| **2b** | `v0.0.13` = `b536a6c` | `vcpkg` | **Published 2026-09-28T01:28:14Z**, run [`36365559225`](https://github.com/Jackie-SDX/cpp-project-template/actions/runs/36365559225) **32/32 jobs green in 14 min 40 s**, `verify-release: all performed checks passed for version 0.0.13`, **61 assets / 169 242 449 bytes** |
+
+The acceptance criterion asked for a vcpkg proof on `v0.0.12`. The vcpkg *matrix* proof for
+that tag exists and is green; the *publication* was withheld by an inventory check on our own
+script, and because tags are never moved to hide a failure, the corrected tree shipped as
+`v0.0.13`. Both the tag and the run are recorded above rather than papered over.
+
+### 20.13 Bugs, root causes and fixes (consolidated)
+
+| # | Bug | Root cause | Fix |
+|---|---|---|---|
+| 1 | Conan legs could not even set up on Windows/macOS (`36286330644`) | venv layout and default build profile assumptions did not hold on the runner images | `74f5d13`, `12785f6` |
+| 2 | `Conan install` failed across OSes | detected compiler not reconciled with Conan's `settings.yml`; fragile env import | `21fb084`, `ac7cf48`, `17069ae` |
+| 3 | Configure/build failures on Windows | vcvars `PATH` merging, VS 18 retarget, MinGW gcc pinning, build-context toolchain reach, `windres`/pcre2 compiler mismatch, clang-cl CRT mismatch, wx CMake target naming | `d9f816b`, `867135b`, `baa706b`, `75bdfc4`, `ba93492`, `eed5b9c`, `426cfe4`, `2dfccc1` |
+| 4 | Release inventory rejected the package (`36321557859`) | `AUTHOR_*` did not match the git author of record | `8cf10f7` |
+| 5 | ELF runtime dependency report failed (`36334997189`) | the runtime closure declared by the artifacts was not provisioned in the Conan path | `41cc9e2` |
+| 6 | Floating/moved action tags (`easimon/wipe-cache`) | a moving tag is not a pin | `5b42af9`, `e5e75c7` + `verify_action_pins.sh` |
+| 7 | A Conan toolchain did not select `conan2`; relative toolchain paths not resolved | `PACKAGE_MANAGER` inference tested an unresolved path | `7e6542d`, `79ff794` |
+| 8 | Conan home archived into CI cache too large to be useful | whole home cached, including downloads | `ebbeec6` (`conan_cache_trim.sh`) |
+| 9 | **Cache invisible across refs** (the issue's complaint) | Actions caches are ref-scoped; 10 GB LRU thrash; exact-key-only restore; malformed tag scope `refs/heads/refs/tags/*` | §19 — three tiers, `d9db0e9`, `718fe85`, `52d1d7c`, `289a43c` |
+| 10 | `Validate release inventory` `abs-paths` failure on `v0.0.12` | the selftest fixture used a literal `/home/<user>/…` build path that matched the checker's own pattern | `b536a6c` (`/var/tmp/x`) |
+| 11 | Windows pack died with `tar (child): Cannot connect to C: resolve failed` | GNU tar parsed the drive letter as a remote host | `289a43c` (`to_local_path` / `from_local_path`) |
+
+**Rejected / not done, on purpose**
+
+* Ranges instead of pinned versions in the recipe (reproducibility).
+* Merging two Conan homes (the home carries a sqlite index — a restore is all or nothing).
+* Prefix restore without a trailing `-` (`linux-gcc-x86` is a prefix of `linux-gcc-x86_64`).
+* Re-running green jobs to get a pass; shrinking the matrix; `continue-on-error` on required
+  validation; moving tags. None of these were used.
+* A workaround for the transient Chocolatey `nsis` outage (19.8): verified external, retried,
+  not patched.
+
+### 20.14 Consolidation, cleanup and merge (2026-09-28)
+
+Executed at the operator's request in one pass:
+
+1. **Documentation consolidated.** Everything done from the beginning was appended to this
+   document (§20), on top of the cache/release record already in §19. The stale OpenCode
+   artefacts that this section supersedes were deleted:
+   `OpenCodeAudit.md`, `OpenCode2.md`,    `docs/AUDIT.md` (`OpenCodeAudit.md` and
+   `docs/AUDIT.md` were byte-identical duplicates), and the `HISTORICAL/` folder. Their
+   content remains available in git history at their last commits. Statements elsewhere in
+   this document that mention `HISTORICAL/` or `docs/AUDIT.md` (§13, §14) describe the tree
+   as it stood on those dates and are deliberately left unedited.
+2. **Merged** `oc/issue-152-conan2` into `main`.
+3. **Stale branches deleted:** `oc/issue-152-conan2`, `oc/issue-152-probe-conan`,
+   `oc/issue-152-probe-vcpkg`. `gh-pages` and `main` kept.
+4. **Post-merge simulation** run to validate that everything still works after the merge —
+   results are recorded in §20.15.
+
+### 20.15 Evidence ledger
+
+| Claim | Evidence |
+|---|---|
+| Baseline | `git ls-tree -r origin/main` @ `46815c1` |
+| Scope of change | `git diff --stat origin/main...HEAD` → 68 files, +5 179 / −138, 29 commits |
+| First green branch `Release` | run `36345020780`, 2026-09-27 19:37 → 21:05, 0 failed jobs |
+| Gate 1 | tag `v0.0.11` → `ebbeec6`; run `36351261376` success; 61 assets / 303 529 037 bytes, published 22:51:58Z |
+| Gate 2 matrix | tag `v0.0.12` → `5bd2aec`; run `36364618764`, all gates + package legs green, `Publish release` skipped |
+| Gate 2 publication | tag `v0.0.13` → `b536a6c`; run `36365559225` 32/32 green in 14 m 40 s; 61 assets / 169 242 449 bytes, published 01:28:14Z |
+| Cross-ref cache reuse | run `36362538098`, `CONAN_CACHE_RESTORE_SOURCE=artifact:10945119789` produced by run `36361077045` on another branch (§19.6) |
+| vcpkg warm-cache | run `36363033271`, exact hit from the `main` seed written by `36359278293` (§19.7) |
+| Lint on final SHA | run `36366813692` success |
+| Selftests/guards | 7 guard + 23 artifact + 12 key checks; actionlint exit 0; 21 action pins |
+
+### 20.16 Residual limitations and open items
+
+1. **`v0.0.12` has a tag but no release.** Documented, deliberate, never to be fixed by
+   moving the tag. The vcpkg proof for it is run `36364618764`; the published vcpkg release
+   is `v0.0.13`.
+2. **Conan binary caching only becomes "first run free" for new keys after the merge**, since
+   the `push`/`schedule` seeding triggers only act on `main` (§19.10).
+3. **Chocolatey `nsis` flakiness** on Windows legs remains an accepted external risk
+   (§19.8); those legs are re-run, not patched.
+4. **The vcpkg binary cache only carries weight on Windows** — Linux/macOS release legs
+   install host packages by design (§19.7), which is pre-existing behaviour, preserved.
+5. `TODO.md` was left alone — only the artefacts listed in §20.14 were removed, and each of
+   those remains readable in git history at its last commit.
 
 *This document was generated from verified repository state; all hashes, counts, asset lists, and run
 results were read directly from the three Git repositories and the GitHub API. Any later change to
