@@ -338,14 +338,19 @@ jobs:
       # exceed GitHub's 10 GB per-repo cache budget, so entries evict each
       # other and the next run rebuilds from source. The script fails the
       # job if any package folder changes.
+      #
+      # Trim and save are skipped again when the artifact tier supplied the
+      # home: that content is already carried repository-wide, so copying it
+      # into this ref's cache scope too would only push the repository back
+      # over its 10 GB budget and evict entries that other refs depend on.
       - name: Trim Conan package cache
         id: conan-cache-trim
-        if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true'
+        if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
         shell: bash
         run: bash project/scripts/conan_cache_trim.sh
       - name: Save Conan package cache
         id: conan-cache-save
-        if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true'
+        if: always() && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: .conan2

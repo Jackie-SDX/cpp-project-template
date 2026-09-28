@@ -604,13 +604,17 @@ jobs:
     # exactly how one leg died on a transient upstream source download).
     # Strip Conan's non-critical folders first; the script fails the job if
     # a single package folder changes, so a warm restore can never regress.
+    # Trim/save are skipped when the artifact tier supplied the home: the
+    # content already lives repository-wide, and a per-ref copy would push
+    # the 10 GB cache budget into eviction thrash (the failure mode this
+    # whole tier contract exists to remove).
     - name: Trim Conan package cache
-      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
       id: conan-cache-trim
       shell: bash
       run: bash project/scripts/conan_cache_trim.sh
     - name: Save Conan package cache
-      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
       id: conan-cache-save
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
@@ -1961,12 +1965,12 @@ jobs:
     # homes fit GitHub's 10 GB per-repo cache budget instead of evicting each
     # other. scripts/conan_cache_trim.sh fails if any package folder changes.
     - name: Trim Conan package cache
-      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
       id: conan-cache-trim
       shell: bash
       run: bash project/scripts/conan_cache_trim.sh
     - name: Save Conan package cache
-      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true'
+      if: always() && env.PACKAGE_MANAGER_MODE == 'conan2' && matrix.conan_profile != '' && steps.conan-cache-restore.outputs.cache-hit != 'true' && steps.conan-artifact-restore.outputs.hit != 'true'
       id: conan-cache-save
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
