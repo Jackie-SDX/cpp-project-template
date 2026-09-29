@@ -277,8 +277,11 @@ jobs:
         run: |
           if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe is missing' }
           & .\vcpkg\vcpkg.exe version
+      # Designated saver (issue #156): five Windows legs share this tool key;
+      # parallel saves raced each other with "Unable to reserve cache with
+      # key ...". One leg writes, the others skip.
       - name: Save Windows vcpkg tool cache
-        if: runner.os == 'Windows' && matrix.config.use_vcpkg != 'OFF' && success() && steps.vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && matrix.config.name == 'Windows MSVC x64' && matrix.config.use_vcpkg != 'OFF' && success() && steps.vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: vcpkg/vcpkg.exe

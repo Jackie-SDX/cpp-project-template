@@ -48,6 +48,14 @@ on:
 permissions:
   contents: read
 
+# Serialized with release.yml and conan.yml (issue #156): this seeder saves
+# the same vcpkg tool/download/binary cache keys a release run saves, and a
+# concurrent release run previously lost those saves with "Unable to reserve
+# cache with key ...". One cache-writing run at a time.
+concurrency:
+  group: dependency-cache
+  cancel-in-progress: false
+
 env:
   VCPKG_GIT_REF: e0a6b8572cf0ac716fdc11466522cf744e97e0bd
   VCPKG_CACHE_NAMESPACE: master
@@ -259,8 +267,11 @@ jobs:
         run: |
           if (-not (Test-Path .\vcpkg\vcpkg.exe)) { throw 'vcpkg.exe was not restored or bootstrapped' }
           & .\vcpkg\vcpkg.exe version
+      # Designated saver (issue #156): the six X64 legs share one tool key
+      # and the two ARM64 runners share another, so parallel saves raced with
+      # "Unable to reserve cache with key ...". One leg per arch writes.
       - name: Save Windows vcpkg tool cache
-        if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && (matrix.name == 'Windows MSVC x64' || matrix.name == 'Windows MSVC ARM64') && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: vcpkg/vcpkg.exe
@@ -339,8 +350,10 @@ jobs:
           if [ "${after}" -gt "${before}" ]; then
             echo "::warning::Stale vcpkg seed under key ${VCPKG_CACHE_KEY}: the exact cache hit did not contain $((after - before)) package(s) that had to be rebuilt. Delete that cache key and re-run 'Release vcpkg cache warmup' to replace it."
           fi
+      # Designated saver (issue #156): same arch-shared download key, one
+      # leg per arch writes (see the tool-cache save above).
       - name: Save vcpkg download cache
-        if: always() && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != ''
+        if: always() && (matrix.name == 'Windows MSVC x64' || matrix.name == 'Windows MSVC ARM64') && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != ''
         uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
         with:
           path: vcpkg_downloads

@@ -11,6 +11,17 @@
 # Trigger rules
 # -------------
 #   * workflow_dispatch only - never runs automatically.
+#   * A required ``confirm`` input must be typed exactly as documented below,
+#     so a mis-click on the dispatch button cannot wipe the cache (issue #156:
+#     two casual wipes on 2026-09-27 left every run cold for hours - 88-118
+#     minutes per release until the caches re-seeded).
+#
+# Cost of wiping
+# --------------
+#   A wipe deletes the conan (wxWidgets from source), vcpkg, msys2 and ccache
+#   families all at once. The next release/conan run is a genuine cold run
+#   (recently measured: 88-118 minutes instead of ~8 warm). Prefer fixing a
+#   single poisoned key over wiping everything.
 #
 # Action pin
 # ----------
@@ -31,6 +42,11 @@ name: Clear all Github actions caches
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type wipe-caches to confirm - this deletes every Actions cache for this repository (next runs are cold: ~90 min instead of ~8)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -41,6 +57,15 @@ jobs:
     name: Delete all caches
     runs-on: ubuntu-24.04
     steps:
+      - name: Require typed confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "wipe-caches" ]; then
+            echo "::error::Refusing to wipe every cache: the 'confirm' input must be exactly 'wipe-caches'. Nothing was deleted."
+            exit 1
+          fi
+          echo "Confirmation accepted - wiping all Actions caches."
       - name: List caches before wiping
         uses: easimon/wipe-cache@e7ab82e64c328fd39c2e96933d426cd72ac2beba # v2
         with:

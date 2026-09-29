@@ -96,9 +96,17 @@ on:
           - vcpkg
         default: default
 
+# One release run at a time (issue #156). The previous group included
+# github.sha and cancelled in progress, so a re-dispatch of the same
+# ref+sha cancelled the original mid save and two runs on the same ref
+# with different shas ran side by side, racing identical conan/vcpkg
+# cache-key saves ("Unable to reserve cache with key ..."). Tag pushes
+# and dispatches now share one repo-wide group and queue instead of
+# cancelling; only superseded PR runs (which write into the ref-isolated
+# pull scope and cannot race anyone) are cancelled.
 concurrency:
-  group: release-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('release-pr-{0}', github.ref) || 'dependency-cache' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
   # Read-only access to this repository's Actions artifacts: the Conan cache's
@@ -731,14 +739,18 @@ jobs:
           }
         }
         if ($lastExitCode -ne 0) { throw "vcpkg install failed after 5 attempts with exit code $lastExitCode" }
+    # Designated saver (issue #156): all six Windows legs share the same
+    # X64 tool/download keys, so six parallel saves raced each other with
+    # "Unable to reserve cache with key ...". One leg writes, everyone
+    # else skips; a miss still bootstraps locally per leg either way.
     - name: Save vcpkg download cache
-      if: always() && runner.os == 'Windows' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != '' && env.PACKAGE_MANAGER_MODE != 'conan2'
+      if: always() && runner.os == 'Windows' && matrix.name == 'Windows MSVC x64' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != '' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
         key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
     - name: Save Windows vcpkg tool cache
-      if: runner.os == 'Windows' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
+      if: runner.os == 'Windows' && matrix.name == 'Windows MSVC x64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg/vcpkg.exe
@@ -2095,14 +2107,17 @@ jobs:
           }
         }
         if ($lastExitCode -ne 0) { throw "vcpkg install failed after 5 attempts with exit code $lastExitCode" }
+    # Designated saver (issue #156): the two ARM64 legs (MSVC + LLVM) share
+    # the same ARM64 tool/download keys, so both saving raced with
+    # "Unable to reserve cache with key ...". One leg writes, the other skips.
     - name: Save vcpkg download cache
-      if: always() && runner.os == 'Windows' && matrix.compiler != 'clangarm64' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != '' && env.PACKAGE_MANAGER_MODE != 'conan2'
+      if: always() && runner.os == 'Windows' && matrix.compiler != 'clangarm64' && matrix.name == 'Windows MSVC ARM64' && steps.vcpkg-download-cache.outputs.cache-hit != 'true' && hashFiles('vcpkg_downloads/**') != '' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg_downloads
         key: vcpkg-downloads-windows-${{ runner.arch }}-${{ env.VCPKG_GIT_REF }}
     - name: Save Windows vcpkg tool cache
-      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
+      if: runner.os == 'Windows' && matrix.compiler != 'clangarm64' && matrix.name == 'Windows MSVC ARM64' && success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true' && env.PACKAGE_MANAGER_MODE != 'conan2'
       uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8
       with:
         path: vcpkg/vcpkg.exe

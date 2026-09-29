@@ -70,10 +70,14 @@ permissions:
   # workflow token (artifacts are the ref-independent cache tier).
   actions: read
 
-# One run per ref at a time: two concurrent runs could race the same cache
-# key save, and queued runs re-use each other's warm cache on purpose.
+# Serialized with release.yml and vcpkg-cache-warmup.yml (issue #156): all
+# three workflows save the identical conan/vcpkg cache keys, and a release
+# dispatch that ran beside this workflow lost conan key saves with
+# "Unable to reserve cache with key ...". One cache-writing run at a time;
+# queued runs re-use each other's warm cache on purpose. This workflow has
+# no pull_request trigger, so every run joins the shared group.
 concurrency:
-  group: conan-${{ github.ref }}
+  group: dependency-cache
   cancel-in-progress: false
 
 env:
