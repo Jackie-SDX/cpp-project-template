@@ -1,0 +1,28 @@
+var searchData=
+[
+  ['each_20ci_20mode_20actually_20provisions_0',['What each CI mode actually provisions',['../md_docs_2install.html#autotoc_md290',1,'']]],
+  ['edit_1',['PASS 0 — Reconnaissance (baseline, before any edit)',['../md_docs_2distribution-hardening-evidence.html#autotoc_md254',1,'']]],
+  ['edit_20main_2046815c1_2',['20.2 Baseline, recorded before any edit (&lt;span class=&quot;tt&quot;&gt;main&lt;/span&gt; @ &lt;span class=&quot;tt&quot;&gt;46815c1&lt;/span&gt;)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md121',1,'']]],
+  ['editing_3',['Findings (re-proven from this HEAD before editing)',['../md_docs_2distribution-hardening-evidence.html#autotoc_md264',1,'']]],
+  ['encountered_20and_20fixes_20applied_4',['17.4 Bugs encountered and fixes applied',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md96',1,'']]],
+  ['engineering_20characteristics_20of_20the_20original_5',['3.3 Engineering characteristics of the original',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md9',1,'']]],
+  ['engineering_20documentation_6',['C++ Project Template — Engineering Documentation',['../md_docs_2PROJECT__DOCUMENTATION.html',1,'']]],
+  ['entirely_7',['7.4 D4 — Remove Android/NDK entirely',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md32',1,'']]],
+  ['every_20change_20before_20pushing_8',['19.5 Offline validation (every change, before pushing)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md112',1,'']]],
+  ['evidence_9',['evidence',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md83',1,'16.2 Root causes and evidence'],['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md113',1,'19.6 Live validation evidence']]],
+  ['evidence_20—_20v0_200_2010_10',['17.7 Release evidence — &lt;span class=&quot;tt&quot;&gt;v0.0.10&lt;/span&gt;',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md99',1,'']]],
+  ['evidence_20and_20audit_20trail_11',['40. Release evidence and audit trail',['../md_docs_2TASKS.html#autotoc_md201',1,'']]],
+  ['evidence_20cited_20in_20this_20document_12',['14. Verification Ledger (evidence cited in this document)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md77',1,'']]],
+  ['evidence_20ledger_13',['Distribution Hardening — Evidence Ledger',['../md_docs_2distribution-hardening-evidence.html',1,'']]],
+  ['evidence_20ledger_14',['Evidence ledger',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md90',1,'16.9 Evidence ledger'],['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md134',1,'20.15 Evidence ledger']]],
+  ['evidence_20ledger_20for_20this_20section_15',['17.10 Evidence ledger for this section',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md102',1,'']]],
+  ['evidence_20note_16',['13.8 Team / evidence note',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md75',1,'']]],
+  ['evidence_20target_20repo_20dispatches_202026_2009_2025_17',['Live acceptance evidence (target-repo dispatches, 2026-09-25)',['../md_docs_2distribution-hardening-evidence.html#autotoc_md267',1,'']]],
+  ['exact_20user_20steps_18',['20.4 Manager selection — the exact user steps',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md123',1,'']]],
+  ['executed_202026_2009_2025_19',['17.8 Stale-branch cleanup (executed 2026-09-25)',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md100',1,'']]],
+  ['executive_20summary_20',['1. Executive Summary',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md2',1,'']]],
+  ['existing_20items_20intentionally_20not_20changed_21',['12.5 Pre-existing items intentionally not changed',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md65',1,'']]],
+  ['experience_22',['P1 — Installer/package lifecycle and user experience',['../md_docs_2TASKS.html#autotoc_md189',1,'']]],
+  ['experimental_20staging_20lane_23',['7.14 D14 — Experimental staging lane',['../md_docs_2PROJECT__DOCUMENTATION.html#autotoc_md42',1,'']]],
+  ['explicitly_20out_20of_20scope_20unless_20separately_20justified_24',['Explicitly out of scope unless separately justified',['../md_docs_2TASKS.html#autotoc_md215',1,'']]]
+];
